@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Causas — CAJ Lo Prado</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<!-- ============ PANTALLA DE CARGA ============ -->
+<div id="loading-screen" class="auth-screen">
+  <div class="auth-loading">Cargando panel…</div>
+</div>
+
+<!-- ============ PANTALLA DE AUTENTICACIÓN ============ -->
+<div id="auth-screen" class="auth-screen" hidden>
+  <div class="auth-card">
+    <span class="mark">Expediente digital</span>
+    <h1 id="auth-title">Iniciar sesión</h1>
+    <div class="sub" id="auth-sub">CAJ Lo Prado · Área Civil</div>
+
+    <form class="auth-form" id="form-login">
+      <div>
+        <label>Correo electrónico</label>
+        <input type="email" id="login-email" required autocomplete="email">
+      </div>
+      <div>
+        <label>Contraseña</label>
+        <input type="password" id="login-password" required autocomplete="current-password">
+      </div>
+      <div class="auth-error" id="login-error"></div>
+      <button type="submit" class="btn primary">Iniciar sesión</button>
+    </form>
+
+    <form class="auth-form" id="form-register" hidden>
+      <div>
+        <label>Nombre completo</label>
+        <input type="text" id="register-nombre" autocomplete="name">
+      </div>
+      <div>
+        <label>Correo electrónico</label>
+        <input type="email" id="register-email" required autocomplete="email">
+      </div>
+      <div>
+        <label>Contraseña (mínimo 6 caracteres)</label>
+        <input type="password" id="register-password" required minlength="6" autocomplete="new-password">
+      </div>
+      <div class="auth-error" id="register-error"></div>
+      <div class="auth-success" id="register-success"></div>
+      <button type="submit" class="btn primary">Crear cuenta</button>
+    </form>
+
+    <form class="auth-form" id="form-forgot" hidden>
+      <div>
+        <label>Correo electrónico</label>
+        <input type="email" id="forgot-email" required autocomplete="email">
+      </div>
+      <div class="auth-error" id="forgot-error"></div>
+      <div class="auth-success" id="forgot-success"></div>
+      <button type="submit" class="btn primary">Enviar enlace de recuperación</button>
+    </form>
+
+    <div class="auth-switch" id="auth-switch">
+      ¿No tienes cuenta? <a id="link-to-register">Regístrate</a><br>
+      <a id="link-to-forgot" style="display:inline-block; margin-top:8px;">¿Olvidaste tu contraseña?</a>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SELECTOR DE ORGANIZACIÓN / MÓDULO ============ -->
+<!-- Solo se muestra cuando la usuaria tiene acceso a más de un par
+     organización+módulo. Con exactamente uno, se entra directo. -->
+<div id="module-select-screen" class="auth-screen" hidden>
+  <div class="auth-card" style="max-width:440px;">
+    <span class="mark">Elige dónde entrar</span>
+    <h1 style="font-size:19px; margin:6px 0 18px;">Selecciona organización y módulo</h1>
+    <div id="module-select-list" class="module-select-list"></div>
+  </div>
+</div>
+
+<!-- ============ MÓDULO FAMILIA (en construcción) ============ -->
+<div id="familia-screen" hidden>
+  <div class="topbar">
+    <div class="user-chip"><span class="dot"></span><span id="familia-org-label"></span></div>
+    <button class="btn small ghost" id="familia-cambiar-modulo">Cambiar módulo</button>
+    <button class="btn small ghost" id="familia-logout">Cerrar sesión</button>
+  </div>
+  <div class="familia-placeholder">
+    <h1>Módulo Familia</h1>
+    <p>Este módulo está en construcción. La arquitectura de acceso ya está lista — las funcionalidades propias de Familia se incorporarán en las próximas fases.</p>
+  </div>
+</div>
+
+<!-- ============ APLICACIÓN ============ -->
+<div id="app-root" hidden>
+
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <div class="topbar">
+    <button class="menu-toggle" id="menu-toggle">☰ Carpetas</button>
+    <div class="user-chip"><span class="dot"></span><span id="user-email"></span></div>
+    <span class="org-module-chip" id="org-module-chip" hidden></span>
+    <button class="btn small ghost" id="btn-cambiar-modulo" hidden>Cambiar módulo</button>
+    <button class="btn small ghost" id="btn-logout">Cerrar sesión</button>
+  </div>
+
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="mark">Expediente digital</span>
+        <h1>Panel de Causas</h1>
+        <div class="sub">CAJ Lo Prado · Área Civil</div>
+      </div>
+
+      <div class="tabs" id="tabs-container">
+        <div class="tab-label">Carpetas</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab-label">Revisiones y tareas</div>
+        <div class="folder-tab" data-cat="centro-trabajo" id="tab-centro-trabajo">Centro de Trabajo <span class="count" id="cnt-centro-trabajo">0</span></div>
+        <div class="folder-tab" data-cat="agenda-global" id="tab-agenda-global">Agenda <span class="count" id="cnt-agenda-global">0</span></div>
+        <div class="folder-tab" data-cat="revision-pjud" id="tab-revision-pjud">Revisión PJUD</div>
+        <div class="folder-tab" data-cat="programacion-salas" id="tab-programacion-salas">Programación de salas <span class="count" id="cnt-programacion-salas">0</span></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab-label">Registros</div>
+        <div class="folder-tab" data-cat="encargo" id="tab-encargo">Encargo receptor <span class="count" id="cnt-encargo">0</span></div>
+        <div class="folder-tab" data-cat="receptores" id="tab-receptores">Administración de receptores</div>
+      </div>
+
+      <div class="tabs">
+        <div class="folder-tab" data-cat="informe-final" id="tab-informe-final">Informe Final</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab-label">Configuración</div>
+        <div class="folder-tab" data-cat="integraciones" id="tab-integraciones">Integraciones <span class="sync-dot" id="integraciones-dot" hidden></span></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="btn primary" id="btn-new">+ Nueva causa</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="top-row">
+        <div class="search-wrap">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="search" placeholder="Buscar por nombre, RUT, ROL o materia…">
+        </div>
+      </div>
+
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card" data-filter="activas"><div class="num" id="stat-total">–</div><div class="lbl">Causas activas</div></div>
+        <div class="stat-card urgent" data-filter="urgente"><div class="num" id="stat-urgentes">–</div><div class="lbl">Urgente</div></div>
+        <div class="stat-card semi" data-filter="semi"><div class="num" id="stat-semi">–</div><div class="lbl">Semi urgente</div></div>
+        <div class="stat-card calm" data-filter="noprior"><div class="num" id="stat-noprior">–</div><div class="lbl">No prioritario</div></div>
+        <div class="stat-card info" data-filter="agenda"><div class="num" id="stat-agenda">–</div><div class="lbl">Agenda</div></div>
+      </div>
+
+      <div class="dash-row" id="dash-row">
+        <div class="dash-card" id="dash-hoy">
+          <div class="dash-card-h">Hoy</div>
+          <div class="dash-card-body" id="dash-hoy-body"></div>
+        </div>
+        <div class="dash-card" id="dash-proximos">
+          <div class="dash-card-h">Próximos compromisos</div>
+          <div class="dash-card-body" id="dash-proximos-body"></div>
+        </div>
+      </div>
+
+      <div id="list-container">
+        <div class="loading-note">Cargando causas…</div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Detail overlay -->
+<div class="overlay" id="overlay">
+  <div class="detail-panel" id="detail-panel"></div>
+</div>
+
+<!-- New case overlay -->
+<div class="overlay" id="overlay-new">
+  <div class="detail-panel" style="max-width:520px;">
+    <div class="detail-head">
+      <h2 style="font-size:18px;">Agregar causa nueva</h2>
+      <button class="close-x" id="close-new">&times;</button>
+    </div>
+    <div style="padding:20px 26px 26px;">
+      <div class="modal-form">
+        <div>
+          <label>Título / referencia</label>
+          <input type="text" id="nf-titulo" placeholder="Ej: Pérez / J.O. Menor Cuantía / Indemnización">
+        </div>
+        <div class="form-grid2">
+          <div>
+            <label>Carpeta</label>
+            <select id="nf-categoria">
+              <option value="tramitacion">En tramitación</option>
+              <option value="nueva">Nueva (redacción)</option>
+              <option value="terminada">Terminada</option>
+            </select>
+          </div>
+          <div>
+            <label>Tipo de juicio</label>
+            <select id="nf-subcategoria">
+              <option value="">Sin definir</option>
+              <option value="Juicio Ejecutivo">Juicio Ejecutivo</option>
+              <option value="Juicio Ordinario">Juicio Ordinario</option>
+              <option value="Juicio Sumario">Juicio Sumario</option>
+              <option value="Voluntario">Voluntario</option>
+              <option value="Extrajudicial">Extrajudicial</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid2">
+          <div>
+            <label>ROL / RIT</label>
+            <input type="text" id="nf-rol" placeholder="C-0000-2026">
+          </div>
+          <div>
+            <label>Tribunal</label>
+            <input type="text" id="nf-tribunal" placeholder="Ej: 14º Juzgado Civil">
+          </div>
+        </div>
+        <div class="form-grid2">
+          <div>
+            <label>Patrocinado</label>
+            <input type="text" id="nf-patrocinado">
+          </div>
+          <div>
+            <label>RUT</label>
+            <input type="text" id="nf-rut">
+          </div>
+        </div>
+        <div>
+          <label>Clave para recordar</label>
+          <input type="text" id="nf-clave" placeholder="Resumen en una línea">
+        </div>
+        <div>
+          <label>Gestión pendiente (primera)</label>
+          <input type="text" id="nf-gestion">
+        </div>
+        <button class="btn primary" id="save-new">Guardar causa</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
