@@ -225,6 +225,14 @@ async function onSessionReady(session) {
 
   document.getElementById('user-email').textContent = CURRENT_USER.nombre || CURRENT_USER.email;
 
+  // CAJ-Civil independiente: sin arquitectura modular. Se entra directo al
+  // flujo Civil, sin consultar user_modules/organizations/modules. Todo lo
+  // que sigue debajo (fetchMisAccesos y el flujo de selector de
+  // organización/módulo) queda dormido, nunca se ejecuta — se conserva para
+  // minimizar el riesgo de este cambio, no porque siga en uso.
+  entrarModuloCivilSinAcceso();
+  return;
+
   try {
     MODULE_ACCESOS = await api.fetchMisAccesos(CURRENT_USER.id);
   } catch (e) {
@@ -390,7 +398,7 @@ async function loadAll() {
   RECEPTORES = rReceptores.status === 'fulfilled' ? rReceptores.value : [];
   TURNOS = rTurnos.status === 'fulfilled' ? rTurnos.value : [];
   REVISIONES_SALA = rRevisionesSala.status === 'fulfilled' ? rRevisionesSala.value : [];
-  GOOGLE_STATUS = rGoogleStatus.status === 'fulfilled' ? rGoogleStatus.value : { conectado: false };
+  GOOGLE_STATUS = rGoogleStatus.status === 'fulfilled' && rGoogleStatus.value ? rGoogleStatus.value : { conectado: false };
 
   if (rCausas.status === 'rejected') {
     document.getElementById('list-container').innerHTML = `<div class="empty-msg">No se pudieron cargar tus causas: ${escapeHtml(rCausas.reason?.message || 'error desconocido')}</div>`;
@@ -3429,7 +3437,7 @@ function wireIntegraciones(container) {
         </select>
         <div style="display:flex; gap:8px; margin-top:8px;">
           <button class="btn small primary" id="integ-guardar-calendario" type="button">Usar este calendario</button>
-          <button class="btn small" id="integ-crear-calendario" type="button">Crear calendario "Causas CAJ Lo Prado"</button>
+          <button class="btn small" id="integ-crear-calendario" type="button">Crear calendario "Agenda CAJ"</button>
         </div>`;
       wrap.querySelector('#integ-guardar-calendario').addEventListener('click', async () => {
         const sel = wrap.querySelector('#integ-calendario-select');
@@ -3442,7 +3450,7 @@ function wireIntegraciones(container) {
         } catch (e) { mostrarMensaje('No se pudo guardar el calendario: ' + e.message, true); }
       });
       wrap.querySelector('#integ-crear-calendario').addEventListener('click', async () => {
-        if (!confirm('¿Crear un nuevo calendario llamado "Causas CAJ Lo Prado" en tu cuenta de Google?')) return;
+        if (!confirm('¿Crear un nuevo calendario llamado "Agenda CAJ" en tu cuenta de Google?')) return;
         try {
           await api.googleSelectCalendar({ crearNuevo: true });
           await refrescarGoogleStatus();

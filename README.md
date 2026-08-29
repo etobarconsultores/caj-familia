@@ -779,7 +779,7 @@ podrá ejecutarse.
      - `https://www.googleapis.com/auth/calendar.calendarlist.readonly` —
        listar los calendarios disponibles para que elijas uno.
      - `https://www.googleapis.com/auth/calendar.calendars` — crear el
-       calendario secundario opcional "Causas CAJ Lo Prado" (solo si tú lo
+       calendario secundario opcional "Agenda CAJ" (solo si tú lo
        confirmas explícitamente desde Integraciones).
      - `openid` y `https://www.googleapis.com/auth/userinfo.email` —
        únicamente para identificar qué cuenta de Google quedó conectada
@@ -949,7 +949,7 @@ Después de desplegar, probar:
    confirmar que vuelve a la app y muestra "Conectado" con la cuenta
    correcta.
 2. **Elegir calendario**: listar calendarios, seleccionar uno existente, y
-   probar también "Crear calendario Causas CAJ Lo Prado".
+   probar también "Crear calendario Agenda CAJ".
 3. **Crear evento**: crear un evento con hora en Agenda → verificar en
    Google Calendar: título, fecha, hora, zona horaria (América/Santiago),
    descripción, recordatorios, y que `google_event_id` quedó guardado.

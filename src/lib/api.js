@@ -154,14 +154,6 @@ async function fetchChildRows(table, causaIds) {
   try {
     let query = supabase.from(table).select('*');
     if (causaIds) query = query.in('causa_id', causaIds);
-    // agenda_eventos es un motor común de plataforma (Fase 1): se filtra
-    // explícitamente por la organización/módulo activos para que, cuando
-    // exista el módulo Familia, sus eventos nunca aparezcan mezclados con
-    // los de Civil (aunque hoy, con Familia todavía sin causas propias,
-    // esto no cambia ningún resultado real).
-    if (table === 'agenda_eventos') {
-      query = query.eq('organization_id', CIVIL_ORGANIZATION_ID).eq('module_id', CIVIL_MODULE_ID);
-    }
     const { data, error } = await query;
     if (error) {
       console.error(`No se pudieron cargar los datos de "${table}":`, error.message);
@@ -473,8 +465,6 @@ export async function createAgendaEvento(userId, causaId, patch) {
   const dbPatch = eventoPatchToDb(patch);
   dbPatch.user_id = userId;
   dbPatch.causa_id = causaId;
-  dbPatch.organization_id = CIVIL_ORGANIZATION_ID;
-  dbPatch.module_id = CIVIL_MODULE_ID;
   const { data, error } = await supabase.from('agenda_eventos').insert(dbPatch).select().single();
   if (error) throw error;
   return eventoFromDb(data);

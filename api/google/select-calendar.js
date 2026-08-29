@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       const { oauth2Client } = await obtenerClienteAutenticado(usuario.id);
       const cal = calendarClient(oauth2Client);
       const { data } = await cal.calendars.insert({
-        requestBody: { summary: 'Causas CAJ Lo Prado', timeZone: 'America/Santiago' }
+        requestBody: { summary: 'Agenda CAJ', timeZone: 'America/Santiago' }
       });
       idFinal = data.id;
       nombreFinal = data.summary;

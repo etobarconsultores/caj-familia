@@ -9,7 +9,7 @@ import { crearClienteAdmin } from './supabaseAdmin.js';
 //   - calendar.calendarlist.readonly→ listar los calendarios disponibles
 //                                      para que la usuaria elija uno.
 //   - calendar.calendars            → crear el calendario secundario
-//                                      "Causas CAJ Lo Prado" (cal.calendars.insert),
+//                                      "Agenda CAJ" (cal.calendars.insert),
 //                                      siempre con confirmación explícita.
 //   - openid + email                → identificar únicamente qué cuenta de
 //                                      Google quedó conectada (mostrar su
