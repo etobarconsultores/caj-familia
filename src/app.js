@@ -1951,6 +1951,7 @@ let turnosSeleccionados = new Set();
 let importPreviewRows = [];
 let importFormato = 'csv-turno'; // 'csv-turno' | 'pdf-listado' | 'pdf-turno-mensual'
 let importLineasPdf = []; // líneas reconstruidas del último PDF leído, para poder reprocesar si se corrige el tipo
+let importEsExcelListado = false; // true solo cuando el listado de receptores vino de un Excel (.xlsx/.xls), para elegir la vista previa reducida sin afectar PDF/CSV
 
 function normalizarTexto(s) {
   return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -1962,6 +1963,22 @@ function encontrarOCrearReceptorLocal(nombre) {
 }
 
 // ---------- Sub-vista: catálogo de receptores ----------
+
+// Filtra RECEPTORES por el buscador global (searchTerm) — nombre completo,
+// correo principal/alternativo, teléfono 1/2/3, corte, tribunal y
+// dirección. Case-insensitive y tolerante a tildes (normalizarTexto, ya
+// usado en el resto del archivo para este mismo propósito). Se usa tanto
+// en renderReceptoresTab() como en el "Seleccionar todos" de
+// wireReceptoresTab(), para que ambos vean siempre la misma lista visible.
+function receptoresFiltradosPorBusqueda() {
+  if (!searchTerm) return RECEPTORES;
+  const st = normalizarTexto(searchTerm);
+  return RECEPTORES.filter(r => {
+    const campos = [r.nombreCompleto, r.correo, r.correoAlternativo, r.telefono, r.telefono2, r.telefono3, r.corte, r.tribunal, r.domicilio];
+    return campos.some(c => normalizarTexto(c).includes(st));
+  });
+}
+
 function receptorCardHtml(r) {
   return `<div class="receptor-card" data-receptor-id="${r.id}">
     <div class="receptor-card-top">
@@ -2034,14 +2051,29 @@ function renderReceptoresTab() {
   // Limpia selecciones de receptores que ya no existen en la lista
   receptoresSeleccionados.forEach(id => { if (!RECEPTORES.find(r => r.id === id)) receptoresSeleccionados.delete(id); });
 
-  const activos = RECEPTORES.filter(r => r.activo);
-  const inactivos = RECEPTORES.filter(r => !r.activo);
+  const receptoresFiltrados = receptoresFiltradosPorBusqueda();
+
+  // Poda cualquier selección que haya quedado OCULTA por el filtro de
+  // búsqueda actual. Se ejecuta en cada render (cada tecla del buscador),
+  // así receptoresSeleccionados nunca conserva IDs invisibles — ni el
+  // contador, ni "Seleccionar todos", ni "Eliminar seleccionados" pueden
+  // llegar a operar sobre algo que no está a la vista.
+  const idsVisibles = new Set(receptoresFiltrados.map(r => r.id));
+  receptoresSeleccionados.forEach(id => { if (!idsVisibles.has(id)) receptoresSeleccionados.delete(id); });
+
+  const activos = receptoresFiltrados.filter(r => r.activo);
+  const inactivos = receptoresFiltrados.filter(r => !r.activo);
   let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-receptor">+ Nuevo receptor</button></div>
   <div id="receptor-form-wrap" class="agenda-form-wrap" hidden></div>`;
   if (RECEPTORES.length === 0) {
     html += `<div class="empty-msg">Aún no hay receptores en el catálogo. Agrega uno manualmente o usa "Importar PDF / CSV".</div>`;
+  } else if (receptoresFiltrados.length === 0) {
+    html += `<div class="empty-msg">No hay receptores que coincidan con la búsqueda.</div>`;
   } else {
-    html += bulkSelectBarHtml(receptoresSeleccionados, RECEPTORES.length, 'receptores');
+    // receptoresSeleccionados ya está podado a solo IDs visibles (arriba),
+    // así que su .size y el checkbox "checked" de bulkSelectBarHtml
+    // reflejan exclusivamente lo filtrado — nunca los 721 del catálogo.
+    html += bulkSelectBarHtml(receptoresSeleccionados, receptoresFiltrados.length, 'receptores');
     html += `<div class="gestion-list">${activos.map(receptorCardHtml).join('')}${inactivos.map(receptorCardHtml).join('')}</div>`;
   }
   return html;
@@ -2115,7 +2147,7 @@ function wireReceptoresTab(container) {
   });
   const selectAll = container.querySelector('#select-all-receptores');
   if (selectAll) selectAll.addEventListener('change', () => {
-    if (selectAll.checked) RECEPTORES.forEach(r => receptoresSeleccionados.add(r.id));
+    if (selectAll.checked) receptoresFiltradosPorBusqueda().forEach(r => receptoresSeleccionados.add(r.id));
     else receptoresSeleccionados.clear();
     renderReceptoresAdmin();
   });
@@ -2215,7 +2247,7 @@ function detectarSuperposicion(receptorId, fechaInicio, fechaFin, excluirId) {
 function renderTurnosTab() {
   turnosSeleccionados.forEach(id => { if (!TURNOS.find(t => t.id === id)) turnosSeleccionados.delete(id); });
 
-  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-turno">+ Nuevo turno</button></div>
+  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-turno">+ Nuevo turno</button> <button class="btn small" id="importar-turno-pdf">Importar turno mensual PDF</button></div>
   <div id="turno-form-wrap" class="agenda-form-wrap" hidden></div>`;
   if (TURNOS.length === 0) {
     html += `<div class="empty-msg">Aún no hay turnos cargados. Agrega uno manualmente o usa "Importar PDF / CSV".</div>`;
@@ -2234,6 +2266,8 @@ function wireTurnosTab(container) {
   const formWrap = container.querySelector('#turno-form-wrap');
   function closeForm() { formWrap.hidden = true; formWrap.innerHTML = ''; }
   const addBtn = container.querySelector('#add-turno');
+  const importarPdfBtn = container.querySelector('#importar-turno-pdf');
+  if (importarPdfBtn) importarPdfBtn.addEventListener('click', abrirImportadorTurnoMensualPdf);
   if (addBtn) addBtn.addEventListener('click', () => {
     formWrap.innerHTML = turnoFormHtml();
     formWrap.hidden = false;
@@ -2316,8 +2350,16 @@ function renderImportarTab() {
   <div class="import-box">
     <p style="font-size:12.5px; color:var(--ink-dim);">
       Sube el PDF oficial de la Corte de Apelaciones de Santiago (listado de receptores o turno mensual),
-      o un archivo CSV/TXT. La aplicación intenta detectar automáticamente el tipo de documento — siempre
-      puedes corregirlo manualmente. Nada se guarda sin tu confirmación en la vista previa.
+      un archivo Excel (.xlsx/.xls) del listado oficial de receptores, o un archivo CSV/TXT. La aplicación
+      intenta detectar automáticamente el tipo de documento — siempre puedes corregirlo manualmente. Nada
+      se guarda sin tu confirmación en la vista previa.
+    </p>
+    <p style="font-size:11.5px; color:var(--ink-faint);">
+      Excel de la base maestra de receptores: se reconocen las columnas
+      <code>Nombre</code>, <code>Corte</code>, <code>Tribunal</code>, <code>Correo Principal</code>,
+      <code>Correo Alternativo</code>, <code>Teléfono 1</code>, <code>Teléfono 2</code>, <code>Teléfono 3</code>
+      y <code>Dirección</code>. Cada campo se guarda por separado, en su propia columna. Un Excel siempre se trata como
+      listado de receptores — nunca crea turnos.
     </p>
     <p style="font-size:11.5px; color:var(--ink-faint);">
       Formato CSV/TXT alternativo (columnas): <code>nombre,telefono,correo,domicilio,jurisdiccion,fecha_inicio,fecha_fin</code>
@@ -2328,8 +2370,8 @@ function renderImportarTab() {
       <a href="${FUENTE_CONTACTO_URL}" target="_blank" rel="noopener">datos de contacto (Corte de Santiago)</a>.
     </p>
     <div class="import-dropzone" id="import-dropzone">
-      <input type="file" id="import-file" accept=".pdf,.csv,.txt" hidden>
-      <div>Arrastra aquí el PDF o CSV, o <button class="btn small" id="import-browse" type="button">elegir archivo</button></div>
+      <input type="file" id="import-file" accept=".pdf,.csv,.txt,.xlsx,.xls" hidden>
+      <div>Arrastra aquí el PDF, Excel o CSV, o <button class="btn small" id="import-browse" type="button">elegir archivo</button></div>
     </div>
     <div id="import-status" style="font-size:12px; color:var(--ink-faint); margin-top:8px;"></div>
     <div id="import-preview-wrap" style="margin-top:16px;"></div>
@@ -2351,34 +2393,84 @@ function previewFilaTurnoFechaHtml(row, idx) {
 function previewFilaListadoHtml(row, idx) {
   const incompleta = row.incompleta || !row.nombre;
   const estado = incompleta ? 'Incompleta' : ((row.telefono || row.celular || row.correo) ? 'Correcta' : 'Revisar');
-  return `<div class="pjud-row import-preview-row ${incompleta ? 'import-row-incompleta' : ''}" data-preview-idx="${idx}" style="grid-template-columns:auto 1.2fr 1.3fr .9fr .9fr 1.1fr auto;">
+  return `<div class="pjud-row import-preview-row ${incompleta ? 'import-row-incompleta' : ''}" data-preview-idx="${idx}" style="grid-template-columns:auto 1.1fr 1.1fr .8fr .8fr 1fr 1.2fr auto;">
     <div><span class="stamp evento-estado-${incompleta ? 'noprior' : 'calm-estado'}" ${incompleta ? 'style="border-color:var(--urgent); color:var(--urgent);"' : ''}>${estado}</span></div>
     <div><input type="text" class="il-nombre" value="${escapeHtml(row.nombre || '')}" placeholder="Nombre completo"></div>
     <div><input type="text" class="il-domicilio" value="${escapeHtml(row.domicilio || '')}" placeholder="Domicilio"></div>
     <div><input type="text" class="il-telefono" value="${escapeHtml(row.telefono || '')}" placeholder="Teléfono"></div>
     <div><input type="text" class="il-celular" value="${escapeHtml(row.celular || '')}" placeholder="Celular"></div>
     <div><input type="text" class="il-correo" value="${escapeHtml(row.correo || '')}" placeholder="Correo"></div>
+    <div><input type="text" class="il-observaciones" value="${escapeHtml(row.observaciones || '')}" placeholder="Correo alternativo / teléfono fijo, etc."></div>
     <div><button class="btn small" data-action="quitar-fila-preview" data-idx="${idx}" style="border-color:var(--urgent); color:var(--urgent);">Quitar</button></div>
   </div>`;
 }
 
+// Vista previa del listado de receptores cuando viene de la base Excel
+// definitiva: cada columna del Excel (Nombre, Corte, Tribunal, Correo
+// Principal, Correo Alternativo, Teléfono 1/2/3, Dirección) tiene su propio
+// campo editable — ninguno se mezcla dentro de "observaciones".
+function previewFilaListadoExcelHtml(row, idx) {
+  const incompleta = row.incompleta || !row.nombre;
+  const estado = incompleta ? 'Incompleta' : ((row.telefono || row.correo) ? 'Correcta' : 'Revisar');
+  return `<div class="pjud-row import-preview-row ${incompleta ? 'import-row-incompleta' : ''}" data-preview-idx="${idx}" style="grid-template-columns:auto 1.3fr .9fr 1.1fr 1.3fr 1.3fr .9fr .9fr .9fr 1.1fr auto;">
+    <div><span class="stamp evento-estado-${incompleta ? 'noprior' : 'calm-estado'}" ${incompleta ? 'style="border-color:var(--urgent); color:var(--urgent);"' : ''}>${estado}</span></div>
+    <div><input type="text" class="il-nombre" value="${escapeHtml(row.nombre || '')}" placeholder="Nombre completo"></div>
+    <div><input type="text" class="il-corte" value="${escapeHtml(row.corte || '')}" placeholder="Corte"></div>
+    <div><input type="text" class="il-tribunal" value="${escapeHtml(row.tribunal || '')}" placeholder="Tribunal"></div>
+    <div><input type="text" class="il-correo" value="${escapeHtml(row.correo || '')}" placeholder="Correo principal"></div>
+    <div><input type="text" class="il-correo-alt" value="${escapeHtml(row.correoAlternativo || '')}" placeholder="Correo alternativo"></div>
+    <div><input type="text" class="il-telefono" value="${escapeHtml(row.telefono || '')}" placeholder="Teléfono 1"></div>
+    <div><input type="text" class="il-telefono2" value="${escapeHtml(row.telefono2 || '')}" placeholder="Teléfono 2"></div>
+    <div><input type="text" class="il-telefono3" value="${escapeHtml(row.telefono3 || '')}" placeholder="Teléfono 3"></div>
+    <div><input type="text" class="il-domicilio" value="${escapeHtml(row.domicilio || '')}" placeholder="Dirección"></div>
+    <div><button class="btn small" data-action="quitar-fila-preview" data-idx="${idx}" style="border-color:var(--urgent); color:var(--urgent);">Quitar</button></div>
+  </div>`;
+}
+
+const AMBITO_TURNO_OPCIONES = ['Corte Suprema', 'Corte Apelaciones / 34° Crimen', 'Juzgado Civil', 'Cobranza Laboral y Previsional'];
+
+const ESTADO_MATCH_LABEL = {
+  exacta: 'Coincidencia exacta',
+  correo: 'Coincidencia por correo',
+  revision: 'Revisión requerida',
+  no_encontrado: 'No encontrado en base'
+};
+
 function previewFilaTurnoMensualHtml(row, idx) {
-  const incompleta = row.incompleta || !row.receptor;
-  return `<div class="pjud-row import-preview-row ${incompleta ? 'import-row-incompleta' : ''}" data-preview-idx="${idx}" style="grid-template-columns:auto .8fr .6fr 1.2fr 1.2fr 1.2fr auto;">
-    <div>${incompleta ? '<span class="stamp evento-estado-noprior" style="border-color:var(--urgent); color:var(--urgent);">Revisar</span>' : '<span class="stamp evento-estado-calm-estado">OK</span>'}</div>
-    <div><input type="text" class="it-mes" value="${escapeHtml(row.mes || '')}" placeholder="Mes"></div>
-    <div><input type="text" class="it-anio" value="${escapeHtml(row.anio || '')}" placeholder="Año"></div>
-    <div><input type="text" class="it-tribunal" value="${escapeHtml(row.tribunal || '')}" placeholder="Tribunal"></div>
-    <div><input type="text" class="it-receptor" value="${escapeHtml(row.receptor || '')}" placeholder="Receptor"></div>
-    <div><input type="text" class="it-correo" value="${escapeHtml(row.correo || '')}" placeholder="Correo"></div>
+  const estadoMatch = row.estadoMatch || 'no_encontrado';
+  const esSegura = estadoMatch === 'exacta' || estadoMatch === 'correo';
+  const incompleta = row.incompleta || !row.receptorPdf || !esSegura;
+  const estadoLabel = !row.receptorPdf ? 'Incompleta' : (ESTADO_MATCH_LABEL[estadoMatch] || 'Revisión requerida');
+  return `<div class="pjud-row import-preview-row ${incompleta ? 'import-row-incompleta' : ''}" data-preview-idx="${idx}" data-estado-match="${estadoMatch}" style="grid-template-columns:auto 1.3fr 1.3fr 1.2fr 1.1fr 1.3fr .9fr auto;">
+    <div><span class="stamp evento-estado-${esSegura ? 'calm-estado' : 'noprior'}" ${esSegura ? '' : 'style="border-color:var(--urgent); color:var(--urgent);"'}>${estadoLabel}</span></div>
+    <div><input type="text" class="it-receptor" value="${escapeHtml(row.receptorPdf || '')}" placeholder="Receptor tal como aparece en el PDF"></div>
+    <div class="it-receptor-encontrado" style="font-size:12.5px; ${esSegura ? 'color:var(--ink);' : 'color:var(--urgent);'}">${escapeHtml(row.receptorEncontradoNombre || 'No encontrado en base')}</div>
+    <div><input type="text" class="it-correo" value="${escapeHtml(row.correoPdf || '')}" placeholder="Correo del PDF"></div>
+    <div><select class="it-ambito">
+      ${AMBITO_TURNO_OPCIONES.map(o => `<option value="${escapeHtml(o)}" ${row.ambitoTurno === o ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}
+    </select></div>
+    <div><input type="text" class="it-tribunal" value="${escapeHtml(row.tribunalTurno || '')}" placeholder="Tribunal"></div>
+    <div style="display:flex; gap:4px;">
+      <input type="text" class="it-mes" value="${escapeHtml(row.mes || '')}" placeholder="Mes" style="width:64px;">
+      <input type="text" class="it-anio" value="${escapeHtml(row.anio || '')}" placeholder="Año" style="width:52px;">
+    </div>
     <div><button class="btn small" data-action="quitar-fila-preview" data-idx="${idx}" style="border-color:var(--urgent); color:var(--urgent);">Quitar</button></div>
   </div>`;
 }
 
 const IMPORT_FORMATOS_META = {
   'csv-turno': { headers: ['Estado', 'Nombre', 'Inicio', 'Fin', 'Jurisdicción', ''], render: previewFilaTurnoFechaHtml, cols: 'auto 1.4fr 1fr 1fr 1fr auto' },
-  'pdf-listado': { headers: ['Estado', 'Nombre', 'Domicilio', 'Teléfono', 'Celular', 'Correo', ''], render: previewFilaListadoHtml, cols: 'auto 1.2fr 1.3fr .9fr .9fr 1.1fr auto' },
-  'pdf-turno-mensual': { headers: ['Estado', 'Mes', 'Año', 'Tribunal', 'Receptor', 'Correo', ''], render: previewFilaTurnoMensualHtml, cols: 'auto .8fr .6fr 1.2fr 1.2fr 1.2fr auto' }
+  'pdf-listado': { headers: ['Estado', 'Nombre', 'Domicilio', 'Teléfono', 'Celular', 'Correo', 'Observaciones', ''], render: previewFilaListadoHtml, cols: 'auto 1.1fr 1.1fr .8fr .8fr 1fr 1.2fr auto' },
+  'pdf-turno-mensual': { headers: ['Estado', 'Receptor PDF', 'Receptor encontrado en base', 'Correo PDF', 'Ámbito', 'Tribunal', 'Mes', ''], render: previewFilaTurnoMensualHtml, cols: 'auto 1.3fr 1.3fr 1.2fr 1.1fr 1.3fr .9fr auto' }
+};
+
+// Meta exclusiva para el listado de receptores importado desde Excel (ver
+// importEsExcelListado / previewFilaListadoExcelHtml). No reemplaza ni
+// modifica la entrada 'pdf-listado' de arriba, usada tal cual para PDF.
+const IMPORT_LISTADO_EXCEL_META = {
+  headers: ['Estado', 'Nombre', 'Corte', 'Tribunal', 'Correo principal', 'Correo alternativo', 'Teléfono 1', 'Teléfono 2', 'Teléfono 3', 'Dirección', ''],
+  render: previewFilaListadoExcelHtml,
+  cols: 'auto 1.3fr .9fr 1.1fr 1.3fr 1.3fr .9fr .9fr .9fr 1.1fr auto'
 };
 
 function selectorTipoDocumentoHtml() {
@@ -2394,7 +2486,9 @@ function selectorTipoDocumentoHtml() {
 
 function renderImportPreview(container, archivoNombre) {
   const wrap = container.querySelector('#import-preview-wrap');
-  const meta = IMPORT_FORMATOS_META[importFormato];
+  const meta = (importFormato === 'pdf-listado' && importEsExcelListado)
+    ? IMPORT_LISTADO_EXCEL_META
+    : IMPORT_FORMATOS_META[importFormato];
   const selectorHtml = selectorTipoDocumentoHtml();
 
   if (importPreviewRows.length === 0) {
@@ -2402,16 +2496,23 @@ function renderImportPreview(container, archivoNombre) {
       <div class="agenda-toolbar" style="margin-top:10px;"><button class="btn small" id="import-add-row" type="button">+ Agregar fila manual</button></div>`;
   } else {
     const completas = importPreviewRows.filter(r => !r.incompleta).length;
+    // El scroll horizontal se aplica únicamente a la vista previa de Excel
+    // (9 columnas de datos + Estado + Acción); el resto de los importadores
+    // (CSV, PDF listado, turno mensual) no se toca.
+    const scrollAperturaHtml = importEsExcelListado ? '<div class="import-table-scroll">' : '';
+    const scrollCierreHtml = importEsExcelListado ? '</div>' : '';
     wrap.innerHTML = `
       ${selectorHtml}
       <div class="subhead">Vista previa — revisa y corrige antes de confirmar</div>
       <div style="font-size:11.5px; color:var(--ink-faint); margin-bottom:8px;">
         ${importPreviewRows.length} fila(s) en total · ${completas} completa(s) · ${importPreviewRows.length - completas} requieren revisión (marcadas en rojo).
       </div>
+      ${scrollAperturaHtml}
       <div class="pjud-table">
         <div class="pjud-row pjud-head" style="grid-template-columns:${meta.cols};">${meta.headers.map(h => `<div>${h}</div>`).join('')}</div>
         ${importPreviewRows.map(meta.render).join('')}
       </div>
+      ${scrollCierreHtml}
       <div class="agenda-toolbar" style="margin-top:10px;">
         <button class="btn small" id="import-add-row" type="button">+ Agregar fila manual</button>
         <button class="btn small primary" id="import-confirm" type="button">Confirmar importación</button>
@@ -2440,8 +2541,8 @@ function wireImportPreview(container, archivoNombre) {
   if (addRowBtn) addRowBtn.addEventListener('click', () => {
     const filaVacia = {
       'csv-turno': { nombre: '', fechaInicio: '', fechaFin: '', jurisdiccion: '', incompleta: true },
-      'pdf-listado': { nombre: '', domicilio: '', telefono: '', celular: '', correo: '', incompleta: true },
-      'pdf-turno-mensual': { mes: '', anio: '', tribunal: '', receptor: '', correo: '', incompleta: true }
+      'pdf-listado': { nombre: '', domicilio: '', telefono: '', celular: '', correo: '', correoAlternativo: '', telefono2: '', telefono3: '', corte: '', tribunal: '', observaciones: '', incompleta: true },
+      'pdf-turno-mensual': { receptorPdf: '', correoPdf: '', ambitoTurno: 'Juzgado Civil', tribunalTurno: '', mes: '', anio: '', receptorId: null, receptorEncontradoNombre: '', estadoMatch: 'no_encontrado', incompleta: true }
     }[importFormato];
     importPreviewRows.push(filaVacia);
     renderImportPreview(container, archivoNombre);
@@ -2457,7 +2558,26 @@ function wireImportPreview(container, archivoNombre) {
       } else if (importFormato === 'pdf-listado') {
         ok = !!row.querySelector('.il-nombre').value.trim();
       } else {
-        ok = !!row.querySelector('.it-receptor').value.trim();
+        // Turno mensual: la corrección del nombre/correo debe re-evaluar la
+        // coincidencia real contra receptores_judiciales en vivo — nunca se
+        // marca "OK" solo porque el campo de texto no está vacío, ya que la
+        // regla obligatoria es no confirmar sin coincidencia segura.
+        const receptorTexto = row.querySelector('.it-receptor').value.trim();
+        const correoTexto = row.querySelector('.it-correo').value.trim();
+        const { receptor, estado } = encontrarReceptorEnBase(receptorTexto, correoTexto);
+        row.dataset.estadoMatch = estado;
+        const encontradoCell = row.querySelector('.it-receptor-encontrado');
+        if (encontradoCell) {
+          encontradoCell.textContent = receptor ? receptor.nombreCompleto : 'No encontrado en base';
+          encontradoCell.style.color = receptor ? 'var(--ink)' : 'var(--urgent)';
+        }
+        ok = !!receptorTexto && (estado === 'exacta' || estado === 'correo');
+        const badgeCell = row.children[0];
+        badgeCell.innerHTML = !receptorTexto
+          ? '<span class="stamp evento-estado-noprior" style="border-color:var(--urgent); color:var(--urgent);">Incompleta</span>'
+          : `<span class="stamp evento-estado-${ok ? 'calm-estado' : 'noprior'}" ${ok ? '' : 'style="border-color:var(--urgent); color:var(--urgent);"'}>${escapeHtml(ESTADO_MATCH_LABEL[estado] || 'Revisión requerida')}</span>`;
+        row.classList.toggle('import-row-incompleta', !ok);
+        return;
       }
       row.classList.toggle('import-row-incompleta', !ok);
       const badgeCell = row.children[0];
@@ -2543,20 +2663,20 @@ async function importarTurnosPorLotes(validas, archivoNombre, onProgreso) {
     for (const row of lote) {
       resumen.filasProcesadas++;
       try {
-        // 1) Localizar o crear el receptor.
-        let receptor = encontrarOCrearReceptorLocal(row.nombre);
-        let esNuevo = false;
+        // Regla obligatoria (global, aplica a toda importación de turnos,
+        // antigua o nueva): un turno SOLO puede vincularse a un receptor que
+        // ya exista en receptores_judiciales. Esta función NUNCA debe crear
+        // uno — a diferencia del importador del catálogo maestro
+        // (confirmarImportacionListado, más abajo en este archivo), que sí
+        // puede hacerlo y no se modifica aquí.
+        const receptor = encontrarOCrearReceptorLocal(row.nombre);
         if (!receptor) {
-          receptor = await crearConReintento(() => api.createReceptor(CURRENT_USER.id, {
-            nombreCompleto: row.nombre, jurisdiccion: row.jurisdiccion || null,
-            materia: 'Civil', activo: true, fuenteOficial: archivoNombre, fechaActualizacion: todayISO()
-          }));
-          RECEPTORES.unshift(receptor);
-          esNuevo = true;
+          resumen.errores.push({ nombre: row.nombre, jurisdiccion: row.jurisdiccion, mensaje: 'Receptor no encontrado en la base maestra — fila omitida, requiere revisión.' });
+          continue;
         }
-        if (esNuevo) resumen.receptoresCreados++; else resumen.receptoresExistentes++;
+        resumen.receptoresExistentes++;
 
-        // 2) Evitar duplicados: mismo receptor_id + fecha_inicio + fecha_fin
+        // Evitar duplicados: mismo receptor_id + fecha_inicio + fecha_fin
         // + jurisdicción ya guardado (incluye turnos de una importación
         // anterior, no solo los del archivo actual).
         const yaExiste = TURNOS.some(t =>
@@ -2567,7 +2687,7 @@ async function importarTurnosPorLotes(validas, archivoNombre, onProgreso) {
         );
         if (yaExiste) { resumen.duplicadosOmitidos++; continue; }
 
-        // 3) Crear el turno vinculado al receptor.
+        // Crear el turno vinculado al receptor ya existente.
         const turno = await crearConReintento(() => api.createTurno(CURRENT_USER.id, {
           receptorId: receptor.id, fechaInicio: row.fechaInicio, fechaFin: row.fechaFin,
           jurisdiccion: row.jurisdiccion || null, materia: 'Civil',
@@ -2628,12 +2748,29 @@ function mostrarResumenImportacion(warningsEl, resumen, totalFilas) {
 async function confirmarImportacionListado(container, wrap, archivoNombre) {
   wrap.querySelectorAll('[data-preview-idx]').forEach(row => {
     const idx = parseInt(row.dataset.previewIdx, 10);
+    // val(): lectura segura — .il-corte/.il-tribunal/.il-correo-alt/
+    // .il-telefono2/.il-telefono3 solo existen en la vista previa de Excel
+    // (previewFilaListadoExcelHtml); en la vista de PDF (previewFilaListadoHtml)
+    // esos elementos no existen y simplemente quedan como '', sin error y
+    // sin cambiar el comportamiento del importador de PDF.
+    const val = (selector) => row.querySelector(selector)?.value?.trim() || '';
     importPreviewRows[idx] = {
-      nombre: row.querySelector('.il-nombre').value.trim(),
-      domicilio: row.querySelector('.il-domicilio').value.trim(),
-      telefono: row.querySelector('.il-telefono').value.trim(),
-      celular: row.querySelector('.il-celular').value.trim(),
-      correo: row.querySelector('.il-correo').value.trim()
+      nombre: val('.il-nombre'),
+      domicilio: val('.il-domicilio'),
+      telefono: val('.il-telefono'),
+      celular: val('.il-celular'),
+      correo: val('.il-correo'),
+      correoAlternativo: val('.il-correo-alt'),
+      telefono2: val('.il-telefono2'),
+      telefono3: val('.il-telefono3'),
+      corte: val('.il-corte'),
+      tribunal: val('.il-tribunal'),
+      observaciones: val('.il-observaciones'),
+      // fuenteOficial no tiene input propio en la vista previa: se conserva
+      // el valor ya asignado al parsear (fijo para el Excel oficial del
+      // Poder Judicial; ausente para PDF/CSV, que siguen usando el nombre
+      // del archivo, sin cambios respecto del comportamiento anterior).
+      fuenteOficial: importPreviewRows[idx]?.fuenteOficial
     };
     importPreviewRows[idx].incompleta = !importPreviewRows[idx].nombre;
   });
@@ -2655,6 +2792,7 @@ async function confirmarImportacionListado(container, wrap, archivoNombre) {
   let creados = 0, actualizados = 0;
   for (const row of validas) {
     const telefono = [row.telefono, row.celular].filter(Boolean).join(' / ') || null;
+    const fuenteOficial = row.fuenteOficial || archivoNombre;
     try {
       const existente = encontrarOCrearReceptorLocal(row.nombre);
       if (existente) {
@@ -2662,14 +2800,26 @@ async function confirmarImportacionListado(container, wrap, archivoNombre) {
           telefono: telefono || existente.telefono,
           correo: row.correo || existente.correo,
           domicilio: row.domicilio || existente.domicilio,
-          fuenteOficial: archivoNombre, fechaActualizacion: todayISO()
+          observaciones: row.observaciones || existente.observaciones,
+          correoAlternativo: row.correoAlternativo || existente.correoAlternativo,
+          telefono2: row.telefono2 || existente.telefono2,
+          telefono3: row.telefono3 || existente.telefono3,
+          corte: row.corte || existente.corte,
+          tribunal: row.tribunal || existente.tribunal,
+          fuenteOficial, fechaActualizacion: todayISO()
         });
         Object.assign(existente, actualizado);
         actualizados++;
       } else {
         const nuevo = await api.createReceptor(CURRENT_USER.id, {
           nombreCompleto: row.nombre, telefono, correo: row.correo || null, domicilio: row.domicilio || null,
-          materia: 'Civil', activo: true, fuenteOficial: archivoNombre, fechaActualizacion: todayISO()
+          observaciones: row.observaciones || null,
+          correoAlternativo: row.correoAlternativo || null,
+          telefono2: row.telefono2 || null,
+          telefono3: row.telefono3 || null,
+          corte: row.corte || null,
+          tribunal: row.tribunal || null,
+          materia: 'Civil', activo: true, fuenteOficial, fechaActualizacion: todayISO()
         });
         RECEPTORES.unshift(nuevo);
         creados++;
@@ -2686,72 +2836,525 @@ async function confirmarImportacionListado(container, wrap, archivoNombre) {
 
 // Tipo B: turno mensual (juzgados civiles de Santiago) → crea/vincula el
 // receptor y crea un turno por tribunal, con el mes completo como período.
+// Antes de crear un turno: ¿ya existe uno con el mismo receptor, mismo
+// rango de fechas y mismo tribunal_turno? Se revisa contra TURNOS (ya
+// cargado en memoria) y también contra lo recién creado en esta misma
+// tanda de confirmación, para no duplicar si el PDF repite una fila.
+function turnoYaExiste(receptorId, fechaInicio, fechaFin, tribunalTurno, extra) {
+  const coincide = (t) => t.receptorId === receptorId && t.fechaInicio === fechaInicio &&
+    t.fechaFin === fechaFin && (t.tribunalTurno || '') === (tribunalTurno || '');
+  return TURNOS.some(coincide) || (extra || []).some(coincide);
+}
+
+// ============================================================================
+// IMPORTADOR SEMIAUTOMÁTICO DE TURNO MENSUAL (PDF escaneado como referencia
+// visual) — bloque nuevo y autocontenido. NO reutiliza ni modifica
+// parsearTurnoMensualCivilPdf/confirmarImportacionTurnoMensual/
+// previewFilaTurnoMensualHtml de arriba (esas siguen intactas, dormidas
+// para PDF escaneados, tal como ya estaban). Este flujo NUNCA lee texto del
+// PDF ni intenta reconocer nombres — el PDF solo se renderiza como imagen
+// de referencia (page.render(), no getTextContent()); toda asignación de
+// receptor viene de una selección explícita contra RECEPTORES ya cargado en
+// memoria. Nunca crea receptores nuevos.
+// ============================================================================
+
+let tmState = null;
+let tmFilaSeq = 0;
+
+function tmNuevaFila(ambitoTurno, tribunalTurno, removible) {
+  tmFilaSeq++;
+  return { id: `tmf${tmFilaSeq}`, ambitoTurno, tribunalTurno, receptorId: null, receptorNoEncontrado: false, correoPdf: '', removible: !!removible };
+}
+
+function tmFilasIniciales() {
+  const filas = [];
+  filas.push(tmNuevaFila('Corte Suprema', 'Corte Suprema', false));
+  filas.push(tmNuevaFila('Corte Apelaciones / 34° Crimen', 'Corte de Apelaciones de Santiago y 34° Juzgado del Crimen de Santiago', true));
+  for (let i = 1; i <= 30; i++) {
+    filas.push(tmNuevaFila('Juzgado Civil', `${i}° Juzgado Civil de Santiago`, false));
+  }
+  filas.push(tmNuevaFila('Cobranza Laboral y Previsional', 'Juzgado de Cobranza Laboral y Previsional de Santiago', true));
+  return filas;
+}
+
+// Detecta mes/año desde el NOMBRE DEL ARCHIVO (nunca desde el contenido del
+// PDF) — precarga, siempre corregible a mano. P.ej. "TURNO_RECEPTORES_
+// JULIO_2026.pdf" → { mes:'julio', anio:'2026' }.
+function tmDetectarMesAnioDesdeNombreArchivo(nombreArchivo) {
+  const texto = normalizarTexto(nombreArchivo).replace(/[_\-.]/g, ' ');
+  for (let i = 0; i < MESES_ES.length; i++) {
+    if (new RegExp(`\\b${MESES_ES[i]}\\b`).test(texto)) {
+      const anioMatch = texto.match(/\b(20\d{2})\b/);
+      if (anioMatch) return { mes: MESES_ES[i], anio: anioMatch[1] };
+    }
+  }
+  return { mes: '', anio: '' };
+}
+
+function tmRangoMes(mesNombre, anioStr) {
+  const idxMes = MESES_ES.indexOf((mesNombre || '').toLowerCase());
+  const anio = parseInt(anioStr, 10);
+  if (idxMes < 0 || !anio) return null;
+  const fechaInicio = `${anio}-${String(idxMes + 1).padStart(2, '0')}-01`;
+  const ultimoDia = new Date(anio, idxMes + 1, 0).getDate();
+  const fechaFin = `${anio}-${String(idxMes + 1).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
+  return { fechaInicio, fechaFin };
+}
+
+function abrirImportadorTurnoMensualPdf() {
+  tmState = { archivo: null, archivoNombre: '', pdfDoc: null, paginaActual: 1, totalPaginas: 0, mes: '', anio: '', filas: tmFilasIniciales() };
+  document.getElementById('tm-overlay')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="tm-overlay" id="tm-overlay">
+      <div class="tm-panel">
+        <div class="tm-panel-head">
+          <h3>Importar turno mensual (PDF de referencia)</h3>
+          <button class="familia-close-x" id="tm-cerrar" type="button">&times;</button>
+        </div>
+        <div class="tm-panel-body" id="tm-panel-body"></div>
+      </div>
+    </div>
+  `);
+  document.getElementById('tm-overlay').classList.add('show');
+  document.getElementById('tm-overlay').addEventListener('click', (e) => { if (e.target.id === 'tm-overlay') tmCerrar(); });
+  document.getElementById('tm-cerrar').addEventListener('click', tmCerrar);
+  tmRenderPaso1();
+}
+
+function tmCerrar() {
+  document.getElementById('tm-overlay')?.classList.remove('show');
+  document.getElementById('tm-overlay')?.remove();
+  tmState = null;
+}
+
+// ---- Paso 1: elegir archivo + confirmar mes/año ----
+function tmRenderPaso1() {
+  const body = document.getElementById('tm-panel-body');
+  body.innerHTML = `
+    <div class="tm-paso1">
+      <p class="familia-hint">Selecciona el PDF mensual de turnos. Se usa únicamente como referencia visual — no se extrae texto del archivo.</p>
+      <input type="file" id="tm-file" accept=".pdf">
+      <div class="form-grid2" style="margin-top:14px;">
+        <div><label>Mes</label>
+          <select id="tm-mes">
+            <option value="">— Selecciona —</option>
+            ${MESES_ES.map(m => `<option value="${m}">${m.charAt(0).toUpperCase() + m.slice(1)}</option>`).join('')}
+          </select>
+        </div>
+        <div><label>Año</label><input type="text" id="tm-anio" placeholder="Ej: 2026" maxlength="4"></div>
+      </div>
+      <div id="tm-archivo-nombre" class="familia-hint" style="margin-top:6px;"></div>
+      <div style="margin-top:16px;"><button class="btn primary" id="tm-continuar" type="button" disabled>Continuar</button></div>
+    </div>
+  `;
+  const fileInput = body.querySelector('#tm-file');
+  const mesSelect = body.querySelector('#tm-mes');
+  const anioInput = body.querySelector('#tm-anio');
+  const continuarBtn = body.querySelector('#tm-continuar');
+  const nombreEl = body.querySelector('#tm-archivo-nombre');
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    tmState.archivo = file;
+    tmState.archivoNombre = file.name;
+    nombreEl.textContent = `Archivo: ${file.name}`;
+    const { mes, anio } = tmDetectarMesAnioDesdeNombreArchivo(file.name);
+    if (mes) mesSelect.value = mes;
+    if (anio) anioInput.value = anio;
+    continuarBtn.disabled = false;
+  });
+
+  continuarBtn.addEventListener('click', async () => {
+    if (!tmState.archivo) { toast('Selecciona un PDF.'); return; }
+    if (!mesSelect.value || !/^20\d{2}$/.test(anioInput.value.trim())) { toast('Indica un mes y un año válidos (ej: 2026).'); return; }
+    tmState.mes = mesSelect.value;
+    tmState.anio = anioInput.value.trim();
+    continuarBtn.disabled = true;
+    continuarBtn.textContent = 'Cargando PDF…';
+    try {
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
+      const buffer = await tmState.archivo.arrayBuffer();
+      tmState.pdfDoc = await pdfjsLib.getDocument({ data: buffer }).promise;
+      tmState.totalPaginas = tmState.pdfDoc.numPages;
+      tmState.paginaActual = 1;
+      tmRenderPaso2();
+    } catch (e) {
+      console.error(e);
+      toast('No se pudo abrir el PDF: ' + e.message);
+      continuarBtn.disabled = false;
+      continuarBtn.textContent = 'Continuar';
+    }
+  });
+}
+
+// ---- Paso 2: visor de PDF + formulario de asignación ----
+function tmRenderPaso2() {
+  const body = document.getElementById('tm-panel-body');
+  body.innerHTML = `
+    <div class="tm-paso2">
+      <div class="tm-pdf-pane">
+        <div class="tm-pdf-toolbar">
+          <button class="btn small ghost" id="tm-pagina-prev" type="button">← Anterior</button>
+          <span id="tm-pagina-label"></span>
+          <button class="btn small ghost" id="tm-pagina-next" type="button">Siguiente →</button>
+        </div>
+        <div class="tm-pdf-canvas-wrap"><canvas id="tm-pdf-canvas"></canvas></div>
+      </div>
+      <div class="tm-form-pane">
+        <div class="tm-form-header">
+          <div><strong>${tmState.mes.charAt(0).toUpperCase() + tmState.mes.slice(1)} ${tmState.anio}</strong> · ${escapeHtml(tmState.archivoNombre)}</div>
+          <button class="btn small ghost" id="tm-cambiar-mes" type="button">Cambiar mes/archivo</button>
+        </div>
+        <div class="tm-filas-wrap" id="tm-filas-wrap"></div>
+        <div class="tm-form-footer">
+          <button class="btn primary" id="tm-ver-resumen" type="button">Ver resumen y guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  body.querySelector('#tm-cambiar-mes').addEventListener('click', tmRenderPaso1);
+  body.querySelector('#tm-pagina-prev').addEventListener('click', () => tmCambiarPagina(-1));
+  body.querySelector('#tm-pagina-next').addEventListener('click', () => tmCambiarPagina(1));
+  body.querySelector('#tm-ver-resumen').addEventListener('click', tmRenderResumen);
+
+  tmActualizarPaginaLabel();
+  tmRenderizarPaginaActual();
+  tmRenderFilas();
+}
+
+function tmActualizarPaginaLabel() {
+  const label = document.getElementById('tm-pagina-label');
+  if (label) label.textContent = `Página ${tmState.paginaActual} de ${tmState.totalPaginas}`;
+}
+
+async function tmCambiarPagina(delta) {
+  const nueva = tmState.paginaActual + delta;
+  if (nueva < 1 || nueva > tmState.totalPaginas) return;
+  tmState.paginaActual = nueva;
+  tmActualizarPaginaLabel();
+  await tmRenderizarPaginaActual();
+}
+
+// Renderiza la página como IMAGEN (page.render) — nunca se llama a
+// getTextContent() en este flujo, no hay ninguna extracción de texto.
+async function tmRenderizarPaginaActual() {
+  const canvas = document.getElementById('tm-pdf-canvas');
+  if (!canvas || !tmState?.pdfDoc) return;
+  const page = await tmState.pdfDoc.getPage(tmState.paginaActual);
+  const wrapWidth = canvas.parentElement.clientWidth || 560;
+  const viewportBase = page.getViewport({ scale: 1 });
+  const escala = Math.max(0.4, Math.min(wrapWidth / viewportBase.width, 2.5));
+  const viewport = page.getViewport({ scale: escala });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+}
+
+// ---- Filas del formulario ----
+function tmRenderFilas() {
+  const wrap = document.getElementById('tm-filas-wrap');
+  if (!wrap) return;
+  const bloques = [
+    { titulo: 'A. Corte Suprema', filas: tmState.filas.filter(f => f.ambitoTurno === 'Corte Suprema') },
+    { titulo: 'B. Corte de Apelaciones de Santiago / 34° Juzgado del Crimen', filas: tmState.filas.filter(f => f.ambitoTurno === 'Corte Apelaciones / 34° Crimen'), agregar: 'Corte Apelaciones / 34° Crimen' },
+    { titulo: 'C. Juzgados Civiles de Santiago', filas: tmState.filas.filter(f => f.ambitoTurno === 'Juzgado Civil') },
+    { titulo: 'D. Juzgado de Cobranza Laboral y Previsional', filas: tmState.filas.filter(f => f.ambitoTurno === 'Cobranza Laboral y Previsional'), agregar: 'Cobranza Laboral y Previsional' }
+  ];
+  wrap.innerHTML = bloques.map(b => `
+    <div class="tm-bloque">
+      <div class="familia-subhead">${b.titulo}</div>
+      <div class="tm-filas">${b.filas.map(tmFilaHtml).join('')}</div>
+      ${b.agregar ? `<button class="btn small ghost" data-tm-agregar-bloque="${escapeHtml(b.agregar)}" type="button">＋ Agregar receptor</button>` : ''}
+    </div>
+  `).join('');
+  tmWireFilas();
+}
+
+function tmFilaHtml(fila) {
+  return `<div class="tm-row" data-fila-id="${fila.id}">
+    <div class="tm-row-tribunal">${escapeHtml(fila.tribunalTurno)}</div>
+    <div class="tm-row-receptor">${tmReceptorCeldaHtml(fila)}</div>
+    <div class="tm-row-correo"><input type="text" class="tm-correo-pdf" data-fila-id="${fila.id}" placeholder="Correo del oficio (opcional)" value="${escapeHtml(fila.correoPdf || '')}"></div>
+    ${fila.removible ? `<button class="btn small" data-tm-quitar-fila="${fila.id}" type="button" style="border-color:var(--urgent); color:var(--urgent);">Quitar</button>` : '<div></div>'}
+  </div>`;
+}
+
+function tmReceptorCeldaHtml(fila) {
+  if (fila.receptorId) {
+    const r = RECEPTORES.find(x => x.id === fila.receptorId);
+    if (!r) return tmBuscadorHtml(fila);
+    const datos = [r.correo, r.telefono, r.domicilio].filter(Boolean);
+    return `<div class="tm-receptor-chip">
+      <strong>${escapeHtml(r.nombreCompleto)}</strong>
+      ${datos.length ? `<span class="tm-receptor-datos">${datos.map(escapeHtml).join(' · ')}</span>` : ''}
+      <button class="btn small ghost" data-tm-cambiar="${fila.id}" type="button">Cambiar</button>
+    </div>`;
+  }
+  if (fila.receptorNoEncontrado) {
+    return `<div class="tm-receptor-no-encontrado">
+      <span class="familia-badge" style="border-color:var(--urgent); color:var(--urgent);">No encontrado en base</span>
+      <button class="btn small ghost" data-tm-cambiar="${fila.id}" type="button">Buscar de nuevo</button>
+    </div>`;
+  }
+  return tmBuscadorHtml(fila);
+}
+
+function tmBuscadorHtml(fila) {
+  return `<div class="tm-buscador" data-tm-buscador="${fila.id}">
+    <input type="text" class="tm-buscador-input" data-fila-id="${fila.id}" placeholder="Buscar receptor por nombre o correo…" autocomplete="off">
+    <div class="tm-buscador-resultados" data-fila-id="${fila.id}"></div>
+    <button class="btn small ghost" data-tm-marcar-no-encontrado="${fila.id}" type="button">No está en la base</button>
+  </div>`;
+}
+
+function tmBuscarReceptores(query) {
+  const q = normalizarTexto(query);
+  if (!q) return [];
+  return RECEPTORES.filter(r => normalizarTexto(r.nombreCompleto).includes(q) || normalizarTexto(r.correo).includes(q)).slice(0, 8);
+}
+
+function tmRenderResultadosBusqueda(filaId, query) {
+  const cont = document.querySelector(`.tm-buscador-resultados[data-fila-id="${filaId}"]`);
+  if (!cont) return;
+  const resultados = tmBuscarReceptores(query);
+  if (!query.trim()) { cont.innerHTML = ''; return; }
+  cont.innerHTML = resultados.length === 0
+    ? '<div class="tm-buscador-vacio">Sin coincidencias en la base maestra.</div>'
+    : resultados.map(r => {
+      const datos = [r.correo, r.telefono, r.domicilio].filter(Boolean);
+      return `<div class="tm-buscador-item" data-tm-elegir="${filaId}" data-receptor-id="${r.id}">
+        <strong>${escapeHtml(r.nombreCompleto)}</strong>
+        ${datos.length ? `<span>${datos.map(escapeHtml).join(' · ')}</span>` : ''}
+      </div>`;
+    }).join('');
+}
+
+function tmFindFila(filaId) { return tmState.filas.find(f => f.id === filaId); }
+
+function tmRerenderCeldaReceptor(filaId) {
+  const row = document.querySelector(`.tm-row[data-fila-id="${filaId}"]`);
+  if (!row) return;
+  row.querySelector('.tm-row-receptor').innerHTML = tmReceptorCeldaHtml(tmFindFila(filaId));
+  tmWireFilaIndividual(filaId);
+}
+
+function tmWireFilas() {
+  document.querySelectorAll('[data-tm-agregar-bloque]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ambito = btn.dataset.tmAgregarBloque;
+      const tribunal = ambito === 'Corte Apelaciones / 34° Crimen'
+        ? 'Corte de Apelaciones de Santiago y 34° Juzgado del Crimen de Santiago'
+        : 'Juzgado de Cobranza Laboral y Previsional de Santiago';
+      tmState.filas.push(tmNuevaFila(ambito, tribunal, true));
+      tmRenderFilas();
+    });
+  });
+  document.querySelectorAll('[data-tm-quitar-fila]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      tmState.filas = tmState.filas.filter(f => f.id !== btn.dataset.tmQuitarFila);
+      tmRenderFilas();
+    });
+  });
+  document.querySelectorAll('.tm-correo-pdf').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const f = tmFindFila(inp.dataset.filaId);
+      if (f) f.correoPdf = inp.value;
+    });
+  });
+  tmState.filas.forEach(f => tmWireFilaIndividual(f.id));
+}
+
+function tmWireFilaIndividual(filaId) {
+  const cambiarBtn = document.querySelector(`[data-tm-cambiar="${filaId}"]`);
+  if (cambiarBtn) cambiarBtn.addEventListener('click', () => {
+    const f = tmFindFila(filaId);
+    f.receptorId = null; f.receptorNoEncontrado = false;
+    tmRerenderCeldaReceptor(filaId);
+    document.querySelector(`.tm-buscador-input[data-fila-id="${filaId}"]`)?.focus();
+  });
+
+  const noEncontradoBtn = document.querySelector(`[data-tm-marcar-no-encontrado="${filaId}"]`);
+  if (noEncontradoBtn) noEncontradoBtn.addEventListener('click', () => {
+    const f = tmFindFila(filaId);
+    f.receptorNoEncontrado = true; f.receptorId = null;
+    tmRerenderCeldaReceptor(filaId);
+  });
+
+  const buscadorInput = document.querySelector(`.tm-buscador-input[data-fila-id="${filaId}"]`);
+  if (buscadorInput) buscadorInput.addEventListener('input', () => tmRenderResultadosBusqueda(filaId, buscadorInput.value));
+
+  document.querySelectorAll(`.tm-buscador-resultados[data-fila-id="${filaId}"] .tm-buscador-item`).forEach(item => {
+    item.addEventListener('click', () => {
+      const f = tmFindFila(filaId);
+      f.receptorId = item.dataset.receptorId; f.receptorNoEncontrado = false;
+      tmRerenderCeldaReceptor(filaId);
+    });
+  });
+}
+
+// ---- Resumen final + confirmación ----
+function tmRenderResumen() {
+  const body = document.getElementById('tm-panel-body');
+  const filasConReceptor = tmState.filas.filter(f => f.receptorId);
+  const filasSinReceptor = tmState.filas.filter(f => !f.receptorId);
+
+  const filaResumenHtml = (f, guardara) => {
+    const r = f.receptorId ? RECEPTORES.find(x => x.id === f.receptorId) : null;
+    return `<div class="pjud-row" style="grid-template-columns:1.1fr 1.4fr 1.3fr 1.2fr .9fr;">
+      <div>${escapeHtml(f.ambitoTurno)}</div>
+      <div>${escapeHtml(f.tribunalTurno)}</div>
+      <div>${r ? escapeHtml(r.nombreCompleto) : '—'}</div>
+      <div>${r?.correo ? escapeHtml(r.correo) : '—'}</div>
+      <div>${guardara ? '<span class="familia-badge" style="border-color:var(--calm); color:var(--calm);">Se guardará</span>' : '<span class="familia-badge" style="border-color:var(--urgent); color:var(--urgent);">No encontrado en base</span>'}</div>
+    </div>`;
+  };
+
+  body.innerHTML = `
+    <div class="tm-resumen">
+      <p class="familia-hint">
+        <strong>${tmState.mes.charAt(0).toUpperCase() + tmState.mes.slice(1)} ${tmState.anio}</strong> ·
+        ${filasConReceptor.length} asignación(es) lista(s) para guardar ·
+        ${filasSinReceptor.length} sin receptor asignado (no se guardarán).
+      </p>
+      <div class="pjud-table">
+        <div class="pjud-row pjud-head" style="grid-template-columns:1.1fr 1.4fr 1.3fr 1.2fr .9fr;"><div>Ámbito</div><div>Tribunal</div><div>Receptor</div><div>Correo base</div><div>Estado</div></div>
+        ${filasConReceptor.map(f => filaResumenHtml(f, true)).join('')}
+        ${filasSinReceptor.map(f => filaResumenHtml(f, false)).join('')}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button class="btn ghost" id="tm-volver-formulario" type="button">← Volver a editar</button>
+        <button class="btn primary" id="tm-confirmar" type="button" ${filasConReceptor.length === 0 ? 'disabled' : ''}>Confirmar e importar (${filasConReceptor.length})</button>
+      </div>
+    </div>
+  `;
+
+  body.querySelector('#tm-volver-formulario').addEventListener('click', tmRenderPaso2);
+  body.querySelector('#tm-confirmar').addEventListener('click', tmConfirmarGuardado);
+}
+
+async function tmConfirmarGuardado() {
+  const rango = tmRangoMes(tmState.mes, tmState.anio);
+  if (!rango) { toast('Mes/año inválido.'); return; }
+  const fuenteOficial = `Corte de Apelaciones de Santiago — turno ${tmState.mes} ${tmState.anio}`;
+  const creadosEnEstaTanda = [];
+  let creados = 0, duplicados = 0, errores = 0;
+
+  for (const f of tmState.filas.filter(x => x.receptorId)) {
+    if (turnoYaExiste(f.receptorId, rango.fechaInicio, rango.fechaFin, f.tribunalTurno, creadosEnEstaTanda)) {
+      duplicados++;
+      continue;
+    }
+    try {
+      const turno = await api.createTurno(CURRENT_USER.id, {
+        receptorId: f.receptorId, fechaInicio: rango.fechaInicio, fechaFin: rango.fechaFin,
+        jurisdiccion: f.tribunalTurno || f.ambitoTurno || null,
+        materia: 'Civil', region: 'Metropolitana',
+        ambitoTurno: f.ambitoTurno, tribunalTurno: f.tribunalTurno, correoPdf: f.correoPdf?.trim() || null,
+        fuenteOficial, archivoNombre: tmState.archivoNombre
+      });
+      TURNOS.unshift(turno);
+      creadosEnEstaTanda.push(turno);
+      creados++;
+    } catch (e) {
+      console.error(e);
+      errores++;
+    }
+  }
+
+  toast(`Turno mensual importado: ${creados} guardado(s)${duplicados ? `, ${duplicados} duplicado(s) omitido(s)` : ''}${errores ? `, ${errores} con error` : ''}.`);
+  tmCerrar();
+  renderReceptoresAdmin();
+}
+
 async function confirmarImportacionTurnoMensual(container, wrap, archivoNombre) {
   wrap.querySelectorAll('[data-preview-idx]').forEach(row => {
     const idx = parseInt(row.dataset.previewIdx, 10);
+    const receptorPdf = row.querySelector('.it-receptor').value.trim();
+    const correoPdf = row.querySelector('.it-correo').value.trim();
+    // Se re-resuelve la coincidencia contra la base maestra usando los
+    // valores tal como quedaron después de la corrección manual en la
+    // vista previa — no se reutiliza el resultado calculado al momento de
+    // leer el PDF, por si la usuaria corrigió un nombre mal extraído.
+    const { receptor, estado } = encontrarReceptorEnBase(receptorPdf, correoPdf);
     importPreviewRows[idx] = {
+      receptorPdf, correoPdf,
+      ambitoTurno: row.querySelector('.it-ambito').value,
+      tribunalTurno: row.querySelector('.it-tribunal').value.trim(),
       mes: row.querySelector('.it-mes').value.trim(),
       anio: row.querySelector('.it-anio').value.trim(),
-      tribunal: row.querySelector('.it-tribunal').value.trim(),
-      receptor: row.querySelector('.it-receptor').value.trim(),
-      correo: row.querySelector('.it-correo').value.trim()
+      receptorId: receptor ? receptor.id : null,
+      receptorEncontradoNombre: receptor ? receptor.nombreCompleto : '',
+      estadoMatch: estado
     };
-    importPreviewRows[idx].incompleta = !importPreviewRows[idx].receptor;
+    importPreviewRows[idx].incompleta = !receptorPdf || (estado !== 'exacta' && estado !== 'correo');
   });
 
   const errores = [];
+  const sinCoincidencia = [];
   const validas = [];
   importPreviewRows.forEach((row, i) => {
-    if (!row.receptor) { errores.push(`Fila ${i + 1}: falta el nombre del receptor.`); return; }
-    if (!row.mes || !row.anio) { errores.push(`Fila ${i + 1} (${row.receptor}): falta mes o año del turno.`); return; }
+    if (!row.receptorPdf) { errores.push(`Fila ${i + 1}: falta el nombre del receptor.`); return; }
+    if (!row.mes || !row.anio) { errores.push(`Fila ${i + 1} (${row.receptorPdf}): falta mes o año del turno.`); return; }
+    // Regla obligatoria: las filas sin coincidencia segura (nombre exacto o
+    // correo exacto) NUNCA se confirman automáticamente — no hay opción de
+    // forzarlas desde aquí. Si la usuaria quiere igual vincularlas, primero
+    // debe corregir el nombre en la vista previa hasta que coincida con la
+    // base, o agregar el receptor en la pestaña Receptores y reintentar.
+    if (row.estadoMatch !== 'exacta' && row.estadoMatch !== 'correo') {
+      sinCoincidencia.push(`Fila ${i + 1} (${row.receptorPdf}): ${ESTADO_MATCH_LABEL[row.estadoMatch] || 'sin coincidencia segura'} — no se importará.`);
+      return;
+    }
     validas.push(row);
   });
 
   const warningsEl = container.querySelector('#import-warnings');
-  if (errores.length) {
-    warningsEl.innerHTML = `<div class="ficha-empty" style="color:var(--urgent);">${errores.map(e => escapeHtml(e)).join('<br>')}</div>`;
+  const avisos = [...errores, ...sinCoincidencia];
+  if (avisos.length) {
+    warningsEl.innerHTML = `<div class="ficha-empty" style="color:var(--urgent);">${avisos.map(e => escapeHtml(e)).join('<br>')}</div>`;
     if (validas.length === 0) return;
-    if (!confirm(`Hay ${errores.length} fila(s) con problemas que no se importarán. ¿Continuar con las ${validas.length} filas válidas?`)) return;
+    if (!confirm(`${avisos.length} fila(s) no se importarán (sin coincidencia segura o datos incompletos). ¿Continuar con las ${validas.length} fila(s) restantes?`)) return;
   }
 
   const mesIndice = (mesNombre) => MESES_ES.indexOf((mesNombre || '').toLowerCase());
+  const creadosEnEstaTanda = [];
 
-  let creados = 0, receptoresNuevos = 0, omitidos = 0;
+  let creados = 0, omitidosPorMes = 0, duplicados = 0;
   for (const row of validas) {
     const idxMes = mesIndice(row.mes);
-    if (idxMes < 0) { toast(`Mes no reconocido para "${row.receptor}": "${row.mes}"`); omitidos++; continue; }
+    if (idxMes < 0) { toast(`Mes no reconocido para "${row.receptorPdf}": "${row.mes}"`); omitidosPorMes++; continue; }
     const anio = parseInt(row.anio, 10);
     const fechaInicio = `${anio}-${String(idxMes + 1).padStart(2, '0')}-01`;
     const ultimoDia = new Date(anio, idxMes + 1, 0).getDate();
     const fechaFin = `${anio}-${String(idxMes + 1).padStart(2, '0')}-${String(ultimoDia).padStart(2, '0')}`;
 
-    let receptor = encontrarOCrearReceptorLocal(row.receptor);
+    // row.receptorId ya fue resuelto arriba contra la base maestra — NUNCA
+    // se crea un receptor nuevo desde este flujo.
+    if (turnoYaExiste(row.receptorId, fechaInicio, fechaFin, row.tribunalTurno, creadosEnEstaTanda)) {
+      duplicados++;
+      continue;
+    }
+
     try {
-      if (!receptor) {
-        receptor = await api.createReceptor(CURRENT_USER.id, {
-          nombreCompleto: row.receptor, correo: row.correo || null, jurisdiccion: 'Santiago',
-          materia: 'Civil', activo: true, fuenteOficial: archivoNombre, fechaActualizacion: todayISO()
-        });
-        RECEPTORES.unshift(receptor);
-        receptoresNuevos++;
-      } else if (row.correo && !receptor.correo) {
-        const actualizado = await api.updateReceptor(receptor.id, { correo: row.correo });
-        Object.assign(receptor, actualizado);
-      }
       const turno = await api.createTurno(CURRENT_USER.id, {
-        receptorId: receptor.id, fechaInicio, fechaFin,
-        jurisdiccion: row.tribunal || null, materia: 'Civil',
+        receptorId: row.receptorId, fechaInicio, fechaFin,
+        jurisdiccion: row.tribunalTurno || row.ambitoTurno || null,
+        materia: 'Civil', region: 'Metropolitana',
+        ambitoTurno: row.ambitoTurno, tribunalTurno: row.tribunalTurno, correoPdf: row.correoPdf || null,
         fuenteOficial: archivoNombre, archivoNombre,
         observaciones: `Turno mensual — ${row.mes} ${row.anio}`
       });
       TURNOS.unshift(turno);
+      creadosEnEstaTanda.push(turno);
       creados++;
     } catch (e) {
-      toast(`No se pudo guardar "${row.receptor}": ${e.message}`);
+      toast(`No se pudo guardar el turno de "${row.receptorPdf}": ${e.message}`);
     }
   }
 
-  toast(`Importación confirmada: ${creados} turno(s) guardado(s)${receptoresNuevos ? `, ${receptoresNuevos} receptor(es) nuevo(s)` : ''}${omitidos ? `. ${omitidos} fila(s) omitida(s) por mes inválido` : ''}.`);
+  toast(`Importación confirmada: ${creados} turno(s) guardado(s)${duplicados ? `, ${duplicados} duplicado(s) omitido(s)` : ''}${omitidosPorMes ? `, ${omitidosPorMes} fila(s) omitida(s) por mes inválido` : ''}.`);
   importPreviewRows = [];
   renderReceptoresAdmin();
 }
@@ -2914,6 +3517,73 @@ const TRIBUNAL_CIVIL_SANTIAGO_REGEX = /(\d{1,2})\s*°?\s*Juzgado\s+Civil\s+de\s+
 const EXCLUIR_TRIBUNAL_REGEX = /Corte\s+Suprema|Corte\s+de\s+Apelaciones|Cobranza\s+Laboral|Juzgado\s+de\s+Familia|Juzgado\s+de\s+Letras\s+del\s+Trabajo|Juzgado\s+de\s+Polic[íi]a\s+Local|Tributario\s+y\s+Aduanero/i;
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
+// ---------- Turno mensual: encabezados de bloque del oficio de la Corte de
+// Apelaciones de Santiago (julio/agosto/septiembre 2026). El oficio no trae
+// un formato tabular único: alterna 4 bloques distintos, cada uno con su
+// propio criterio de ámbito/tribunal. Estos patrones se basan en la
+// redacción de encabezado que describiste; no fueron verificados todavía
+// contra el texto real extraído de un PDF oficial (ver limitaciones en la
+// entrega) — si el oficio real usa una redacción distinta, esta detección
+// de encabezado es el punto exacto a ajustar.
+const BLOQUE_CORTE_SUPREMA_REGEX = /Receptor(?:es)?\s+Judicial(?:es)?\s+Excma\.?\s+Corte\s+Suprema/i;
+const BLOQUE_CORTE_APELACIONES_REGEX = /Receptor(?:es)?\s+Judicial(?:es)?\s+Ilma\.?\s+Corte\s+de\s+Apelaciones\s+de\s+Santiago\s+y\s+34°?\s*Juzgado\s+del\s+Crimen/i;
+const BLOQUE_JUZGADOS_CIVILES_REGEX = /Receptor(?:es)?\s+Judicial(?:es)?\s+Juzgados\s+Civiles\s+de\s+Santiago/i;
+const BLOQUE_COBRANZA_REGEX = /Juzgado\s+de\s+Cobranza\s+Laboral\s+y\s+Previsional/i;
+
+const AMBITO_TURNO_POR_BLOQUE = {
+  corte_suprema: 'Corte Suprema',
+  corte_apelaciones: 'Corte Apelaciones / 34° Crimen',
+  cobranza: 'Cobranza Laboral y Previsional'
+};
+const TRIBUNAL_TURNO_POR_BLOQUE = {
+  corte_suprema: 'Corte Suprema',
+  corte_apelaciones: 'Corte de Apelaciones de Santiago y 34° Juzgado del Crimen de Santiago',
+  cobranza: 'Juzgado de Cobranza Laboral y Previsional de Santiago'
+};
+
+// Detecta si una línea es un encabezado de alguno de los 4 bloques. Devuelve
+// la clave del bloque ('corte_suprema' | 'corte_apelaciones' | 'juzgados_civiles'
+// | 'cobranza') o null si la línea no es un encabezado.
+function detectarEncabezadoBloqueTurno(texto) {
+  if (BLOQUE_CORTE_SUPREMA_REGEX.test(texto)) return 'corte_suprema';
+  if (BLOQUE_CORTE_APELACIONES_REGEX.test(texto)) return 'corte_apelaciones';
+  if (BLOQUE_JUZGADOS_CIVILES_REGEX.test(texto)) return 'juzgados_civiles';
+  if (BLOQUE_COBRANZA_REGEX.test(texto)) return 'cobranza';
+  return null;
+}
+
+// Líneas de ruido que nunca son un receptor dentro de un bloque colectivo
+// (Corte Suprema / Corte Apelaciones-34° Crimen / Cobranza): pie de página,
+// numeración, o la línea de mes/año del propio oficio.
+function esLineaRuidoBloqueTurno(texto) {
+  if (!texto || texto.length < 3) return true;
+  if (/^p[aá]gina\s+\d+/i.test(texto)) return true;
+  if (MESES_ES.some(m => new RegExp(`\\b${m}\\b`, 'i').test(texto)) && /\d{4}/.test(texto)) return true;
+  return false;
+}
+
+// ---------- Coincidencia contra receptores_judiciales — NUNCA crea receptores ----------
+// Regla obligatoria: un PDF de turno solo puede vincular receptores que ya
+// existen en la base maestra. Primero por nombre normalizado exacto; como
+// respaldo, por correo exacto. Nunca por coincidencia parcial/débil — si hay
+// ambigüedad (más de un receptor coincide) se trata como "revisión
+// requerida", igual que si no hay ninguna coincidencia.
+function encontrarReceptorEnBase(nombre, correo) {
+  const nombreNorm = normalizarTexto(nombre);
+  if (nombreNorm) {
+    const porNombre = RECEPTORES.filter(r => normalizarTexto(r.nombreCompleto) === nombreNorm);
+    if (porNombre.length === 1) return { receptor: porNombre[0], estado: 'exacta' };
+    if (porNombre.length > 1) return { receptor: null, estado: 'revision' }; // nombre duplicado en la base: ambiguo, no se adivina
+  }
+  const correoNorm = normalizarTexto(correo);
+  if (correoNorm) {
+    const porCorreo = RECEPTORES.filter(r => normalizarTexto(r.correo) === correoNorm);
+    if (porCorreo.length === 1) return { receptor: porCorreo[0], estado: 'correo' };
+    if (porCorreo.length > 1) return { receptor: null, estado: 'revision' };
+  }
+  return { receptor: null, estado: 'no_encontrado' };
+}
+
 function limpiarTexto(s) {
   return String(s || '').replace(/^[\s\-–—:•.,]+|[\s\-–—:•.,]+$/g, '').replace(/\s{2,}/g, ' ').trim();
 }
@@ -2947,9 +3617,17 @@ function extraerMesAnioDocumento(lineas) {
 // dígitos, sin correo ni teléfono) abre un nuevo receptor; las líneas
 // siguientes se van clasificando como correo, teléfono/celular o domicilio,
 // hasta la próxima línea que parezca un nombre.
+// Frases de título/encabezado del documento oficial que NUNCA deben tratarse
+// como nombre de persona, sin importar cómo el extractor de texto del PDF
+// las presente (MAYÚSCULAS SOSTENIDAS o Título — algunos PDF exponen el
+// encabezado ya en formato "Palabra Palabra", que sí pasaría el resto de
+// este chequeo si no se excluye explícitamente aquí).
+const ENCABEZADO_DOCUMENTO_REGEX = /listado\s+de\s+receptores|n[oó]mina\s+de\s+receptores|receptores?\s+judiciales|poder\s+judicial|corte\s+de\s+apelaciones/i;
+
 function pareceNombrePersona(texto) {
   if (EMAIL_REGEX.test(texto) || TELEFONO_REGEX.test(texto)) return false;
   if (/\d/.test(texto)) return false;
+  if (ENCABEZADO_DOCUMENTO_REGEX.test(texto)) return false;
   const palabras = texto.trim().split(/\s+/).filter(Boolean);
   if (palabras.length < 2 || palabras.length > 6) return false;
   // Formato "Nombre Apellido" (mayúscula inicial + minúsculas), no encabezados
@@ -2997,29 +3675,74 @@ function parsearListadoReceptoresPdf(lineas) {
 }
 
 // ---------- Tipo B: turno mensual — juzgados civiles de Santiago (1° a 30°) ----------
+// Convierte una línea colectiva (Corte Suprema / Corte Apelaciones-34° Crimen
+// / Cobranza) en {receptor, correo} — el correo se extrae y se quita del
+// resto del texto para no contaminar el nombre, igual criterio que ya usaba
+// el bloque de Juzgados Civiles.
+function extraerReceptorYCorreoDeLinea(texto) {
+  const emailMatch = texto.match(new RegExp(EMAIL_REGEX));
+  const correo = emailMatch ? emailMatch[0] : '';
+  let resto = texto;
+  if (correo) resto = resto.replace(correo, '');
+  return { receptor: limpiarTexto(resto), correo };
+}
+
 function parsearTurnoMensualCivilPdf(lineas) {
   const { mes, anio } = extraerMesAnioDocumento(lineas);
   const filas = [];
+  let bloqueActual = null; // null | 'corte_suprema' | 'corte_apelaciones' | 'juzgados_civiles' | 'cobranza'
+
+  function agregarFila({ receptor, correo, ambitoTurno, tribunalTurno }) {
+    if (!receptor) return;
+    const { receptor: encontrado, estado } = encontrarReceptorEnBase(receptor, correo);
+    filas.push({
+      receptorPdf: receptor,
+      correoPdf: correo,
+      ambitoTurno,
+      tribunalTurno,
+      mes, anio,
+      receptorId: encontrado ? encontrado.id : null,
+      receptorEncontradoNombre: encontrado ? encontrado.nombreCompleto : '',
+      estadoMatch: estado, // 'exacta' | 'correo' | 'revision' | 'no_encontrado'
+      // "incompleta" (usado por el resto de la UI para el conteo genérico
+      // completas/requieren revisión) refleja tanto datos faltantes como
+      // ausencia de coincidencia segura con la base maestra.
+      incompleta: !receptor || estado === 'revision' || estado === 'no_encontrado'
+    });
+  }
 
   lineas.forEach(l => {
-    const texto = l.texto;
-    if (EXCLUIR_TRIBUNAL_REGEX.test(texto)) return;
-    const m = texto.match(TRIBUNAL_CIVIL_SANTIAGO_REGEX);
-    if (!m) return;
+    const texto = limpiarTexto(l.texto);
+    if (!texto) return;
 
-    const numeroJuzgado = m[1];
-    const tribunal = `${numeroJuzgado}° Juzgado Civil de Santiago`;
-    const emailMatch = texto.match(new RegExp(EMAIL_REGEX));
-    const correo = emailMatch ? emailMatch[0] : '';
+    const encabezado = detectarEncabezadoBloqueTurno(texto);
+    if (encabezado) { bloqueActual = encabezado; return; }
 
-    let resto = texto.replace(m[0], '');
-    if (correo) resto = resto.replace(correo, '');
-    const receptor = limpiarTexto(resto);
+    if (bloqueActual === 'juzgados_civiles') {
+      // Mismo criterio ya usado antes de este cambio: una fila por tribunal
+      // "N° Juzgado Civil de Santiago" + receptor individual.
+      if (EXCLUIR_TRIBUNAL_REGEX.test(texto)) return;
+      const m = texto.match(TRIBUNAL_CIVIL_SANTIAGO_REGEX);
+      if (!m) return;
+      const tribunalTurno = `${m[1]}° Juzgado Civil de Santiago`;
+      let resto = texto.replace(m[0], '');
+      const { receptor, correo } = extraerReceptorYCorreoDeLinea(resto);
+      agregarFila({ receptor, correo, ambitoTurno: 'Juzgado Civil', tribunalTurno });
+      return;
+    }
 
-    filas.push({
-      tribunal, receptor, correo, mes, anio,
-      incompleta: !receptor
-    });
+    if (bloqueActual === 'corte_suprema' || bloqueActual === 'corte_apelaciones' || bloqueActual === 'cobranza') {
+      if (esLineaRuidoBloqueTurno(texto)) return;
+      const { receptor, correo } = extraerReceptorYCorreoDeLinea(texto);
+      agregarFila({
+        receptor, correo,
+        ambitoTurno: AMBITO_TURNO_POR_BLOQUE[bloqueActual],
+        tribunalTurno: TRIBUNAL_TURNO_POR_BLOQUE[bloqueActual]
+      });
+      return;
+    }
+    // bloqueActual === null: todavía no se encontró ningún encabezado
+    // reconocido — la línea se ignora (probablemente portada/membrete).
   });
 
   return filas;
@@ -3106,6 +3829,60 @@ function parsearCsv(texto) {
   return filas;
 }
 
+// ---------- Excel del listado oficial de receptores (Poder Judicial - Transparencia) ----------
+// Encabezados de la base Excel definitiva; el matching es tolerante a
+// mayúsculas/acentos/espacios (igual criterio que normalizarEncabezadoCsv),
+// nunca por posición de columna.
+function normalizarEncabezadoExcel(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+const XLSX_ALIAS_NOMBRE = ['nombre'];
+const XLSX_ALIAS_CORTE = ['corte'];
+const XLSX_ALIAS_TRIBUNAL = ['tribunal'];
+const XLSX_ALIAS_CORREO_PRINCIPAL = ['correo principal', 'correo'];
+const XLSX_ALIAS_CORREO_ALTERNATIVO = ['correo alternativo'];
+const XLSX_ALIAS_TELEFONO_1 = ['telefono 1', 'telefono1', 'telefono'];
+const XLSX_ALIAS_TELEFONO_2 = ['telefono 2', 'telefono2'];
+const XLSX_ALIAS_TELEFONO_3 = ['telefono 3', 'telefono3'];
+const XLSX_ALIAS_DIRECCION = ['direccion', 'domicilio'];
+
+// filasObjeto: arreglo de objetos { 'Nombre': ..., 'Corte': ..., ... } tal
+// como los entrega XLSX.utils.sheet_to_json() (encabezado real de cada
+// columna como clave, sin asumir un orden fijo). Cada columna del Excel
+// definitivo va a su propio campo — Corte, Tribunal, Correo Alternativo y
+// Teléfono 2/3 tienen columna propia en receptores_judiciales, así que
+// nunca se mezclan en observaciones. Domicilio/Dirección tampoco se
+// inventa: si el Excel no la trae, queda vacía.
+function parsearExcelListadoReceptores(filasObjeto) {
+  return filasObjeto.map(obj => {
+    const porEncabezado = {};
+    Object.keys(obj || {}).forEach(k => { porEncabezado[normalizarEncabezadoExcel(k)] = obj[k]; });
+
+    const buscar = (alias) => {
+      for (const a of alias) {
+        if (porEncabezado[a] !== undefined && String(porEncabezado[a]).trim()) return String(porEncabezado[a]).trim();
+      }
+      return '';
+    };
+
+    const nombre = buscar(XLSX_ALIAS_NOMBRE);
+    const corte = buscar(XLSX_ALIAS_CORTE);
+    const tribunal = buscar(XLSX_ALIAS_TRIBUNAL);
+    const correo = buscar(XLSX_ALIAS_CORREO_PRINCIPAL);
+    const correoAlternativo = buscar(XLSX_ALIAS_CORREO_ALTERNATIVO);
+    const telefono = buscar(XLSX_ALIAS_TELEFONO_1);
+    const telefono2 = buscar(XLSX_ALIAS_TELEFONO_2);
+    const telefono3 = buscar(XLSX_ALIAS_TELEFONO_3);
+    const domicilio = buscar(XLSX_ALIAS_DIRECCION);
+
+    return {
+      nombre, corte, tribunal, correo, correoAlternativo, telefono, telefono2, telefono3, domicilio,
+      fuenteOficial: 'Base maestra de receptores judiciales',
+      incompleta: !nombre
+    };
+  }).filter(r => r.nombre || r.correo || r.telefono || r.corte || r.tribunal || r.domicilio);
+}
+
 function reparsearPdfComoFormato(formato) {
   importFormato = formato;
   if (formato === 'pdf-listado') importPreviewRows = parsearListadoReceptoresPdf(importLineasPdf);
@@ -3117,6 +3894,7 @@ async function procesarArchivoImportado(file, container) {
   statusEl.textContent = 'Leyendo archivo…';
   importPreviewRows = [];
   importLineasPdf = [];
+  importEsExcelListado = false;
 
   try {
     if (file.type === 'text/csv' || /\.csv$|\.txt$/i.test(file.name)) {
@@ -3126,6 +3904,70 @@ async function procesarArchivoImportado(file, container) {
       statusEl.innerHTML = importPreviewRows.length
         ? `Archivo leído. Filas detectadas: <strong>${importPreviewRows.length}</strong> · completas: <strong>${completas}</strong> · requieren revisión: <strong>${importPreviewRows.length - completas}</strong>.`
         : 'No se detectaron filas en el archivo. Puedes agregarlas manualmente.';
+    } else if (/\.xlsx$|\.xls$/i.test(file.name)) {
+      // Excel del listado oficial de receptores: siempre se trata como
+      // catálogo de receptores (pdf-listado) — nunca crea turnos, y no
+      // ofrece el selector de "tipo de documento" (ese selector solo
+      // aparece cuando hay líneas de PDF que reprocesar).
+      importEsExcelListado = true;
+      const XLSX = await import('xlsx');
+      const buffer = await file.arrayBuffer();
+      const libro = XLSX.read(buffer, { type: 'array' });
+      const hoja = libro.Sheets[libro.SheetNames[0]];
+
+      // El archivo oficial trae una fila de título ("Poder Judicial -
+      // Transparencia") antes de los encabezados reales, así que no se
+      // puede asumir que la fila 1 es el encabezado. Se leen las filas
+      // como arreglos crudos y se busca, dentro de las primeras filas, la
+      // que contiene una columna "Nombre" — esa es la fila de encabezado
+      // real. Si un Excel distinto ya trae los encabezados en la fila 1,
+      // se encuentra igual, en la primera iteración.
+      const filasCrudas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '' });
+      const LIMITE_BUSQUEDA_ENCABEZADO = 10;
+      let indiceEncabezado = -1;
+      for (let i = 0; i < Math.min(filasCrudas.length, LIMITE_BUSQUEDA_ENCABEZADO); i++) {
+        const fila = filasCrudas[i] || [];
+        if (fila.some(celda => normalizarEncabezadoExcel(celda) === 'nombre')) {
+          indiceEncabezado = i;
+          break;
+        }
+      }
+
+      importFormato = 'pdf-listado';
+
+      if (indiceEncabezado === -1) {
+        importPreviewRows = [];
+        statusEl.innerHTML = `
+          No se encontró una columna "Nombre" entre las primeras filas de este Excel. Verifica que el
+          archivo tenga una fila de encabezados con esa columna. Puedes agregar registros manualmente,
+          o intentar con el PDF/CSV oficial.
+        `;
+      } else {
+        const encabezadosFila = filasCrudas[indiceEncabezado].map(h => String(h || '').trim());
+        const filasObjeto = filasCrudas.slice(indiceEncabezado + 1)
+          .filter(fila => (fila || []).some(celda => String(celda || '').trim()))
+          .map(fila => {
+            const obj = {};
+            encabezadosFila.forEach((h, idx) => { if (h) obj[h] = fila[idx] !== undefined ? fila[idx] : ''; });
+            return obj;
+          });
+
+        importPreviewRows = parsearExcelListadoReceptores(filasObjeto);
+
+        const completas = importPreviewRows.filter(r => !r.incompleta).length;
+        if (importPreviewRows.length === 0) {
+          statusEl.innerHTML = `
+            No se reconoció ninguna fila con nombre en este Excel. Verifica que la fila de encabezados
+            tenga las columnas <code>Nombre</code>, <code>Correo Principal</code>, <code>Teléfono Celular</code>, etc.
+            Puedes agregar registros manualmente, o intentar con el PDF/CSV oficial.
+          `;
+        } else {
+          statusEl.innerHTML = `
+            Excel leído (listado de receptores). Filas detectadas: <strong>${importPreviewRows.length}</strong> ·
+            completas: <strong>${completas}</strong> · requieren revisión: <strong>${importPreviewRows.length - completas}</strong>.
+          `;
+        }
+      }
     } else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
       const pdfjsLib = await import('pdfjs-dist');
       pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
@@ -3160,6 +4002,10 @@ async function procesarArchivoImportado(file, container) {
       const completas = importPreviewRows.filter(r => !r.incompleta).length;
       const requierenRevision = importPreviewRows.length - completas;
       const etiquetaTipo = importFormato === 'pdf-turno-mensual' ? 'Turno mensual (juzgados civiles)' : 'Listado de receptores';
+      // Advertencia explícita de baja confianza: hay filas, pero NINGUNA se
+      // pudo extraer completa — no basta con la marca "Revisar" de cada
+      // fila, se exige revisión manual explícita antes de confirmar.
+      const confianzaBaja = importFormato === 'pdf-listado' && importPreviewRows.length > 0 && completas === 0;
       statusEl.innerHTML = `
         Tipo de documento detectado: <strong>${etiquetaTipo}</strong> (puedes corregirlo abajo).<br>
         Páginas analizadas: <strong>${pdf.numPages}</strong> ·
@@ -3167,9 +4013,10 @@ async function procesarArchivoImportado(file, container) {
         completas: <strong>${completas}</strong> ·
         requieren revisión: <strong>${requierenRevision}</strong>.
         ${importPreviewRows.length === 0 ? '<br>No se pudo detectar información automáticamente en este archivo. Puedes agregar las filas manualmente, o intentar con un CSV.' : ''}
+        ${confianzaBaja ? '<br><strong style="color:var(--urgent);">No se detectó ninguna fila con confianza suficiente — revisa manualmente cada registro antes de confirmar la importación.</strong>' : ''}
       `;
     } else {
-      statusEl.textContent = 'Formato no reconocido. Usa PDF, CSV o TXT.';
+      statusEl.textContent = 'Formato no reconocido. Usa PDF, Excel (.xlsx/.xls), CSV o TXT.';
       renderImportPreview(container, file.name);
       return;
     }

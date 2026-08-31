@@ -523,6 +523,8 @@ export async function deleteInstruccion(id) {
 function receptorFromDb(r) {
   return {
     id: r.id, nombreCompleto: r.nombre_completo, telefono: r.telefono, correo: r.correo,
+    correoAlternativo: r.correo_alternativo, telefono2: r.telefono_2, telefono3: r.telefono_3,
+    corte: r.corte, tribunal: r.tribunal,
     domicilio: r.domicilio, jurisdiccion: r.jurisdiccion, materia: r.materia,
     activo: r.activo, observaciones: r.observaciones, fuenteOficial: r.fuente_oficial,
     fechaActualizacion: r.fecha_actualizacion
@@ -532,6 +534,8 @@ function receptorFromDb(r) {
 function receptorPatchToDb(patch) {
   const map = {
     nombreCompleto: 'nombre_completo', telefono: 'telefono', correo: 'correo',
+    correoAlternativo: 'correo_alternativo', telefono2: 'telefono_2', telefono3: 'telefono_3',
+    corte: 'corte', tribunal: 'tribunal',
     domicilio: 'domicilio', jurisdiccion: 'jurisdiccion', materia: 'materia',
     activo: 'activo', observaciones: 'observaciones', fuenteOficial: 'fuente_oficial',
     fechaActualizacion: 'fecha_actualizacion'
@@ -572,6 +576,7 @@ function turnoFromDb(t) {
     jurisdiccion: t.jurisdiccion, materia: t.materia, region: t.region,
     fuenteOficial: t.fuente_oficial, archivoNombre: t.archivo_nombre, enlaceOrigen: t.enlace_origen,
     fechaImportacion: t.fecha_importacion, observaciones: t.observaciones,
+    ambitoTurno: t.ambito_turno, tribunalTurno: t.tribunal_turno, correoPdf: t.correo_pdf,
     receptor: t.receptores_judiciales ? receptorFromDb(t.receptores_judiciales) : null
   };
 }
@@ -581,7 +586,8 @@ function turnoPatchToDb(patch) {
     receptorId: 'receptor_id', fechaInicio: 'fecha_inicio', fechaFin: 'fecha_fin',
     jurisdiccion: 'jurisdiccion', materia: 'materia', region: 'region',
     fuenteOficial: 'fuente_oficial', archivoNombre: 'archivo_nombre', enlaceOrigen: 'enlace_origen',
-    observaciones: 'observaciones'
+    observaciones: 'observaciones',
+    ambitoTurno: 'ambito_turno', tribunalTurno: 'tribunal_turno', correoPdf: 'correo_pdf'
   };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });

@@ -12,7 +12,8 @@
     "@supabase/supabase-js": "^2.45.4",
     "googleapis": "^144.0.0",
     "jspdf": "^2.5.2",
-    "pdfjs-dist": "^3.11.174"
+    "pdfjs-dist": "^3.11.174",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "vite": "^5.4.8",
