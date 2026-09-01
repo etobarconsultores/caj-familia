@@ -359,6 +359,7 @@ export async function seedHitosSiVacio(userId, causaId, hitosExistentes) {
 function encargoFromDb(row) {
   return {
     id: row.id,
+    causaId: row.causa_id,
     folio: row.folio, depto: row.depto, centroEncarga: row.centro_encarga,
     abogadoEncarga: row.abogado_encarga, fechaEncargo: row.fecha_encargo, materia: row.materia,
     patrocinadoNombre: row.patrocinado_nombre, patrocinadoSexo: row.patrocinado_sexo,
@@ -367,6 +368,9 @@ function encargoFromDb(row) {
     direccion: row.direccion, comuna: row.comuna, tribunal: row.tribunal, rol: row.rol,
     jurisdiccion: row.jurisdiccion, observaciones: row.observaciones,
     fechaResolucion: row.fecha_resolucion,
+    descripcionEncargo: row.descripcion_encargo,
+    resultadoDiligencia: row.resultado_diligencia,
+    fechaRealizacion: row.fecha_realizacion,
     receptorTurnoNombre: row.receptor_turno_nombre,
     telefonoReceptor: row.telefono_receptor,
     domicilioReceptor: row.domicilio_receptor,
@@ -381,6 +385,7 @@ function encargoFromDb(row) {
 
 function encargoToDb(patch) {
   const map = {
+    causaId: 'causa_id',
     folio: 'folio', depto: 'depto', centroEncarga: 'centro_encarga',
     abogadoEncarga: 'abogado_encarga', fechaEncargo: 'fecha_encargo', materia: 'materia',
     patrocinadoNombre: 'patrocinado_nombre', patrocinadoSexo: 'patrocinado_sexo',
@@ -389,6 +394,9 @@ function encargoToDb(patch) {
     direccion: 'direccion', comuna: 'comuna', tribunal: 'tribunal', rol: 'rol',
     jurisdiccion: 'jurisdiccion', observaciones: 'observaciones',
     fechaResolucion: 'fecha_resolucion',
+    descripcionEncargo: 'descripcion_encargo',
+    resultadoDiligencia: 'resultado_diligencia',
+    fechaRealizacion: 'fecha_realizacion',
     receptorTurnoNombre: 'receptor_turno_nombre',
     telefonoReceptor: 'telefono_receptor',
     domicilioReceptor: 'domicilio_receptor',
