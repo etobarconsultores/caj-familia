@@ -83,11 +83,23 @@ function priorClass(p) {
   return 'na';
 }
 
+// Catálogo fijo de tipos de juicio — las subcarpetas de En tramitación /
+// Nuevas (redacción) / Terminadas se pintan siempre con estos 8, en este
+// orden, tengan o no causas cargadas (ver renderFolders).
+const ORDEN_TIPOS_JUICIO = [
+  'Juicio Ejecutivo', 'Juicio Ordinario', 'Juicio Sumario',
+  'Juicio monitorio', 'Recurso de protección', 'Recurso de amparo',
+  'Voluntario', 'Extrajudicial'
+];
+
 function subcatClass(c) {
   const s = (c.subcategoria || c.materia || '').toLowerCase();
   if (s.includes('ejecutivo')) return 'sc-ejecutivo';
   if (s.includes('ordinario')) return 'sc-ordinario';
   if (s.includes('sumario')) return 'sc-sumario';
+  if (s.includes('monitorio')) return 'sc-monitorio';
+  if (s.includes('protección') || s.includes('proteccion')) return 'sc-recurso-proteccion';
+  if (s.includes('amparo')) return 'sc-recurso-amparo';
   if (s.includes('voluntari')) return 'sc-voluntario';
   if (s.includes('extrajudicial')) return 'sc-extrajudicial';
   return '';
@@ -432,8 +444,22 @@ function renderSidebarTabs() {
       <span class="count">${inCat.length}</span>
     </div>`;
 
-    const subs = [];
-    inCat.forEach(c => { const k = c.subcategoria || ''; if (k && !subs.includes(k)) subs.push(k); });
+    // Catálogo fijo: se pintan siempre las 8 opciones oficiales, en este
+    // orden, con su contador real (0 si no hay ninguna causa de ese tipo)
+    // — ya no depende de qué exista en los datos. Cualquier subcategoria
+    // histórica que no esté en el catálogo (texto libre de antes, o un tipo
+    // que dejó de ofrecerse) se agrega después, para no perder acceso a ella.
+    const subsHistoricas = [];
+    inCat.forEach(c => {
+      const k = c.subcategoria || '';
+      if (k && !ORDEN_TIPOS_JUICIO.includes(k) && !subsHistoricas.includes(k)) subsHistoricas.push(k);
+    });
+    // En la barra lateral solo se muestran las subcarpetas con al menos 1
+    // causa — el catálogo oficial (ORDEN_TIPOS_JUICIO) sigue completo y sin
+    // reducirse; esto solo filtra qué se pinta aquí, no las opciones
+    // disponibles en los formularios de creación/edición.
+    const subs = [...ORDEN_TIPOS_JUICIO, ...subsHistoricas]
+      .filter(sub => inCat.some(c => c.subcategoria === sub));
 
     html += `<div class="subtabs ${isActive ? 'open' : ''}" data-parent="${catKey}">`;
     html += `<div class="folder-tab sub ${isActive && !currentSubcat ? 'active' : ''}" data-cat="${catKey}" data-subcat="">Todas <span class="count">${inCat.length}</span></div>`;
@@ -508,9 +534,9 @@ function updateRecordTabsUI() {
 // ============================================================================
 function matchesFilters(c) {
   if (statFilter === 'activas' && c.categoria === 'terminada') return false;
-  if (statFilter === 'urgente' && c.prioridad !== 'Urgente') return false;
-  if (statFilter === 'semi' && c.prioridad !== 'Semi urgente') return false;
-  if (statFilter === 'noprior' && c.prioridad !== 'No prioritario') return false;
+  if (statFilter === 'urgente' && (c.categoria === 'terminada' || prioridadEfectiva(c) !== 'Urgente')) return false;
+  if (statFilter === 'semi' && (c.categoria === 'terminada' || prioridadEfectiva(c) !== 'Semi urgente')) return false;
+  if (statFilter === 'noprior' && (c.categoria === 'terminada' || prioridadEfectiva(c) !== 'No prioritario')) return false;
   if (currentCat !== 'todas' && c.categoria !== currentCat) return false;
   if (currentCat !== 'todas' && currentSubcat && (c.subcategoria || '') !== currentSubcat) return false;
   if (activePriors.size > 0 && !activePriors.has(c.prioridad)) return false;
@@ -521,12 +547,28 @@ function matchesFilters(c) {
   return true;
 }
 
+// Prioridad efectiva de una causa: se calcula al vuelo a partir de sus
+// gestiones y eventos activos (nunca de un valor guardado directamente en
+// la causa). Jerarquía excluyente Urgente > Semi urgente > No prioritario
+// — una causa nunca pertenece a más de una a la vez. Reutiliza
+// isEventoActivo() tal cual existe (Suspendido cuenta como no activo,
+// igual que Realizado/Cancelado), sin ninguna definición paralela.
+function prioridadEfectiva(c) {
+  const gestionesActivas = (c.gestionesPendientes || []).filter(g => g.estado === 'Pendiente' || g.estado === 'En espera');
+  const eventosActivos = (c.agendaEventos || []).filter(isEventoActivo);
+  const prioridades = new Set([...gestionesActivas, ...eventosActivos].map(x => x.prioridad).filter(Boolean));
+  if (prioridades.has('Urgente')) return 'Urgente';
+  if (prioridades.has('Semi urgente')) return 'Semi urgente';
+  if (prioridades.has('No prioritario')) return 'No prioritario';
+  return null;
+}
+
 function renderStats() {
   const activos = CAUSAS.filter(c => c.categoria !== 'terminada');
   document.getElementById('stat-total').textContent = activos.length;
-  document.getElementById('stat-urgentes').textContent = activos.filter(c => c.prioridad === 'Urgente').length;
-  document.getElementById('stat-semi').textContent = activos.filter(c => c.prioridad === 'Semi urgente').length;
-  document.getElementById('stat-noprior').textContent = activos.filter(c => c.prioridad === 'No prioritario').length;
+  document.getElementById('stat-urgentes').textContent = activos.filter(c => prioridadEfectiva(c) === 'Urgente').length;
+  document.getElementById('stat-semi').textContent = activos.filter(c => prioridadEfectiva(c) === 'Semi urgente').length;
+  document.getElementById('stat-noprior').textContent = activos.filter(c => prioridadEfectiva(c) === 'No prioritario').length;
   document.getElementById('stat-agenda').textContent = allEventosFlat().filter(isEventoActivo).length;
   document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
     card.classList.toggle('active', statFilter === card.dataset.filter);
@@ -732,6 +774,11 @@ function notifRowsHtml(c) {
 
 const GESTION_ESTADOS = ['Pendiente', 'En espera', 'Realizada', 'Cancelada'];
 const GESTION_PRIORIDADES = ['Urgente', 'Semi urgente', 'No prioritario'];
+// Concepto independiente de Categoría (que sigue siendo texto libre para
+// clasificaciones como Notificación/Oficio/PJUD): Tipo distingue si la
+// gestión es una tarea propia (redactar, presentar, revisar) o una gestión
+// que depende de un tercero (contactar, solicitar, hacer seguimiento).
+const GESTION_TIPOS = ['Tarea', 'Gestión'];
 
 function gestionEstadoClass(estado) {
   if (estado === 'Realizada') return 'calm-estado';
@@ -778,6 +825,7 @@ function pendientesHtml(c) {
 
 function gestionFormHtml(g) {
   const e = g || { estado: 'Pendiente' };
+  const tipoOptions = ['', ...GESTION_TIPOS].map(t => `<option value="${t}" ${(e.tipo || '') === t ? 'selected' : ''}>${t || 'Selecciona…'}</option>`).join('');
   const prioridadOptions = ['', ...GESTION_PRIORIDADES].map(p => `<option value="${p}" ${(e.prioridad || '') === p ? 'selected' : ''}>${p || 'Sin definir'}</option>`).join('');
   const estadoOptions = GESTION_ESTADOS.map(s => `<option value="${s}" ${e.estado === s ? 'selected' : ''}>${s}</option>`).join('');
   return `
@@ -785,17 +833,18 @@ function gestionFormHtml(g) {
     <div class="subhead" style="margin-top:0;">${g ? 'Editar gestión' : 'Nueva gestión'}</div>
     <div><label>Descripción</label><textarea id="gf-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
     <div class="form-grid2">
+      <div><label>Tipo</label><select id="gf-tipo">${tipoOptions}</select></div>
       <div><label>Categoría</label><input type="text" id="gf-categoria" value="${escapeHtml(e.categoria || '')}" placeholder="Ej: Notificación, Oficio, PJUD…"></div>
+    </div>
+    <div class="form-grid2">
       <div><label>Prioridad</label><select id="gf-prioridad">${prioridadOptions}</select></div>
-    </div>
-    <div class="form-grid2">
       <div><label>Estado</label><select id="gf-estado">${estadoOptions}</select></div>
-      <div><label>Fecha de revisión</label><input type="date" id="gf-fecharevision" value="${escapeHtml(e.fechaRevision || '')}"></div>
     </div>
     <div class="form-grid2">
+      <div><label>Fecha de revisión</label><input type="date" id="gf-fecharevision" value="${escapeHtml(e.fechaRevision || '')}"></div>
       <div><label>Fecha límite (opcional)</label><input type="date" id="gf-fechalimite" value="${escapeHtml(e.fechaLimite || '')}"></div>
-      <div><label>Enlace de Drive (opcional)</label><input type="text" id="gf-drivelink" value="${escapeHtml(e.driveLink || '')}"></div>
     </div>
+    <div><label>Enlace de Drive (opcional)</label><input type="text" id="gf-drivelink" value="${escapeHtml(e.driveLink || '')}"></div>
     <div><label>Observaciones</label><textarea id="gf-observaciones">${escapeHtml(e.observaciones || '')}</textarea></div>
     <div style="display:flex; gap:8px; margin-top:6px;">
       <button class="btn primary" id="save-gestion" type="button">Guardar gestión</button>
@@ -1609,12 +1658,22 @@ function allGestionesActivasFlat() {
   return out;
 }
 
-function centroTrabajoBuckets() {
+// Vista activa dentro de Centro de Trabajo: 'Tarea' o 'Gestión' (nunca una
+// tercera pestaña — "Sin tipo asignado" es un bloque aparte, no una vista).
+let centroTrabajoVista = 'Tarea';
+
+function centroTrabajoBuckets(tipo) {
   const hoy = todayISO();
   const en7dias = new Date(); en7dias.setDate(en7dias.getDate() + 7);
   const en7iso = toISO(en7dias);
 
-  const activas = allGestionesActivasFlat();
+  // tipo undefined -> todas las activas (sin usar, se deja por compatibilidad);
+  // tipo === null -> exclusivamente las que NO tienen tipo asignado (bloque
+  // temporal de regularización); tipo === 'Tarea'/'Gestión' -> solo esas.
+  let activas = allGestionesActivasFlat();
+  if (tipo === null) activas = activas.filter(g => !g.tipo);
+  else if (tipo) activas = activas.filter(g => g.tipo === tipo);
+
   const buckets = { hoy: [], proximos7: [], enEspera: [], vencidas: [], sinFecha: [] };
 
   activas.forEach(g => {
@@ -1656,17 +1715,31 @@ function workBucketHtml(title, items, emptyMsg) {
 }
 
 function renderCentroTrabajo() {
-  const b = centroTrabajoBuckets();
+  const b = centroTrabajoBuckets(centroTrabajoVista);
+  const sinTipo = allGestionesActivasFlat().filter(g => !g.tipo);
   const container = document.getElementById('list-container');
   container.innerHTML = `
     <div class="section-title">Centro de Trabajo</div>
-    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.</div>
-    ${workBucketHtml('Hoy', b.hoy, 'No tienes gestiones para revisar hoy.')}
+    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 14px;">¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.</div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <button class="btn small ${centroTrabajoVista === 'Tarea' ? 'primary' : 'ghost'}" data-ct-vista="Tarea" type="button">Tareas pendientes</button>
+      <button class="btn small ${centroTrabajoVista === 'Gestión' ? 'primary' : 'ghost'}" data-ct-vista="Gestión" type="button">Gestiones pendientes</button>
+    </div>
+    ${workBucketHtml('Hoy', b.hoy, 'No tienes nada para revisar hoy.')}
     ${workBucketHtml('Próximos 7 días', b.proximos7, 'Nada programado para los próximos 7 días.')}
-    ${workBucketHtml('En espera', b.enEspera, 'No hay gestiones en espera.')}
-    ${workBucketHtml('Vencidas', b.vencidas, 'No tienes gestiones vencidas. Al día 🎉')}
-    ${workBucketHtml('Sin fecha', b.sinFecha, 'No hay gestiones sin fecha de revisión.')}
+    ${workBucketHtml('En espera', b.enEspera, 'No hay nada en espera.')}
+    ${workBucketHtml('Vencidas', b.vencidas, 'No tienes nada vencido. Al día 🎉')}
+    ${workBucketHtml('Sin fecha', b.sinFecha, 'No hay nada sin fecha de revisión.')}
+    ${sinTipo.length ? `
+    <div class="work-bucket" style="margin-top:24px; border-top:1px dashed var(--line); padding-top:16px;">
+      <div class="work-bucket-h">Sin tipo asignado <span class="n">${sinTipo.length}</span></div>
+      <div style="color:var(--ink-faint); font-size:12px; margin:-4px 0 10px;">Registros históricos creados antes de distinguir Tarea/Gestión. Edítalos para clasificarlos — este bloque desaparece solo cuando ya no quede ninguno.</div>
+      <div class="work-grid">${sinTipo.map(workCardHtml).join('')}</div>
+    </div>` : ''}
   `;
+  container.querySelectorAll('[data-ct-vista]').forEach(btn => {
+    btn.addEventListener('click', () => { centroTrabajoVista = btn.dataset.ctVista; renderCentroTrabajo(); });
+  });
   container.querySelectorAll('[data-causa-id]').forEach(el => {
     el.addEventListener('click', () => {
       currentCat = 'todas';
@@ -6022,6 +6095,9 @@ function detailHtml(c) {
             <option value="Juicio Ejecutivo">Juicio Ejecutivo</option>
             <option value="Juicio Ordinario">Juicio Ordinario</option>
             <option value="Juicio Sumario">Juicio Sumario</option>
+            <option value="Juicio monitorio">Juicio monitorio</option>
+            <option value="Recurso de protección">Recurso de protección</option>
+            <option value="Recurso de amparo">Recurso de amparo</option>
             <option value="Voluntario">Voluntario</option>
             <option value="Extrajudicial">Extrajudicial</option>
           </select>
@@ -6499,6 +6575,7 @@ function wireGestionesTab(c, panel) {
       const patch = {
         descripcion: formWrap.querySelector('#gf-descripcion').value.trim(),
         categoria: formWrap.querySelector('#gf-categoria').value.trim() || null,
+        tipo: formWrap.querySelector('#gf-tipo').value || null,
         prioridad: formWrap.querySelector('#gf-prioridad').value || null,
         estado: formWrap.querySelector('#gf-estado').value,
         fechaRevision: formWrap.querySelector('#gf-fecharevision').value || null,
@@ -6507,16 +6584,17 @@ function wireGestionesTab(c, panel) {
         observaciones: formWrap.querySelector('#gf-observaciones').value.trim() || null
       };
       if (!patch.descripcion) { toast('La gestión necesita una descripción'); return; }
+      if (!patch.tipo) { toast('Selecciona si es una Tarea o una Gestión'); return; }
       try {
         if (gestion) {
           const actualizado = await api.updateGestionPendiente(gestion.id, patch);
           const idx = c.gestionesPendientes.findIndex(x => x.id === gestion.id);
-          if (idx >= 0) c.gestionesPendientes[idx] = { id: actualizado.id, descripcion: actualizado.descripcion, driveLink: actualizado.drive_link, categoria: actualizado.categoria, prioridad: actualizado.prioridad, estado: actualizado.estado, fechaRevision: actualizado.fecha_revision, fechaLimite: actualizado.fecha_limite, observaciones: actualizado.observaciones, createdAt: actualizado.created_at };
+          if (idx >= 0) c.gestionesPendientes[idx] = { id: actualizado.id, descripcion: actualizado.descripcion, driveLink: actualizado.drive_link, categoria: actualizado.categoria, tipo: actualizado.tipo, prioridad: actualizado.prioridad, estado: actualizado.estado, fechaRevision: actualizado.fecha_revision, fechaLimite: actualizado.fecha_limite, observaciones: actualizado.observaciones, createdAt: actualizado.created_at };
           toast('Gestión actualizada');
         } else {
           const nuevo = await api.createGestion(CURRENT_USER.id, c.id, patch);
           c.gestionesPendientes = c.gestionesPendientes || [];
-          c.gestionesPendientes.push({ id: nuevo.id, descripcion: nuevo.descripcion, driveLink: nuevo.drive_link, categoria: nuevo.categoria, prioridad: nuevo.prioridad, estado: nuevo.estado, fechaRevision: nuevo.fecha_revision, fechaLimite: nuevo.fecha_limite, observaciones: nuevo.observaciones, createdAt: nuevo.created_at });
+          c.gestionesPendientes.push({ id: nuevo.id, descripcion: nuevo.descripcion, driveLink: nuevo.drive_link, categoria: nuevo.categoria, tipo: nuevo.tipo, prioridad: nuevo.prioridad, estado: nuevo.estado, fechaRevision: nuevo.fecha_revision, fechaLimite: nuevo.fecha_limite, observaciones: nuevo.observaciones, createdAt: nuevo.created_at });
           toast('Gestión creada');
         }
         closeForm();
@@ -7318,6 +7396,7 @@ function wireTopLevelUI() {
       }
       statFilter = (statFilter === f) ? null : f;
       currentCat = 'todas'; currentSubcat = null;
+      activePriors.clear();
       render();
     });
   });

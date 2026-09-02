@@ -72,7 +72,7 @@ function causaFromDb(row) {
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
       .map(g => ({
         id: g.id, descripcion: g.descripcion, driveLink: g.drive_link,
-        categoria: g.categoria, prioridad: g.prioridad, estado: g.estado || 'Pendiente',
+        categoria: g.categoria, tipo: g.tipo, prioridad: g.prioridad, estado: g.estado || 'Pendiente',
         fechaRevision: g.fecha_revision, fechaLimite: g.fecha_limite, observaciones: g.observaciones,
         createdAt: g.created_at
       })),
@@ -242,7 +242,7 @@ export async function deleteCausa(causaId) {
 // ---------- Gestiones pendientes ----------
 function gestionPatchToDb(patch) {
   const map = {
-    descripcion: 'descripcion', driveLink: 'drive_link', categoria: 'categoria',
+    descripcion: 'descripcion', driveLink: 'drive_link', categoria: 'categoria', tipo: 'tipo',
     prioridad: 'prioridad', estado: 'estado', fechaRevision: 'fecha_revision',
     fechaLimite: 'fecha_limite', observaciones: 'observaciones'
   };
