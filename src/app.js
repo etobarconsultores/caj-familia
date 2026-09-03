@@ -5943,10 +5943,10 @@ let informeFinalSeleccion = new Set(); // usado cuando el filtro es "manual"
 let informeFinalOrden = 'agrupar-estado';
 
 const INFORME_CAMPOS_DEFAULT = {
-  rol: true, tribunal: true, caratulado: true, materia: true, tipoJuicio: true,
-  patrocinado: true, carpeta: true, etapa: true, estadoActual: true, resumen: false,
-  gestionesRealizadas: true, resultadoBeneficio: true, gestionesPendientes: true,
-  gestionesEnEspera: false, ultimaRevisionPjud: false, proximaActuacion: false,
+  rit: true, saj: false, tribunal: true, caratulado: true, procedimiento: true, tipoJuicio: false,
+  materia: true, patrocinado: true, carpeta: true, etapa: true, estadoActual: true, resumen: false,
+  fechaIngreso: false, tutor: false, baj: false, recurso: false, rolIngreso: false, competencia: false,
+  gestionesPendientes: true, gestionesEnEspera: false, ultimaRevisionPjud: false,
   observacionesTraspaso: true, cronologia: false, instruccionesTutor: false,
   proximosEventos: false, audienciasFuturas: false
 };
@@ -5954,15 +5954,16 @@ let informeFinalCampos = { ...INFORME_CAMPOS_DEFAULT };
 
 const INFORME_CAMPOS_GRUPOS = [
   ['Datos básicos', [
-    ['rol', 'ROL / RIT'], ['tribunal', 'Tribunal'], ['caratulado', 'Caratulado'],
-    ['materia', 'Materia'], ['tipoJuicio', 'Tipo de juicio'], ['patrocinado', 'Parte patrocinada'],
-    ['carpeta', 'Estado / carpeta de la causa'], ['etapa', 'Etapa procesal'],
-    ['estadoActual', 'Estado actual'], ['resumen', 'Resumen de la causa']
+    ['rit', 'RIT / ROL'], ['saj', 'Código SAJ'], ['tribunal', 'Tribunal'], ['caratulado', 'Caratulado'],
+    ['procedimiento', 'Procedimiento'], ['tipoJuicio', 'Tipo de juicio'], ['materia', 'Materia'],
+    ['patrocinado', 'Parte patrocinada'], ['carpeta', 'Carpeta'], ['etapa', 'Etapa procesal'],
+    ['estadoActual', 'Estado actual'], ['resumen', 'Resumen de la causa'],
+    ['fechaIngreso', 'Fecha de ingreso'], ['tutor', 'Tutor'], ['baj', 'BAJ'],
+    ['recurso', 'Recurso'], ['rolIngreso', 'ROL ingreso Corte'], ['competencia', 'Competencia']
   ]],
   ['Gestión', [
-    ['gestionesRealizadas', 'Gestiones realizadas'], ['resultadoBeneficio', 'Resultado o beneficio obtenido'],
-    ['gestionesPendientes', 'Gestiones pendientes'], ['gestionesEnEspera', 'Gestiones en espera'],
-    ['ultimaRevisionPjud', 'Última revisión PJUD'], ['proximaActuacion', 'Próxima actuación'],
+    ['gestionesPendientes', 'Gestiones/Tareas pendientes'], ['gestionesEnEspera', 'Gestiones/Tareas en espera'],
+    ['ultimaRevisionPjud', 'Última revisión PJUD'],
     ['observacionesTraspaso', 'Observaciones de traspaso'], ['cronologia', 'Cronología jurídica'],
     ['instruccionesTutor', 'Instrucciones del tutor']
   ]],
@@ -5974,7 +5975,7 @@ const INFORME_CAMPOS_GRUPOS = [
 const INFORME_ORDEN_OPCIONES = [
   ['agrupar-estado', 'Agrupar por estado (recomendado)'],
   ['rol', 'Por ROL'], ['tribunal', 'Por tribunal'], ['caratulado', 'Por caratulado'],
-  ['estado', 'Por estado de causa'], ['fechaIngreso', 'Por fecha de ingreso'], ['prioridad', 'Por prioridad']
+  ['estado', 'Por estado de causa'], ['fechaIngreso', 'Por fecha de ingreso']
 ];
 
 function informeFinalCausasFiltradas() {
@@ -5990,8 +5991,7 @@ function ordenarCausasInforme(causas) {
     tribunal: (a, b) => tribunalTexto(a).localeCompare(tribunalTexto(b)),
     caratulado: (a, b) => (caratuladoTexto(a) || '').localeCompare(caratuladoTexto(b) || ''),
     estado: (a, b) => (a.categoria || '').localeCompare(b.categoria || ''),
-    fechaIngreso: (a, b) => (a.fechaIngreso || '').localeCompare(b.fechaIngreso || ''),
-    prioridad: (a, b) => { const ord = { Urgente: 0, 'Semi urgente': 1, 'No prioritario': 2 }; return (ord[a.prioridad] ?? 9) - (ord[b.prioridad] ?? 9); }
+    fechaIngreso: (a, b) => (a.fechaIngreso || '').localeCompare(b.fechaIngreso || '')
   };
   if (informeFinalOrden === 'agrupar-estado') {
     const ordenCat = { tramitacion: 0, nueva: 1, terminada: 2 };
@@ -6370,7 +6370,32 @@ function informeFinalConfiguradorHtml() {
 
   <div class="agenda-toolbar" style="margin-top:20px;">
     <button class="btn small primary" id="informe-ver-preview">Vista previa</button>
-  </div>`;
+  </div>
+
+  <div class="subhead" style="margin-top:30px; border-top:1px solid var(--line); padding-top:20px;">Resumen de audiencias asistidas</div>
+  <div class="ficha-empty" style="color:var(--ink-faint); margin-top:-4px;">Para el formulario de práctica. Independiente del filtro, el orden y los campos configurados arriba — siempre incluye todas las audiencias realizadas, de todas las causas.</div>
+  ${(() => {
+    const audiencias = resumenAudienciasAsistidas(CAUSAS);
+    return `
+    <div style="margin:10px 0; font-size:13px;"><strong>${audiencias.length}</strong> audiencia${audiencias.length === 1 ? '' : 's'} realizada${audiencias.length === 1 ? '' : 's'} registrada${audiencias.length === 1 ? '' : 's'}.</div>
+    ${!audiencias.length ? `<div class="ficha-empty" style="color:var(--ink-faint);">No hay audiencias realizadas registradas todavía.</div>` : `
+    <table class="ficha-table" style="width:100%;">
+      <thead><tr><th>TIPO AUDIENCIA</th><th>FECHA</th><th>RIT</th><th>MATERIA</th><th>TRIBUNAL</th></tr></thead>
+      <tbody>
+        ${audiencias.map(a => `<tr>
+          <td>${escapeHtml(a.tipoAudiencia)}</td>
+          <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
+          <td>${escapeHtml(a.rit)}</td>
+          <td>${escapeHtml(a.materia)}</td>
+          <td>${escapeHtml(a.tribunal)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:10px;">
+      <button class="btn small" id="informe-audiencias-excel" type="button">Descargar Excel</button>
+    </div>`}
+    `;
+  })()}`;
 }
 
 function wireInformeFinalConfigurador(container) {
@@ -6403,6 +6428,19 @@ function wireInformeFinalConfigurador(container) {
   container.querySelector('#informe-ver-preview').addEventListener('click', () => {
     informeFinalEtapa = 'preview';
     renderInformeFinal();
+  });
+
+  const excelBtn = container.querySelector('#informe-audiencias-excel');
+  if (excelBtn) excelBtn.addEventListener('click', () => {
+    const audiencias = resumenAudienciasAsistidas(CAUSAS);
+    const filasHoja = [
+      ['TIPO AUDIENCIA', 'FECHA', 'RIT', 'MATERIA', 'TRIBUNAL'],
+      ...audiencias.map(a => [a.tipoAudiencia, fmtFechaSolo(a.fecha), a.rit, a.materia, a.tribunal])
+    ];
+    const hoja = XLSX.utils.aoa_to_sheet(filasHoja);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Audiencias');
+    XLSX.writeFile(libro, `resumen_audiencias_${todayISO()}.xlsx`);
   });
 }
 
@@ -6444,29 +6482,6 @@ function informeFinalPreviewHtml() {
   <div class="ficha-empty" style="color:var(--ink-dim); margin-bottom:16px;">${camposLabels.length ? escapeHtml(camposLabels.join(' · ')) : 'Ningún campo adicional seleccionado (solo datos básicos del bloque).'}</div>
   ${causas.length === 0 ? '<div class="empty-msg">No hay causas que coincidan con el filtro elegido.</div>' : ''}
 
-  <div class="subhead" style="margin-top:22px;">Resumen de audiencias asistidas</div>
-  <div class="ficha-empty" style="color:var(--ink-faint); margin-top:-4px;">Incluye todas las audiencias realizadas en todas las causas, independiente del filtro configurado arriba para el Informe Final.</div>
-  ${(() => {
-    const audiencias = resumenAudienciasAsistidas(CAUSAS);
-    if (!audiencias.length) return `<div class="ficha-empty" style="color:var(--ink-faint);">No hay audiencias realizadas registradas.</div>`;
-    return `
-    <table class="ficha-table" style="width:100%;">
-      <thead><tr><th>TIPO AUDIENCIA</th><th>FECHA</th><th>RIT</th><th>MATERIA</th><th>TRIBUNAL</th></tr></thead>
-      <tbody>
-        ${audiencias.map(a => `<tr>
-          <td>${escapeHtml(a.tipoAudiencia)}</td>
-          <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
-          <td>${escapeHtml(a.rit)}</td>
-          <td>${escapeHtml(a.materia)}</td>
-          <td>${escapeHtml(a.tribunal)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-    <div style="margin-top:10px;">
-      <button class="btn small" id="informe-audiencias-excel" type="button">Descargar resumen en Excel</button>
-    </div>`;
-  })()}
-
   <div class="agenda-toolbar" style="margin-top:20px;">
     <button class="btn small primary" id="informe-generar-pdf" ${causas.length === 0 ? 'disabled' : ''}>Generar PDF</button>
     <button class="btn small" id="informe-volver">Volver a configurar</button>
@@ -6477,18 +6492,6 @@ function wireInformeFinalPreview(container) {
   container.querySelector('#informe-volver').addEventListener('click', () => {
     informeFinalEtapa = 'configurar';
     renderInformeFinal();
-  });
-  const excelBtn = container.querySelector('#informe-audiencias-excel');
-  if (excelBtn) excelBtn.addEventListener('click', () => {
-    const audiencias = resumenAudienciasAsistidas(CAUSAS);
-    const filasHoja = [
-      ['TIPO AUDIENCIA', 'FECHA', 'RIT', 'MATERIA', 'TRIBUNAL'],
-      ...audiencias.map(a => [a.tipoAudiencia, fmtFechaSolo(a.fecha), a.rit, a.materia, a.tribunal])
-    ];
-    const hoja = XLSX.utils.aoa_to_sheet(filasHoja);
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, 'Audiencias');
-    XLSX.writeFile(libro, `resumen_audiencias_${todayISO()}.xlsx`);
   });
   const genBtn = container.querySelector('#informe-generar-pdf');
   if (genBtn) genBtn.addEventListener('click', () => {
@@ -6522,32 +6525,30 @@ function construirBloqueCausaInforme(c, campos) {
     filas.push([label, str]);
   };
 
-  add('rol', 'ROL / RIT', c.rol);
+  add('rit', 'RIT / ROL', rolCompletoTexto(c));
+  add('saj', 'Código SAJ', c.folio);
   add('tribunal', 'Tribunal', tribunalTexto(c));
   add('caratulado', 'Caratulado', caratuladoTexto(c));
+  add('procedimiento', 'Procedimiento', c.subcategoria);
+  add('tipoJuicio', 'Tipo de juicio', (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') ? c.tipoJuicio : null);
   add('materia', 'Materia', c.materia);
-  add('tipoJuicio', 'Tipo de juicio', c.subcategoria);
   add('patrocinado', 'Parte patrocinada', patrocinadoEfectivo(c));
-  add('carpeta', 'Estado / carpeta', CATEGORIA_LABEL[c.categoria] || c.categoria);
+  add('carpeta', 'Carpeta', CATEGORIA_LABEL[c.categoria] || c.categoria);
   add('etapa', 'Etapa procesal', c.etapa);
   add('estadoActual', 'Estado actual', c.estado);
   add('resumen', 'Resumen de la causa', c.resumen);
-  add('resultadoBeneficio', 'Resultado o beneficio obtenido', c.resultadoBeneficio);
+  add('fechaIngreso', 'Fecha de ingreso', c.fechaIngreso ? fmtFechaSolo(c.fechaIngreso) : null);
+  add('tutor', 'Tutor', c.tutor);
+  add('baj', 'BAJ', c.bajEstado ? (BAJ_LABEL[c.bajEstado] || c.bajEstado) : null);
+  add('recurso', 'Recurso', c.recurso);
+  add('rolIngreso', 'ROL ingreso Corte', c.rolIngreso);
+  add('competencia', 'Competencia', c.competencia);
   add('ultimaRevisionPjud', 'Última revisión PJUD', c.ultimaRevisionAt ? fmtFechaHora(c.ultimaRevisionAt) : null);
   add('observacionesTraspaso', 'Observaciones de traspaso', c.observacionesTraspaso);
-
-  if (campos.proximaActuacion) {
-    const activa = pickActiveGestion(c);
-    add('proximaActuacion', 'Próxima actuación', activa ? `${activa.descripcion}${activa.fechaRevision ? ' (revisar ' + fmtFechaSolo(activa.fechaRevision) + ')' : ''}` : null);
-  }
 
   const tituloBloque = `Causa ROL/RIT N° ${c.rol || '(sin ROL)'}`;
   const secciones = [{ title: tituloBloque, kind: 'kv', rows: [['Referencia', c.titulo], ...filas] }];
 
-  if (campos.gestionesRealizadas) {
-    const realizadas = (c.gestionesPendientes || []).filter(g => g.estado === 'Realizada').map(g => g.descripcion);
-    if (realizadas.length) secciones.push({ title: 'Gestiones realizadas por la postulante', kind: 'list', items: realizadas });
-  }
   if (campos.gestionesPendientes || campos.gestionesEnEspera) {
     const estados = [];
     if (campos.gestionesPendientes) estados.push('Pendiente');
