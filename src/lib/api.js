@@ -20,6 +20,10 @@ function causaFromDb(row) {
     titulo: row.titulo,
     categoria: row.categoria,
     subcategoria: row.subcategoria,
+    tipoJuicio: row.tipo_juicio,
+    patrocinadoTipo: row.patrocinado_tipo,
+    rit: row.rit,
+    competencia: row.competencia,
     rol: row.rol,
     rolIngreso: row.rol_ingreso,
     folio: row.folio,
@@ -109,13 +113,19 @@ function causaFromDb(row) {
         googleSyncStatus: e.google_sync_status, googleLastSyncAt: e.google_last_sync_at,
         googleSyncError: e.google_sync_error, recordatorios: e.recordatorios,
         organizationId: e.organization_id, moduleId: e.module_id
-      }))
+      })),
+    intervinientes: (row.intervinientes || [])
+      .slice()
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      .map(i => ({ id: i.id, tipoParte: i.tipo_parte, nombre: i.nombre, orden: i.orden }))
   };
 }
 
 function causaPatchToDb(patch) {
   const map = {
     titulo: 'titulo', categoria: 'categoria', subcategoria: 'subcategoria',
+    tipoJuicio: 'tipo_juicio', rit: 'rit', competencia: 'competencia',
+    patrocinadoTipo: 'patrocinado_tipo',
     rol: 'rol', rolIngreso: 'rol_ingreso', folio: 'folio', tribunal: 'tribunal',
     materia: 'materia', submateria: 'submateria', parte: 'parte', representacion: 'representacion',
     recurso: 'recurso', rolCA: 'rol_ca', tutor: 'tutor',
@@ -147,7 +157,7 @@ function causaPatchToDb(patch) {
 // esa causa queda sin esa información específica, pero sigue apareciendo.
 const CAUSA_CHILD_TABLES = [
   'gestiones_pendientes', 'cronologia', 'domicilios_notificacion',
-  'hitos', 'agenda_eventos', 'instrucciones_tutor'
+  'hitos', 'agenda_eventos', 'instrucciones_tutor', 'intervinientes'
 ];
 
 async function fetchChildRows(table, causaIds) {
@@ -197,7 +207,8 @@ async function fetchCausasConRelaciones(filtroIds) {
     domicilios_notificacion: porTabla.domicilios_notificacion.get(row.id) || [],
     hitos: porTabla.hitos.get(row.id) || [],
     agenda_eventos: porTabla.agenda_eventos.get(row.id) || [],
-    instrucciones_tutor: porTabla.instrucciones_tutor.get(row.id) || []
+    instrucciones_tutor: porTabla.instrucciones_tutor.get(row.id) || [],
+    intervinientes: porTabla.intervinientes.get(row.id) || []
   }));
 }
 
@@ -274,6 +285,33 @@ export async function updateGestionPendiente(id, patch) {
 
 export async function deleteGestionPendiente(id) {
   const { error } = await supabase.from('gestiones_pendientes').delete().eq('id', id);
+  if (error) throw error;
+}
+
+function intervinientePatchToDb(patch) {
+  const map = { tipoParte: 'tipo_parte', nombre: 'nombre', orden: 'orden' };
+  const out = {};
+  Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
+  return out;
+}
+
+export async function createInterviniente(userId, causaId, patch) {
+  const dbPatch = intervinientePatchToDb(patch);
+  dbPatch.user_id = userId;
+  dbPatch.causa_id = causaId;
+  const { data, error } = await supabase.from('intervinientes').insert(dbPatch).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateInterviniente(id, patch) {
+  const { data, error } = await supabase.from('intervinientes').update(intervinientePatchToDb(patch)).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteInterviniente(id) {
+  const { error } = await supabase.from('intervinientes').delete().eq('id', id);
   if (error) throw error;
 }
 

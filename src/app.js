@@ -43,7 +43,6 @@ function borrarSeleccionModuloGuardada() {
 let currentCat = 'centro-trabajo';
 let currentSubcat = null;
 let statFilter = null;
-let activePriors = new Set();
 let searchTerm = '';
 let lastDetailTab = 'editar';
 let agendaViewMode = 'lista';
@@ -89,7 +88,8 @@ function priorClass(p) {
 const ORDEN_TIPOS_JUICIO = [
   'Juicio Ejecutivo', 'Juicio Ordinario', 'Juicio Sumario',
   'Juicio monitorio', 'Recurso de protección', 'Recurso de amparo',
-  'Voluntario', 'Extrajudicial'
+  'Voluntario', 'Extrajudicial',
+  'Gestión preparatoria', 'Interdicción', 'Interdictos posesorios'
 ];
 
 function subcatClass(c) {
@@ -539,7 +539,6 @@ function matchesFilters(c) {
   if (statFilter === 'noprior' && (c.categoria === 'terminada' || prioridadEfectiva(c) !== 'No prioritario')) return false;
   if (currentCat !== 'todas' && c.categoria !== currentCat) return false;
   if (currentCat !== 'todas' && currentSubcat && (c.subcategoria || '') !== currentSubcat) return false;
-  if (activePriors.size > 0 && !activePriors.has(c.prioridad)) return false;
   if (searchTerm) {
     const hay = [c.titulo, c.patrocinado, c.demandanteNombre, c.demandadoNombre, c.rut, c.rol, c.materia, c.submateria, c.clave].filter(Boolean).join(' ').toLowerCase();
     if (!hay.includes(searchTerm.toLowerCase())) return false;
@@ -971,16 +970,19 @@ function buildFichaData(c) {
 
   const generales = kv([
     ['Título / referencia', c.titulo],
-    ['ROL', c.rol],
+    ['RIT / ROL', rolCompletoTexto(c)],
     ['Caratulado', caratuladoTexto(c)],
     ['Tribunal', tribunalTexto(c)],
     ['Código SAJ', c.folio],
     ['ROL ingreso Corte', c.rolIngreso],
     ['Carpeta', CATEGORIA_LABEL[c.categoria] || c.categoria],
-    ['Tipo de juicio', c.subcategoria],
-    ['Etapa', c.etapa],
+    ['Procedimiento', c.subcategoria],
+    ['Tipo de juicio', (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') ? c.tipoJuicio : null],
+    ['Etapa Procesal', c.etapa],
     ['Materia', c.materia],
     ['Patrocinado', patrocinadoEfectivo(c)],
+    ['Tutor', c.tutor],
+    ['Fecha ingreso causa', fmtFechaSolo(c.fechaIngreso)],
     ['Recurso', c.recurso]
   ]);
   if (generales.length) sections.push({ title: 'Datos generales', kind: 'kv', rows: generales });
@@ -1028,14 +1030,11 @@ function buildFichaData(c) {
   });
 
   const contacto = kv([
-    ['Patrocinado', c.patrocinado],
     ['RUT', c.rut],
     ['Correo', c.correo],
     ['Correo alternativo', c.correoAlt],
     ['Teléfono', c.telefono],
-    ['Nota', c.nota],
-    ['Tutor', c.tutor],
-    ['Fecha de ingreso', fmtFechaSolo(c.fechaIngreso)]
+    ['Nota', c.nota]
   ]);
   if (contacto.length) sections.push({ title: 'Contacto', kind: 'kv', rows: contacto });
 
@@ -1607,14 +1606,20 @@ function partesAbreviadas(c) {
 
 // El caratulado nunca depende de a quién representamos: siempre respeta el
 // orden procesal Demandante / Demandado, aunque representemos al demandado.
+// intervinientesEfectivos(c) es la fuente real (ver más abajo) — usa la
+// tabla nueva cuando tiene datos, o arma el mismo par de siempre a partir
+// de las columnas antiguas cuando la causa aún no tiene intervinientes.
 function tieneRolProcesalDefinido(c) {
-  return !!(c.demandanteNombre || c.demandadoNombre);
+  return intervinientesEfectivos(c).some(i => i.tipoParte === 'Demandante' || i.tipoParte === 'Demandado/a');
 }
 
 function caratuladoTexto(c) {
+  const lista = intervinientesEfectivos(c);
   if (tieneRolProcesalDefinido(c)) {
-    const dte = nombreCorto(c.demandanteNombre);
-    const ddo = nombreCorto(c.demandadoNombre);
+    const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
+    const primerDemandado = lista.find(i => i.tipoParte === 'Demandado/a');
+    const dte = nombreCorto(primerDemandante ? primerDemandante.nombre : null);
+    const ddo = nombreCorto(primerDemandado ? primerDemandado.nombre : null);
     if (dte && ddo) return `${dte} / ${ddo}`;
     if (dte) return dte;
     if (ddo) return ddo;
@@ -1622,6 +1627,547 @@ function caratuladoTexto(c) {
   // Causa antigua sin posición procesal definida: se muestra el respaldo
   // (patrocinado/contraparte) sin garantía de orden procesal.
   return partesAbreviadas(c);
+}
+
+function normalizarProcedimiento(s) { return normalizarTexto(s || ''); }
+function procedimientoCanonico(valorGuardado) {
+  const norm = normalizarProcedimiento(valorGuardado);
+  if (!norm) return null;
+  return ORDEN_TIPOS_JUICIO.find(p => normalizarProcedimiento(p) === norm) || null;
+}
+
+const TIPO_JUICIO_POR_PROCEDIMIENTO = {
+  'Juicio Ordinario': ['Mayor Cuantía', 'Menor Cuantía', 'Mínima Cuantía', 'Otro'],
+  'Juicio Ejecutivo': ['Obligación de Dar', 'Obligación de Hacer', 'Obligación de no Hacer', 'Otro']
+};
+function opcionesTipoJuicioParaProcedimiento(procedimientoCanon) {
+  return TIPO_JUICIO_POR_PROCEDIMIENTO[procedimientoCanon] || null;
+}
+
+const MATERIA_POR_PROCEDIMIENTO = {
+  'Juicio Ordinario': [
+    'Acción Cambiaria Ordinaria, Letra', 'Acción Cambiaria Ordinaria, Pagaré',
+    'Acción de Rescisión por Lesión Enorme', 'Acción de Simulación', 'Acción Hipotecaria',
+    'Acción Ordinaria de Cobro de Cheque', 'Acción Ordinaria de Desposeimiento',
+    'Acción Pauliana, Revocatorias', 'Cobro de Mutuo de Dinero', 'Cobro de Pesos',
+    'Cumplimiento de Contrato', 'Derecho y Cobro de Pensiones, Jubilar',
+    'Indemnización de Perjuicios', 'Indemnización de Perjuicios Transporte Aéreo',
+    'Indemnización de Perjuicios Transporte Terrestre', 'Nulidad de Acto Administrativo',
+    'Nulidad de Contrato', 'Nulidad de Expropiación', 'Nulidad de Testamento',
+    'Otros Ordinarios', 'Peteción de Herencia',
+    'Prescripción Exrinción de Acciones, Adquisición de Derechos y Otros',
+    'Procedimiento Cuantía Inferior Art. 749 C.P.C. Hacienda',
+    'Procedimiento Cuantía Superior Art. 749 C.P.C. Hacienda', 'Reforma de Testamento',
+    'Reivindicación', 'Reliquidación de Pensiones', 'Resolución de Contrato', 'Violencia de Genero'
+  ],
+  'Juicio Sumario': [
+    'Acción de Cerramiento', 'Acciones Contempladas en la Ley que Regula la Competencia',
+    'Acciones Revocatorias Concursales', 'Amparo de Aguas',
+    'Arrendamiento Bienes Inmuebles, Menor a 4 U.T.M', 'Arrendamiento de Bienes Muebles, CPC',
+    'Arrendamiento Devolución de Garantía', 'Cobro de Honorarios', 'Cobro de Rentas, Monitorio',
+    'Cobro Pequeño Derecho de Autor', 'Cobro Rentas Bienes Raíces Urbanos, Arrendamiento',
+    'Cobro Servicios Según D.L. 964 y Ley 18.101, Arrendamiento', 'Comodato', 'Comodato Precario',
+    'Depósito Necesario', 'Derecho Real, Conservación Medioambiental',
+    'Derechos Aprovechamiento, C. Aguas', 'Desahucio Contrato Bienes Raíces Urbanos, Arrendamiento',
+    'Impugnación del Acuerdo de Renegociación', 'Indemnización de Perjuicios, Arrendamiento',
+    'Indemnización Ley de Propiedad Intelectual', 'Indemnización Perjuicios Art. 169 Ley Tránsito',
+    'Indemnización Perjuicios Art. 9 Ley 18.287', 'Infracciones a la Ley de Pesca y Acuicultura',
+    'Jactancia', 'Otros Sumarios', 'Pesos, Cobro Según Art. 680 N° 7 CPC',
+    'Precario, inc. 2° Art. 2.195 C.C', 'Predios Rústicos, Arrendamiento',
+    'Procedimiento Arrendamiento, Reconveción de Pago', 'Procedimiento Art. 680 N° 8 C.P.C., Cuentas',
+    'Procedimiento de Demarcación', 'Reclamación Art. 341 Ley 20.720',
+    'Reclamación de Acto Administrativo', 'Reclamación de Multa Administrativa',
+    'Restitución por Expiración Tiempo Estipulado Arrendamiento',
+    'Restitución por Extinción Derecho Arrendador', 'Sanitario Código Reclamación de Multas Art. 171',
+    'Sentencia Penal Condenatoria', 'Servidumbre Legales', 'Servidumbre Naturales',
+    'Terminación Inmediata por no Pago Rentas o Reconvención, Arrandamiento',
+    'Transgresión a la Ética Profesional'
+  ],
+  'Juicio monitorio': ['Cobro de rentas', 'Comodato precario', 'Precario'],
+  'Gestión preparatoria': [
+    'Citación confesión de deuda', 'Citación Reconocimiento de Firma',
+    'Citación y Confesión de Deuda, Reconocimiento de Firma', 'Gestión de Avaluación',
+    'Gestión de Confrontación', 'Notificación de Desposeimiento', 'Notificación de Factura',
+    'Notificación de Protesto, Letra', 'Notificación de Protesto, Pagaré',
+    'Notificación protesto de cheque', 'Notificación Título Ejecutivo Herederos'
+  ],
+  'Juicio Ejecutivo': [
+    'Acción de Desposeimiento', 'Acción Según Ley de Bancos Hipotecario', 'Cobro de Cheque',
+    'Cobro de Facturas', 'Cobro de Gastos Comunes', 'Cobro de Letra de Cambio', 'Cobro de Mutuo',
+    'Cobro de Pagaré', 'Cobro Ejecutivo de Sentencia Judicial', 'Cumplimiento Obligación de Dar',
+    'Cumplimiento Obligación de Hacer', 'Cumplimiento Obligación de No Hacer',
+    'Ejecutivo según Ley CORVI', 'Otros Ejecutivos'
+  ],
+  'Voluntario': [
+    'Aprobación de escrituras de partición', 'Autorización Cambio de Nombre',
+    'Autorización inscripción fuera de plazo legal Defunción', 'Autorización para arrendar Bienes Raíces',
+    'Autorización para Cesión de Derechos', 'Autorización para contraer segundas nupcias',
+    'Autorización para Donar o insinuación', 'Autorización para enajenar Bienes Raíces',
+    'Autorización para gravar Bienes Raíces', 'Declaración de Herencia yacente', 'Extravío de Título',
+    'Inscripciones en Registro Vehiculos Motorizados', 'Inventario solemne', 'Muerte Presunta',
+    'Nombramiento de Curador', 'Otros Voluntarios', 'Pago por consignación (art. 1600 CC)',
+    'Posesión efectiva', 'Reclamo negativa del Conservador de Bienes Raíces',
+    'Reclamo negativa Registro Civil', 'Rectificación Partidas de nacimiento',
+    'Registro Civil autorización nombramiento curador especial'
+  ],
+  'Interdicción': ['Discipación', 'Interdicción por Demencia c/certificado COMPIN', 'Rehabilitación del disipador'],
+  'Interdictos posesorios': [
+    'Amparo, querella', 'Obra nueva, denuncia', 'Obra ruinosa, denuncia',
+    'Oposición a Reconstitución de Inscripción Ley 16665', 'Otros interdictos posesorios',
+    'Reestablecimiento, querella', 'Restitución, querella'
+  ],
+  'Recurso de protección': [
+    'Salud', 'Administrativo', 'Autotutela (Corte de suministros básicos)',
+    'Educación (Sanción Universidad)', 'Educación (Ley 21.128 aula segura)',
+    'Extranjería (Negativa a solicitud de refugio)', 'Extranjería (Omisión visa temporal)',
+    'Extranjería (Omisión permanencia definitiva)', 'Grupos intermedios (Suspensión y expulsión de bomberos)',
+    'Honra (Funa por RR.SS (redes sociales)', 'Honra (Publicación deuda con pagaré no protestado en Liq. Concursal)',
+    'Honra (Publicación deuda con pagaré no protestado)', 'Jurisdiccional (Reclamo de ilegalidad)',
+    'Jurisdiccional (Publicación de datos personales SAF)', 'Jurisdiccional (Resolución judicial)',
+    'Laboral (No renovación de contrata)', 'Laboral (Municipalidad descuenta licencias médicas rechazadas)',
+    'Laboral (Funcionarios en cargos de exclusiva confianza)', 'Laboral (Término anticipado de contrata)',
+    'Propiedad', 'Otras protecciones'
+  ],
+  'Recurso de amparo': ['Amparo Art. 21 Constitución Política', 'Amparo económico']
+};
+
+const ETAPA_JUICIO_ORDINARIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación', 'Réplica y Dúplica', 'Llamado a conciliación', 'Término probatorio', 'Observaciones a la prueba', 'Citación a oír sentencia', 'Sentencia', 'Cumplimiento Incidental', 'Recursos'];
+const ETAPA_JUICIO_SUMARIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación y conciliación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos'];
+const ETAPA_JUICIO_MONITORIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación y conciliación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos', 'Lanzamiento'];
+const ETAPA_GESTION_PREPARATORIA = ['En redacción', 'Presentación de la solicitud', 'Notificación', 'Audiencia o comparecencia', 'Resolución del Tribunal'];
+const ETAPA_JUICIO_EJECUTIVO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Excepciones', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Embargo', 'Bases de remate', 'Remate', 'Recursos'];
+const ETAPA_VOLUNTARIO_INTERDICCION = ['En redacción', 'Presentación de la solicitud', 'Audiencia', 'Informes / Oficios', 'Testigos', 'Citación a oír sentencia', 'Sentencia', 'Publicación', 'Inscripción'];
+const ETAPA_INTERDICTOS_POSESORIOS = ['En redacción', 'Presentación de la querella', 'Notificación', 'Audiencia', 'Contestación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos', 'Cumplimiento Incidental'];
+const ETAPA_RECURSO_PROTECCION_AMPARO = ['En redacción', 'Presentación recurso', 'Examen de admisibilidad', 'Recurso', 'Alegatos', 'Sentencia', 'Recurso'];
+
+const ETAPA_POR_PROCEDIMIENTO = {
+  'Juicio Ordinario': ETAPA_JUICIO_ORDINARIO,
+  'Juicio Sumario': ETAPA_JUICIO_SUMARIO,
+  'Juicio monitorio': ETAPA_JUICIO_MONITORIO,
+  'Gestión preparatoria': ETAPA_GESTION_PREPARATORIA,
+  'Juicio Ejecutivo': ETAPA_JUICIO_EJECUTIVO,
+  'Voluntario': ETAPA_VOLUNTARIO_INTERDICCION,
+  'Interdicción': ETAPA_VOLUNTARIO_INTERDICCION,
+  'Interdictos posesorios': ETAPA_INTERDICTOS_POSESORIOS,
+  'Recurso de protección': ETAPA_RECURSO_PROTECCION_AMPARO,
+  'Recurso de amparo': ETAPA_RECURSO_PROTECCION_AMPARO
+};
+function opcionesMateriaParaProcedimiento(procedimientoCanon) { return MATERIA_POR_PROCEDIMIENTO[procedimientoCanon] || null; }
+function opcionesEtapaParaProcedimiento(procedimientoCanon) { return ETAPA_POR_PROCEDIMIENTO[procedimientoCanon] || null; }
+
+const RIT_PREFIJOS_VALIDOS = ['C', 'V', 'E', 'A', 'F', 'I'];
+function ritYRolEfectivos(c) {
+  if (c.rit) return { rit: c.rit, rol: c.rol || '' };
+  const rol = c.rol || '';
+  const m = rol.match(/^([CVEAFI])-(.+)$/);
+  if (m && RIT_PREFIJOS_VALIDOS.includes(m[1])) return { rit: m[1], rol: m[2] };
+  return { rit: null, rol };
+}
+function rolCompletoTexto(c) {
+  const { rit, rol } = ritYRolEfectivos(c);
+  if (!rit || !rol) return null;
+  return `${rit}-${rol}`;
+}
+
+function tituloAutomatico(c) {
+  const componentes = [];
+  const rolTexto = rolCompletoTexto(c);
+  if (rolTexto) componentes.push(`ROL ${rolTexto}`);
+  if (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') componentes.push(c.tipoJuicio);
+  if (c.materia) componentes.push(c.materia);
+  const lista = intervinientesEfectivos(c);
+  const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
+  const primerDemandado = lista.find(i => i.tipoParte === 'Demandado/a');
+  const apDte = nombreCorto(primerDemandante ? primerDemandante.nombre : null);
+  const apDdo = nombreCorto(primerDemandado ? primerDemandado.nombre : null);
+  if (apDte) componentes.push(apDte);
+  if (apDdo) componentes.push(apDdo);
+  return componentes.filter(Boolean).join(' / ');
+}
+
+function emptyCausa() {
+  return {
+    id: null, folio: null, categoria: 'nueva', subcategoria: null, tipoJuicio: null,
+    materia: null, etapa: null, bajEstado: null, recurso: null, rolIngreso: null, competencia: null,
+    rit: null, rol: null, tipoTribunal: null, numeroTribunal: null, ciudadTribunal: null, tribunal: null,
+    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null,
+    intervinientes: [], demandanteNombre: null, demandadoNombre: null, parteRepresentada: null,
+    patrocinado: null, patrocinadoTipo: null, contraparteNombre: null, titulo: null
+  };
+}
+
+// ============================================================================
+// ANTECEDENTES — formulario único compartido por "Nueva causa" y la
+// pestaña Antecedentes de una causa existente. antecedentesFormHtml(c)
+// genera el HTML (idéntico en ambos contextos); wireAntecedentesForm
+// conecta los eventos y decide createCausa/updateCausa según corresponda.
+// ============================================================================
+const TUTOR_OPCIONES = ['Hugo Toledo', 'Cesar Romero'];
+const RECURSO_OPCIONES = ['Apelación', 'Apelación en subsidio casación', 'Casación en la forma', 'Casación en el fondo'];
+
+function tutorOptionsHtml(seleccionado) {
+  return `<option value="">Sin definir</option>` +
+    TUTOR_OPCIONES.map(t => `<option value="${escapeHtml(t)}" ${seleccionado === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+}
+
+function procedimientoOptionsHtml(seleccionado) {
+  return `<option value="">Sin definir</option>` +
+    ORDEN_TIPOS_JUICIO.map(p => `<option value="${escapeHtml(p)}" ${seleccionado === p ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
+}
+
+// Campo dependiente de Procedimiento: si `opciones` es null, se muestra un
+// input de texto libre (caso Extrajudicial, o cualquier procedimiento sin
+// catálogo). Si es un arreglo, se muestra un select con esas opciones — y,
+// si el valor ya guardado no está entre ellas (dato histórico anterior al
+// catálogo), se agrega como una opción adicional al final, ya
+// seleccionada, para no perder ni ocultar el dato.
+// Tipo de juicio es distinto de Materia/Etapa: cuando el procedimiento no
+// tiene catálogo propio, NO se vuelve texto libre — queda fijo en "No
+// Aplica", sin posibilidad de digitar nada.
+function campoTipoJuicioHtml(opciones, valorActual) {
+  if (!opciones) {
+    return `<input type="text" id="af-tipojuicio" value="No Aplica" disabled style="opacity:.6; cursor:not-allowed;">`;
+  }
+  const incluyeValorActual = valorActual && opciones.includes(valorActual);
+  let opts = `<option value="">Sin definir</option>`;
+  opts += opciones.map(o => `<option value="${escapeHtml(o)}" ${valorActual === o ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+  if (valorActual && !incluyeValorActual) {
+    opts += `<option value="${escapeHtml(valorActual)}" selected>${escapeHtml(valorActual)} (valor anterior, sin normalizar)</option>`;
+  }
+  return `<select id="af-tipojuicio">${opts}</select>`;
+}
+
+function campoDependienteHtml(id, opciones, valorActual) {
+  if (!opciones) {
+    return `<input type="text" id="${id}" value="${escapeHtml(valorActual || '')}">`;
+  }
+  const incluyeValorActual = valorActual && opciones.includes(valorActual);
+  let opts = `<option value="">Sin definir</option>`;
+  opts += opciones.map(o => `<option value="${escapeHtml(o)}" ${valorActual === o ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+  if (valorActual && !incluyeValorActual) {
+    opts += `<option value="${escapeHtml(valorActual)}" selected>${escapeHtml(valorActual)} (valor anterior, sin normalizar)</option>`;
+  }
+  return `<select id="${id}">${opts}</select>`;
+}
+
+function intervinienteRowHtml(item, idx) {
+  return `<div class="af-interviniente-row" data-idx="${idx}">
+    <label>Tipo de parte</label>
+    <select class="af-interv-tipo" data-idx="${idx}">
+      <option value="">Sin definir</option>
+      ${TIPOS_PARTE.map(t => `<option value="${t}" ${item.tipoParte === t ? 'selected' : ''}>${t}</option>`).join('')}
+    </select>
+    <label style="margin-top:6px;">Nombre</label>
+    <input type="text" class="af-interv-nombre" data-idx="${idx}" value="${escapeHtml(item.nombre || '')}" placeholder="Nombre completo">
+    <button class="btn small danger" type="button" data-action="af-quitar-interviniente" data-idx="${idx}" style="margin-top:6px; width:100%;">Quitar</button>
+  </div>`;
+}
+function intervinientesRowsHtml(lista) {
+  if (!lista.length) return `<div class="ficha-empty" style="color:var(--ink-faint);">Sin intervinientes registrados.</div>`;
+  return `<div style="display:grid; grid-template-columns:repeat(${lista.length}, minmax(150px, 1fr)); gap:10px; overflow-x:auto;">
+    ${lista.map((item, idx) => intervinienteRowHtml(item, idx)).join('')}
+  </div>`;
+}
+
+// Patrocinado ya no se digita: su nombre se deriva del interviniente con
+// el tipo de parte seleccionado (el primero por orden, si hubiera más de
+// uno del mismo tipo).
+function nombrePatrocinadoDesdeIntervinientes(tipoParte, lista) {
+  if (!tipoParte) return null;
+  const match = lista.find(i => i.tipoParte === tipoParte);
+  return match ? match.nombre : null;
+}
+// parte_representada (columna antigua) solo admite 'Demandante'/'Demandado'
+// por su CHECK ya existente — nunca se le escribe ninguno de los otros 5
+// tipos nuevos, para no violar esa restricción. Traducción en ambos
+// sentidos solo para los 2 casos compatibles.
+function parteRepresentadaLegacyDesdeTipo(tipoParte) {
+  if (tipoParte === 'Demandante') return 'Demandante';
+  if (tipoParte === 'Demandado/a') return 'Demandado';
+  return null;
+}
+function tipoPatrocinadoDesdeLegacy(parteRepresentada) {
+  if (parteRepresentada === 'Demandante') return 'Demandante';
+  if (parteRepresentada === 'Demandado') return 'Demandado/a';
+  return '';
+}
+// Fuente principal: patrocinado_tipo (admite los 7 tipos). Si una causa
+// histórica no lo tiene, cae a parte_representada solo para los 2 tipos
+// que esa columna antigua siempre pudo representar.
+function tipoPatrocinadoEfectivo(c) {
+  if (c.patrocinadoTipo) return c.patrocinadoTipo;
+  return tipoPatrocinadoDesdeLegacy(c.parteRepresentada);
+}
+
+function antecedentesFormHtml(c) {
+  const procedimientoCanon = procedimientoCanonico(c.subcategoria) || (c.subcategoria || null);
+  const opcionesTipoJuicio = opcionesTipoJuicioParaProcedimiento(procedimientoCanon);
+  const opcionesMateria = opcionesMateriaParaProcedimiento(procedimientoCanon);
+  const opcionesEtapa = opcionesEtapaParaProcedimiento(procedimientoCanon);
+  const { rit, rol } = ritYRolEfectivos(c);
+  const lista = intervinientesEfectivos(c);
+
+  return `
+  <div class="modal-form" id="af-form">
+    <div class="form-grid4">
+      <div><label>Código SAJ</label><input type="text" inputmode="numeric" id="af-saj" class="saj-input" value="${escapeHtml(c.folio || '')}" placeholder="Solo números"></div>
+      <div>
+        <label>Carpeta</label>
+        <select id="af-categoria">
+          <option value="tramitacion" ${c.categoria === 'tramitacion' ? 'selected' : ''}>En tramitación</option>
+          <option value="nueva" ${c.categoria === 'nueva' ? 'selected' : ''}>Nueva (redacción)</option>
+          <option value="terminada" ${c.categoria === 'terminada' ? 'selected' : ''}>Terminada</option>
+        </select>
+      </div>
+      <div><label>Fecha ingreso causa</label><input type="date" id="af-fechaingreso" value="${escapeHtml(c.fechaIngreso || '')}"></div>
+      <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
+    </div>
+
+    <div class="form-grid4">
+      <div><label>Procedimiento</label><select id="af-procedimiento">${procedimientoOptionsHtml(procedimientoCanon)}</select></div>
+      <div id="af-tipojuicio-wrap"><label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
+      <div id="af-materia-wrap"><label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
+      <div><label>BAJ</label><select id="af-baj"><option value="">Sin definir</option>${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    </div>
+
+    <div class="subhead" style="margin-top:10px;">Tribunal</div>
+    <div class="form-grid4">
+      <div><label>RIT</label><select id="af-rit"><option value="">Sin definir</option>${RIT_PREFIJOS_VALIDOS.map(p => `<option value="${p}" ${rit === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div><label>ROL</label><input type="text" id="af-rol" value="${escapeHtml(rol || '')}" placeholder="Ej: 15250-2026"></div>
+      <div><label>Tribunal</label><select id="af-tribunal-civil">${opcionesTribunalCivilHtml(numeroTribunalCivilPrecargado(c))}</select></div>
+      <div id="af-etapa-wrap"><label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapa, c.etapa)}</div>
+    </div>
+    <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="af-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
+
+    <div class="subhead" style="margin-top:10px; display:flex; align-items:center; justify-content:space-between;">
+      <span>Intervinientes</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="margin:0; font-size:12px;">Cantidad</label>
+        <input type="number" id="af-cant-intervinientes" min="0" value="${lista.length}" style="width:64px;">
+      </div>
+    </div>
+    <div id="af-intervinientes-wrap">${intervinientesRowsHtml(lista)}</div>
+
+    <div class="subhead" style="margin-top:10px;">Patrocinado</div>
+    <div class="form-grid2">
+      <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div><label>Nombre (derivado de Intervinientes)</label><div id="af-patrocinado-nombre-preview" style="padding:8px 0; color:var(--ink-dim);">${escapeHtml(nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoEfectivo(c), lista) || 'Sin definir')}</div></div>
+    </div>
+    <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="af-caratulado-preview">Caratulado: <strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
+    <div style="font-size:11px; color:var(--ink-faint);" id="af-titulo-preview">Título generado: <strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
+
+    <div class="subhead" style="margin-top:10px;">Recurso</div>
+    <div class="form-grid4">
+      <div><label>Recurso</label><select id="af-recurso"><option value="">Sin definir</option>${RECURSO_OPCIONES.map(r => `<option value="${r}" ${c.recurso === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+      <div><label>ROL ingreso Corte</label><input type="text" id="af-rolingreso" value="${escapeHtml(c.rolIngreso || '')}" placeholder="Ej: 9315-2025"></div>
+      <div><label>Competencia</label><select id="af-competencia"><option value="">Sin definir</option><option value="Corte de Apelaciones" ${c.competencia === 'Corte de Apelaciones' ? 'selected' : ''}>Corte de Apelaciones</option><option value="Corte Suprema" ${c.competencia === 'Corte Suprema' ? 'selected' : ''}>Corte Suprema</option></select></div>
+      <div></div>
+    </div>
+
+    <div style="display:flex; gap:8px; margin-top:16px;">
+      <button class="btn primary" id="af-save" type="button">Guardar</button>
+      ${c.id ? `<button class="btn danger" id="af-delete" type="button" style="margin-left:auto;">Eliminar esta causa del panel</button>` : ''}
+    </div>
+  </div>`;
+}
+
+// Arma un objeto tipo-causa a partir del estado actual del formulario (sin
+// guardar nada) — usado para recalcular las vistas previas de Tribunal/
+// Caratulado/Título en vivo, y como base del patch final al guardar.
+function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
+  const procedimiento = panel.querySelector('#af-procedimiento').value || null;
+  const ritSel = panel.querySelector('#af-rit').value || null;
+  const rolInput = panel.querySelector('#af-rol').value.trim() || null;
+  const numeroCivil = panel.querySelector('#af-tribunal-civil').value || null;
+  const tipoPatrocinadoSel = panel.querySelector('#af-patrocinado-tipo').value || null;
+  const patrocinadoNombre = nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoSel, estadoIntervinientes);
+  const parteRepresentada = parteRepresentadaLegacyDesdeTipo(tipoPatrocinadoSel);
+  const tipoJuicioEl = panel.querySelector('#af-tipojuicio');
+  const materiaEl = panel.querySelector('#af-materia');
+  const etapaEl = panel.querySelector('#af-etapa');
+  return {
+    ...c,
+    folio: panel.querySelector('#af-saj').value.trim() || null,
+    categoria: panel.querySelector('#af-categoria').value,
+    fechaIngreso: panel.querySelector('#af-fechaingreso').value || null,
+    tutor: panel.querySelector('#af-tutor').value || null,
+    subcategoria: procedimiento,
+    tipoJuicio: tipoJuicioEl ? (tipoJuicioEl.value || null) : null,
+    materia: materiaEl ? (materiaEl.value.trim ? materiaEl.value.trim() || null : materiaEl.value || null) : null,
+    bajEstado: panel.querySelector('#af-baj').value || null,
+    rit: ritSel, rol: rolInput,
+    tipoTribunal: numeroCivil ? 'Juzgado Civil' : null,
+    numeroTribunal: numeroCivil || null,
+    ciudadTribunal: numeroCivil ? 'Santiago' : null,
+    etapa: etapaEl ? (etapaEl.value.trim ? etapaEl.value.trim() || null : etapaEl.value || null) : null,
+    intervinientes: estadoIntervinientes.filter(i => i.nombre && i.tipoParte),
+    patrocinado: patrocinadoNombre,
+    patrocinadoTipo: tipoPatrocinadoSel || null,
+    parteRepresentada,
+    recurso: panel.querySelector('#af-recurso').value || null,
+    rolIngreso: panel.querySelector('#af-rolingreso').value.trim() || null,
+    competencia: panel.querySelector('#af-competencia').value || null
+  };
+}
+
+function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
+  const form = panel.querySelector('#af-form');
+  if (!form) return;
+
+  // Estado en memoria de intervinientes — parte de intervinientesEfectivos(c)
+  // (tabla nueva, o el respaldo demandante/demandado si aún no existe).
+  let estadoIntervinientes = intervinientesEfectivos(c).map(i => ({ id: i.id, tipoParte: i.tipoParte, nombre: i.nombre }));
+
+  function refreshPreviews() {
+    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
+    const tribunalPreview = form.querySelector('#af-tribunal-preview');
+    if (tribunalPreview) tribunalPreview.innerHTML = `Se mostrará como: <strong>${escapeHtml(tribunalTexto(snap) || 'Sin definir')}</strong>`;
+    const caratuladoPreview = form.querySelector('#af-caratulado-preview');
+    if (caratuladoPreview) caratuladoPreview.innerHTML = `Caratulado: <strong>${escapeHtml(caratuladoTexto(snap) || 'Sin definir')}</strong>`;
+    const tituloPreview = form.querySelector('#af-titulo-preview');
+    if (tituloPreview) tituloPreview.innerHTML = `Título generado: <strong>${escapeHtml(tituloAutomatico(snap) || 'Sin definir')}</strong>`;
+    const patrocinadoPreview = form.querySelector('#af-patrocinado-nombre-preview');
+    if (patrocinadoPreview) patrocinadoPreview.textContent = snap.patrocinado || 'Sin definir';
+  }
+
+  function renderIntervinientes() {
+    form.querySelector('#af-intervinientes-wrap').innerHTML = intervinientesRowsHtml(estadoIntervinientes);
+    form.querySelector('#af-cant-intervinientes').value = estadoIntervinientes.length;
+    refreshPreviews();
+  }
+
+  // Procedimiento -> recalcula Tipo de juicio / Materia / Etapa Procesal
+  // dependientes (se reinician al cambiar de procedimiento, ya que un
+  // valor de otro procedimiento no tiene sentido en el nuevo catálogo).
+  form.querySelector('#af-procedimiento').addEventListener('change', () => {
+    const canon = form.querySelector('#af-procedimiento').value || null;
+    form.querySelector('#af-tipojuicio-wrap').innerHTML = `<label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicioParaProcedimiento(canon), null)}`;
+    form.querySelector('#af-materia-wrap').innerHTML = `<label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateriaParaProcedimiento(canon), null)}`;
+    form.querySelector('#af-etapa-wrap').innerHTML = `<label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapaParaProcedimiento(canon), null)}`;
+    wireCamposDependientesInput();
+    refreshPreviews();
+  });
+
+  function wireCamposDependientesInput() {
+    ['#af-tipojuicio', '#af-materia', '#af-etapa'].forEach(sel => {
+      const el = form.querySelector(sel);
+      if (el) el.addEventListener('input', refreshPreviews);
+    });
+  }
+  wireCamposDependientesInput();
+
+  // Tribunal / RIT / ROL — todo en vivo hacia la vista previa.
+  ['#af-rit', '#af-rol', '#af-tribunal-civil'].forEach(sel => {
+    const el = form.querySelector(sel);
+    if (el) el.addEventListener('input', refreshPreviews);
+  });
+
+  // Cantidad de intervinientes: agrega/quita filas al final, conservando
+  // los datos ya ingresados en las filas que se mantienen.
+  form.querySelector('#af-cant-intervinientes').addEventListener('input', (e) => {
+    const nueva = Math.max(0, parseInt(e.target.value, 10) || 0);
+    while (estadoIntervinientes.length < nueva) estadoIntervinientes.push({ id: null, tipoParte: '', nombre: '' });
+    while (estadoIntervinientes.length > nueva) estadoIntervinientes.pop();
+    renderIntervinientes();
+  });
+
+  // Delegación de eventos sobre el contenedor de intervinientes — las
+  // filas se reconstruyen dinámicamente, así que se conecta una sola vez
+  // sobre el contenedor persistente.
+  const intervWrap = form.querySelector('#af-intervinientes-wrap');
+  intervWrap.addEventListener('input', (e) => {
+    const idx = parseInt(e.target.dataset.idx, 10);
+    if (Number.isNaN(idx)) return;
+    if (e.target.classList.contains('af-interv-tipo')) estadoIntervinientes[idx].tipoParte = e.target.value;
+    if (e.target.classList.contains('af-interv-nombre')) estadoIntervinientes[idx].nombre = e.target.value.trim();
+    refreshPreviews();
+  });
+  intervWrap.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action="af-quitar-interviniente"]');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    estadoIntervinientes.splice(idx, 1);
+    renderIntervinientes();
+  });
+
+  // Patrocinado (el nombre se deriva, no se digita — se refresca junto con
+  // el resto de las vistas previas al cambiar el tipo o los intervinientes)
+  const patrocinadoTipoSel = form.querySelector('#af-patrocinado-tipo');
+  if (patrocinadoTipoSel) patrocinadoTipoSel.addEventListener('input', refreshPreviews);
+
+  form.querySelector('#af-save').addEventListener('click', async () => {
+    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
+    const patch = {
+      folio: snap.folio, categoria: snap.categoria, fechaIngreso: snap.fechaIngreso, tutor: snap.tutor,
+      subcategoria: snap.subcategoria, tipoJuicio: snap.tipoJuicio, materia: snap.materia, bajEstado: snap.bajEstado,
+      rit: snap.rit, rol: snap.rol, tipoTribunal: snap.tipoTribunal, numeroTribunal: snap.numeroTribunal, ciudadTribunal: snap.ciudadTribunal,
+      etapa: snap.etapa, patrocinado: snap.patrocinado, patrocinadoTipo: snap.patrocinadoTipo, parteRepresentada: snap.parteRepresentada,
+      recurso: snap.recurso, rolIngreso: snap.rolIngreso, competencia: snap.competencia,
+      titulo: tituloAutomatico(snap) || null
+    };
+    const intervinientesValidos = estadoIntervinientes.filter(i => i.nombre && i.tipoParte);
+    try {
+      if (esNuevaCausa) {
+        const nueva = await api.createCausa(CURRENT_USER.id, patch);
+        nueva.intervinientes = [];
+        for (let idx = 0; idx < intervinientesValidos.length; idx++) {
+          const it = intervinientesValidos[idx];
+          const creado = await api.createInterviniente(CURRENT_USER.id, nueva.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+          nueva.intervinientes.push(creado);
+        }
+        CAUSAS.unshift(nueva);
+        toast('Causa agregada');
+        closeNewModal();
+        render();
+      } else {
+        await api.updateCausa(c.id, patch);
+        Object.assign(c, patch);
+        const originales = intervinientesEfectivos(c).filter(i => i.id);
+        const nuevaLista = [];
+        for (let idx = 0; idx < intervinientesValidos.length; idx++) {
+          const it = intervinientesValidos[idx];
+          if (it.id) {
+            await api.updateInterviniente(it.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+            nuevaLista.push({ id: it.id, tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+          } else {
+            const creado = await api.createInterviniente(CURRENT_USER.id, c.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+            nuevaLista.push({ id: creado.id, tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+          }
+        }
+        const idsFinales = new Set(nuevaLista.map(i => i.id));
+        for (const original of originales) {
+          if (!idsFinales.has(original.id)) await api.deleteInterviniente(original.id);
+        }
+        c.intervinientes = nuevaLista;
+        toast('Cambios guardados');
+        render();
+        closeOverlay();
+      }
+    } catch (e) { toast('No se pudo guardar: ' + e.message); }
+  });
+
+  const delBtn = form.querySelector('#af-delete');
+  if (delBtn) delBtn.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar esta causa del panel? Esta acción no se puede deshacer.')) return;
+    try {
+      await api.deleteCausa(c.id);
+      CAUSAS = CAUSAS.filter(x => x.id !== c.id);
+      toast('Causa eliminada');
+      render();
+      closeOverlay();
+    } catch (e) { toast('No se pudo eliminar: ' + e.message); }
+  });
+}
+
+const TIPOS_PARTE = ['Demandante', 'Demandado/a', 'Solicitante', 'Solicitado', 'Requirente', 'Requerido', 'Tercero'];
+
+function intervinientesEfectivos(c) {
+  const reales = (c.intervinientes || []).slice().sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+  if (reales.length) return reales;
+  const respaldo = [];
+  if (c.demandanteNombre) respaldo.push({ id: null, tipoParte: 'Demandante', nombre: c.demandanteNombre, orden: 0 });
+  if (c.demandadoNombre) respaldo.push({ id: null, tipoParte: 'Demandado/a', nombre: c.demandadoNombre, orden: 1 });
+  return respaldo;
 }
 
 // Nombre completo de la parte que efectivamente representamos, derivado de
@@ -5972,6 +6518,12 @@ function detailHtml(c) {
     <div id="instr-form-wrap" class="agenda-form-wrap" hidden></div>
     <div id="instr-list-wrap">${instruccionesListHtml(c)}</div>
 
+    <div class="subhead" style="margin-top:26px; display:flex; align-items:center; justify-content:space-between;">
+      <span>Última revisión PJUD</span>
+      <button class="btn small" id="btn-actualizar-revision" type="button">Actualizar revisión</button>
+    </div>
+    <div style="font-size:12.5px; color:var(--ink-dim);" id="ultima-revision-display">${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : 'Aún no registrada.'}</div>
+
     <div class="subhead" style="margin-top:26px;">Cronología jurídica</div>
     <div id="tl-cronologia">${cronologiaHtml(c)}</div>
     <div class="add-row">
@@ -6011,7 +6563,6 @@ function detailHtml(c) {
 
   <div class="dtab-content" data-tab="contacto">
     <div class="contact-grid">
-      <div class="field"><div class="k">Patrocinado</div><input type="text" class="ct-input" id="ct-patrocinado" value="${escapeHtml(c.patrocinado || '')}"></div>
       <div class="field"><div class="k">RUT</div><input type="text" class="ct-input" id="ct-rut" value="${escapeHtml(c.rut || '')}"></div>
       <div class="field"><div class="k">Correo</div><input type="text" class="ct-input" id="ct-correo" value="${escapeHtml(c.correo || '')}"></div>
       <div class="field"><div class="k">Correo alternativo</div><input type="text" class="ct-input" id="ct-correoAlt" value="${escapeHtml(c.correoAlt || '')}"></div>
@@ -6019,8 +6570,6 @@ function detailHtml(c) {
       <div class="field"><div class="k">Clave única</div><input type="text" class="ct-input" id="ct-claveUnica" value="${escapeHtml(c.claveUnica || '')}"></div>
       <div class="field"><div class="k">Teléfono</div><input type="text" class="ct-input" id="ct-telefono" value="${escapeHtml(c.telefono || '')}"></div>
       <div class="field"><div class="k">Nota</div><input type="text" class="ct-input" id="ct-nota" value="${escapeHtml(c.nota || '')}"></div>
-      <div class="field"><div class="k">Tutor</div><input type="text" class="ct-input" id="ct-tutor" value="${escapeHtml(c.tutor || '')}"></div>
-      <div class="field"><div class="k">Fecha ingreso causa</div><input type="text" class="ct-input" id="ct-fechaIngreso" value="${escapeHtml(c.fechaIngreso || '')}" placeholder="AAAA-MM-DD"></div>
     </div>
     <div style="margin-top:14px;">
       <button class="btn small primary" id="save-contacto">Guardar contacto</button>
@@ -6036,150 +6585,7 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content active" data-tab="editar">
-    <div class="modal-form">
-      <div class="form-grid4">
-        <div>
-          <label>Código SAJ</label>
-          <input type="text" inputmode="numeric" id="an-saj" class="saj-input" value="${escapeHtml(c.folio || '')}" placeholder="Solo números">
-        </div>
-        <div>
-          <label>Etapa</label>
-          <input type="text" id="an-etapa" value="${escapeHtml(c.etapa || '')}">
-        </div>
-        <div>
-          <label>Materia</label>
-          <input type="text" id="an-materia" value="${escapeHtml(c.materia || '')}">
-        </div>
-        <div>
-          <label>BAJ</label>
-          <select id="an-baj">
-            <option value="">Sin definir</option>
-            ${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="form-grid2">
-        <div>
-          <label>Recurso</label>
-          <input type="text" id="an-recurso" value="${escapeHtml(c.recurso || '')}" placeholder="Ej: Apelación">
-        </div>
-        <div>
-          <label>ROL ingreso Corte</label>
-          <input type="text" id="an-rolingreso" value="${escapeHtml(c.rolIngreso || '')}" placeholder="Ej: 9315-2025">
-        </div>
-      </div>
-
-      <div class="form-grid2">
-        <div>
-          <label>Título / referencia de la causa</label>
-          <input type="text" id="ed-titulo" value="${escapeHtml(c.titulo)}" placeholder="Ej: Pérez / J.O. Menor Cuantía / Indemnización">
-        </div>
-        <div>
-          <label>ROL</label>
-          <input type="text" id="ed-rol" value="${escapeHtml(c.rol || '')}" placeholder="Ej: C-10560-2026">
-        </div>
-      </div>
-      <div class="form-grid2">
-        <div>
-          <label>Carpeta</label>
-          <select id="ed-categoria">
-            <option value="tramitacion">En tramitación</option>
-            <option value="nueva">Nueva (redacción)</option>
-            <option value="terminada">Terminada</option>
-          </select>
-        </div>
-        <div>
-          <label>Tipo de juicio</label>
-          <select id="ed-subcategoria">
-            <option value="">Sin definir</option>
-            <option value="Juicio Ejecutivo">Juicio Ejecutivo</option>
-            <option value="Juicio Ordinario">Juicio Ordinario</option>
-            <option value="Juicio Sumario">Juicio Sumario</option>
-            <option value="Juicio monitorio">Juicio monitorio</option>
-            <option value="Recurso de protección">Recurso de protección</option>
-            <option value="Recurso de amparo">Recurso de amparo</option>
-            <option value="Voluntario">Voluntario</option>
-            <option value="Extrajudicial">Extrajudicial</option>
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <label>Prioridad de la causa</label>
-        <select id="ed-prioridad">
-          <option value="">Sin definir</option>
-          <option value="Urgente">Urgente</option>
-          <option value="Semi urgente">Semi urgente</option>
-          <option value="No prioritario">No prioritaria</option>
-        </select>
-      </div>
-      <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;">Se define manualmente. Clasifica visualmente tu cartera de causas; no depende de ninguna instrucción ni fecha límite.</div>
-
-      <div class="subhead" style="margin-top:10px;">Tribunal</div>
-      <div class="form-grid2">
-        <div>
-          <label>Tipo de tribunal</label>
-          <select id="ed-tipotribunal">
-            <option value="">Sin definir</option>
-            <option value="Juzgado Civil">Juzgado Civil</option>
-            <option value="Juzgado de Familia">Juzgado de Familia</option>
-            <option value="Juzgado de Letras del Trabajo">Juzgado de Letras del Trabajo</option>
-            <option value="Juzgado de Cobranza Laboral y Previsional">Juzgado de Cobranza Laboral y Previsional</option>
-            <option value="Tribunal Tributario y Aduanero">Tribunal Tributario y Aduanero</option>
-            <option value="Juzgado de Policía Local">Juzgado de Policía Local</option>
-            <option value="Corte de Apelaciones">Corte de Apelaciones</option>
-            <option value="Corte Suprema">Corte Suprema</option>
-            <option value="Otro">Otro</option>
-          </select>
-        </div>
-        <div id="ed-numerotribunal-wrap" ${c.tipoTribunal === 'Juzgado Civil' ? 'hidden' : ''}>
-          <label>Número (si corresponde)</label>
-          <input type="text" id="ed-numerotribunal" value="${escapeHtml(c.numeroTribunal || '')}" placeholder="Ej: 2, 19, 28">
-        </div>
-        <div id="ed-tribunal-civil-wrap" ${c.tipoTribunal === 'Juzgado Civil' ? '' : 'hidden'}>
-          <label>Tribunal</label>
-          <select id="ed-tribunal-civil">${opcionesTribunalCivilHtml(numeroTribunalCivilPrecargado(c))}</select>
-        </div>
-      </div>
-      <div id="ed-ciudadtribunal-wrap" ${c.tipoTribunal === 'Juzgado Civil' ? 'hidden' : ''}>
-        <label>Ciudad o jurisdicción</label>
-        <input type="text" id="ed-ciudadtribunal" value="${escapeHtml(c.ciudadTribunal || '')}" placeholder="Ej: Santiago, San Miguel, Puente Alto">
-      </div>
-      <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="ed-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
-      ${(!c.tipoTribunal && c.tribunal) ? `<div style="font-size:11px; color:var(--ink-faint);">Tribunal registrado anteriormente (texto libre, aún sin normalizar): ${escapeHtml(c.tribunal)}</div>` : ''}
-
-      <div class="subhead" style="margin-top:10px;">Caratulado procesal</div>
-      ${!tieneRolProcesalDefinido(c) && (c.patrocinado || c.contraparteNombre) ? `<div style="font-size:11.5px; color:var(--semi); background:var(--semi-bg); border-radius:5px; padding:8px 10px; margin-bottom:4px;">Pendiente definir posición procesal de las partes.</div>` : ''}
-      <div class="form-grid2">
-        <div>
-          <label>Demandante</label>
-          <input type="text" id="ed-demandante" value="${escapeHtml(c.demandanteNombre || '')}" placeholder="Nombre completo">
-        </div>
-        <div>
-          <label>Demandado</label>
-          <input type="text" id="ed-demandado" value="${escapeHtml(c.demandadoNombre || '')}" placeholder="Nombre completo">
-        </div>
-      </div>
-      <div>
-        <label>Parte que represento</label>
-        <select id="ed-parterepresentada">
-          <option value="">Sin definir</option>
-          <option value="Demandante">Demandante</option>
-          <option value="Demandado">Demandado</option>
-        </select>
-      </div>
-      <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="ed-caratulado-preview">Caratulado: <strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
-      ${c.contraparteNombre && !c.demandanteNombre && !c.demandadoNombre ? `<div style="font-size:11px; color:var(--ink-faint);">Contraparte registrada anteriormente (respaldo, sin posición procesal): ${escapeHtml(c.contraparteNombre)}</div>` : ''}
-
-      <div class="subhead" style="margin-top:10px; display:flex; align-items:center; justify-content:space-between;">
-        <span>Última revisión PJUD</span>
-        <button class="btn small" id="btn-actualizar-revision" type="button">Actualizar revisión</button>
-      </div>
-      <div style="font-size:12.5px; color:var(--ink-dim);" id="ultima-revision-display">${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : 'Aún no registrada.'}</div>
-
-      <button class="btn primary" id="save-edit">Guardar cambios</button>
-      <button class="btn danger" id="delete-causa">Eliminar esta causa del panel</button>
-    </div>
+    ${antecedentesFormHtml(c)}
   </div>
 
   <div class="dtab-content" data-tab="encargo-receptor">
@@ -6424,16 +6830,13 @@ function wireDetailEvents(c) {
   const saveContacto = panel.querySelector('#save-contacto');
   if (saveContacto) saveContacto.addEventListener('click', async () => {
     const patch = {
-      patrocinado: panel.querySelector('#ct-patrocinado').value.trim() || null,
       rut: panel.querySelector('#ct-rut').value.trim() || null,
       correo: panel.querySelector('#ct-correo').value.trim() || null,
       correoAlt: panel.querySelector('#ct-correoAlt').value.trim() || null,
       claveWeb: panel.querySelector('#ct-claveWeb').value.trim() || null,
       claveUnica: panel.querySelector('#ct-claveUnica').value.trim() || null,
       telefono: panel.querySelector('#ct-telefono').value.trim() || null,
-      nota: panel.querySelector('#ct-nota').value.trim() || null,
-      tutor: panel.querySelector('#ct-tutor').value.trim() || null,
-      fechaIngreso: panel.querySelector('#ct-fechaIngreso').value.trim() || null
+      nota: panel.querySelector('#ct-nota').value.trim() || null
     };
     try { await api.updateCausa(c.id, patch); Object.assign(c, patch); toast('Contacto guardado'); render(); }
     catch (e) { toast('No se pudo guardar: ' + e.message); }
@@ -6462,44 +6865,8 @@ function wireDetailEvents(c) {
     } catch (e) { toast('No se pudo actualizar: ' + e.message); }
   });
 
-  const saveEdit = panel.querySelector('#save-edit');
-  if (saveEdit) saveEdit.addEventListener('click', async () => {
-    const demandanteNombre = panel.querySelector('#ed-demandante').value.trim() || null;
-    const demandadoNombre = panel.querySelector('#ed-demandado').value.trim() || null;
-    const parteRepresentada = panel.querySelector('#ed-parterepresentada').value || null;
-    const patch = {
-      folio: panel.querySelector('#an-saj').value.trim() || null,
-      etapa: panel.querySelector('#an-etapa').value.trim() || null,
-      materia: panel.querySelector('#an-materia').value.trim() || null,
-      bajEstado: panel.querySelector('#an-baj').value || null,
-      recurso: panel.querySelector('#an-recurso').value.trim() || null,
-      rolIngreso: panel.querySelector('#an-rolingreso').value.trim() || null,
-      titulo: panel.querySelector('#ed-titulo').value.trim() || c.titulo,
-      rol: panel.querySelector('#ed-rol').value.trim() || null,
-      categoria: panel.querySelector('#ed-categoria').value,
-      subcategoria: panel.querySelector('#ed-subcategoria').value || null,
-      prioridad: panel.querySelector('#ed-prioridad').value || null,
-      tipoTribunal: panel.querySelector('#ed-tipotribunal').value || null,
-      numeroTribunal: panel.querySelector('#ed-tipotribunal').value === 'Juzgado Civil'
-        ? (panel.querySelector('#ed-tribunal-civil').value || null)
-        : (panel.querySelector('#ed-numerotribunal').value.trim() || null),
-      ciudadTribunal: panel.querySelector('#ed-tipotribunal').value === 'Juzgado Civil'
-        ? (panel.querySelector('#ed-tribunal-civil').value ? 'Santiago' : null)
-        : (panel.querySelector('#ed-ciudadtribunal').value.trim() || null),
-      demandanteNombre, demandadoNombre, parteRepresentada
-    };
-    // Sincroniza "patrocinado" automáticamente según la parte representada,
-    // sin duplicar el dato manualmente (se sigue mostrando en Contacto).
-    if (parteRepresentada === 'Demandante' && demandanteNombre) patch.patrocinado = demandanteNombre;
-    else if (parteRepresentada === 'Demandado' && demandadoNombre) patch.patrocinado = demandadoNombre;
-    try {
-      await api.updateCausa(c.id, patch);
-      Object.assign(c, patch);
-      toast('Cambios guardados');
-      render();
-      closeOverlay();
-    } catch (e) { toast('No se pudo guardar: ' + e.message); }
-  });
+  // ---------- Antecedentes (formulario compartido con Nueva causa) ----------
+  wireAntecedentesForm(panel, c, { esNuevaCausa: false });
 
   // ---------- Exportar ficha ----------
   const btnPrint = panel.querySelector('#btn-print-ficha');
@@ -6521,18 +6888,6 @@ function wireDetailEvents(c) {
       btnPdf.disabled = false;
       btnPdf.textContent = originalText;
     }
-  });
-
-  const delBtn = panel.querySelector('#delete-causa');
-  if (delBtn) delBtn.addEventListener('click', async () => {
-    if (!confirm('¿Eliminar esta causa del panel? Esta acción no se puede deshacer.')) return;
-    try {
-      await api.deleteCausa(c.id);
-      CAUSAS = CAUSAS.filter(x => x.id !== c.id);
-      toast('Causa eliminada');
-      render();
-      closeOverlay();
-    } catch (e) { toast('No se pudo eliminar: ' + e.message); }
   });
 }
 
@@ -7320,37 +7675,16 @@ function openRecordDetail(id) {
 // ============================================================================
 // NUEVA CAUSA
 // ============================================================================
-function openNewModal() { document.getElementById('overlay-new').classList.add('show'); }
+function openNewModal() {
+  const wrap = document.getElementById('nf-antecedentes-wrap');
+  const causaVacia = emptyCausa();
+  wrap.innerHTML = antecedentesFormHtml(causaVacia);
+  wireAntecedentesForm(wrap, causaVacia, { esNuevaCausa: true });
+  document.getElementById('overlay-new').classList.add('show');
+}
 function closeNewModal() {
   document.getElementById('overlay-new').classList.remove('show');
-  ['nf-titulo', 'nf-rol', 'nf-tribunal', 'nf-patrocinado', 'nf-rut', 'nf-clave', 'nf-gestion'].forEach(id => { document.getElementById(id).value = ''; });
-}
-async function saveNewCausa() {
-  const titulo = document.getElementById('nf-titulo').value.trim();
-  if (!titulo) { toast('Ingresa un título para la causa'); return; }
-  const patch = {
-    titulo,
-    categoria: document.getElementById('nf-categoria').value,
-    subcategoria: document.getElementById('nf-subcategoria').value || null,
-    rol: document.getElementById('nf-rol').value.trim() || null,
-    tribunal: document.getElementById('nf-tribunal').value.trim() || null,
-    patrocinado: document.getElementById('nf-patrocinado').value.trim() || null,
-    rut: document.getElementById('nf-rut').value.trim() || null,
-    clave: document.getElementById('nf-clave').value.trim() || null,
-    fechaIngreso: new Date().toISOString().slice(0, 10)
-  };
-  try {
-    const nueva = await api.createCausa(CURRENT_USER.id, patch);
-    const gestion = document.getElementById('nf-gestion').value.trim();
-    if (gestion) {
-      const g = await api.addGestionPendiente(CURRENT_USER.id, nueva.id, gestion, null);
-      nueva.gestionesPendientes.push({ id: g.id, descripcion: g.descripcion, driveLink: g.drive_link, createdAt: g.created_at });
-    }
-    CAUSAS.unshift(nueva);
-    toast('Causa agregada');
-    closeNewModal();
-    render();
-  } catch (e) { toast('No se pudo crear la causa: ' + e.message); }
+  document.getElementById('nf-antecedentes-wrap').innerHTML = '';
 }
 
 // ============================================================================
@@ -7372,16 +7706,6 @@ function wireMobileMenu() {
 // WIRING GENERAL
 // ============================================================================
 function wireTopLevelUI() {
-  document.querySelectorAll('.chip[data-prior]').forEach(chip => {
-    chip.addEventListener('click', () => {
-      statFilter = null;
-      const p = chip.dataset.prior;
-      if (activePriors.has(p)) { activePriors.delete(p); chip.classList.remove('active'); }
-      else { activePriors.add(p); chip.classList.add('active'); }
-      render();
-    });
-  });
-
   document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value; render(); });
 
   document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
@@ -7396,7 +7720,6 @@ function wireTopLevelUI() {
       }
       statFilter = (statFilter === f) ? null : f;
       currentCat = 'todas'; currentSubcat = null;
-      activePriors.clear();
       render();
     });
   });
@@ -7406,7 +7729,6 @@ function wireTopLevelUI() {
 
   document.getElementById('btn-new').addEventListener('click', openNewModal);
   document.getElementById('close-new').addEventListener('click', closeNewModal);
-  document.getElementById('save-new').addEventListener('click', saveNewCausa);
 
   const tabEncargo = document.getElementById('tab-encargo');
   if (tabEncargo) tabEncargo.addEventListener('click', () => { statFilter = null; currentCat = 'encargo'; currentSubcat = null; closeMobileSidebar(); render(); });

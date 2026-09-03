@@ -187,72 +187,12 @@
 
 <!-- New case overlay -->
 <div class="overlay" id="overlay-new">
-  <div class="detail-panel" style="max-width:520px;">
+  <div class="detail-panel" style="max-width:720px;">
     <div class="detail-head">
       <h2 style="font-size:18px;">Agregar causa nueva</h2>
       <button class="close-x" id="close-new">&times;</button>
     </div>
-    <div style="padding:20px 26px 26px;">
-      <div class="modal-form">
-        <div>
-          <label>Título / referencia</label>
-          <input type="text" id="nf-titulo" placeholder="Ej: Pérez / J.O. Menor Cuantía / Indemnización">
-        </div>
-        <div class="form-grid2">
-          <div>
-            <label>Carpeta</label>
-            <select id="nf-categoria">
-              <option value="tramitacion">En tramitación</option>
-              <option value="nueva">Nueva (redacción)</option>
-              <option value="terminada">Terminada</option>
-            </select>
-          </div>
-          <div>
-            <label>Tipo de juicio</label>
-            <select id="nf-subcategoria">
-              <option value="">Sin definir</option>
-              <option value="Juicio Ejecutivo">Juicio Ejecutivo</option>
-              <option value="Juicio Ordinario">Juicio Ordinario</option>
-              <option value="Juicio Sumario">Juicio Sumario</option>
-              <option value="Juicio monitorio">Juicio monitorio</option>
-              <option value="Recurso de protección">Recurso de protección</option>
-              <option value="Recurso de amparo">Recurso de amparo</option>
-              <option value="Voluntario">Voluntario</option>
-              <option value="Extrajudicial">Extrajudicial</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-grid2">
-          <div>
-            <label>ROL / RIT</label>
-            <input type="text" id="nf-rol" placeholder="C-0000-2026">
-          </div>
-          <div>
-            <label>Tribunal</label>
-            <input type="text" id="nf-tribunal" placeholder="Ej: 14º Juzgado Civil">
-          </div>
-        </div>
-        <div class="form-grid2">
-          <div>
-            <label>Patrocinado</label>
-            <input type="text" id="nf-patrocinado">
-          </div>
-          <div>
-            <label>RUT</label>
-            <input type="text" id="nf-rut">
-          </div>
-        </div>
-        <div>
-          <label>Clave para recordar</label>
-          <input type="text" id="nf-clave" placeholder="Resumen en una línea">
-        </div>
-        <div>
-          <label>Gestión pendiente (primera)</label>
-          <input type="text" id="nf-gestion">
-        </div>
-        <button class="btn primary" id="save-new">Guardar causa</button>
-      </div>
-    </div>
+    <div style="padding:20px 26px 26px;" id="nf-antecedentes-wrap"></div>
   </div>
 </div>
 
