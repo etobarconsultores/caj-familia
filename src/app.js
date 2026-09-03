@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.js';
 import * as api from './lib/api.js';
 import { SAJ_APP_URL, PJUD_APP_URL, GMAIL_URL } from './config.js';
 import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 
 // ============================================================================
@@ -751,6 +752,326 @@ function hitosHtml(c) {
 // ============================================================================
 // FICHA DE CAUSA
 // ============================================================================
+const NOTIF_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero'];
+
+function notifDomicilioRowHtml(d, pIdx, dIdx) {
+  return `<tr data-p-idx="${pIdx}" data-d-idx="${dIdx}">
+    <td><input type="text" class="np-domicilio" value="${escapeHtml(d.domicilio || '')}"></td>
+    <td><select class="np-dom-estado">
+      <option value="" ${!d.estado ? 'selected' : ''}>—</option>
+      <option value="Negativa" ${d.estado === 'Negativa' ? 'selected' : ''}>Negativa</option>
+      <option value="Señalar" ${d.estado === 'Señalar' ? 'selected' : ''}>Señalar</option>
+      <option value="Señalado" ${d.estado === 'Señalado' ? 'selected' : ''}>Señalado</option>
+    </select></td>
+    <td><input type="date" class="np-dom-fecha" value="${escapeHtml(d.fecha || '')}"></td>
+    <td><input type="text" class="np-dom-folio" value="${escapeHtml(d.folio || '')}"></td>
+    <td><input type="text" class="np-dom-informado" value="${escapeHtml(d.informadoPor || '')}"></td>
+    <td class="col-del"><button class="notif-row-del" data-action="np-quitar-domicilio" data-p-idx="${pIdx}" data-d-idx="${dIdx}">&times;</button></td>
+  </tr>`;
+}
+
+function notifPersonaBlockHtml(persona, idx) {
+  return `<div class="agenda-form" data-persona-idx="${idx}" style="margin-bottom:14px;">
+    <div class="form-grid2">
+      <div><label>Parte</label><select class="np-parte" data-idx="${idx}"><option value="">Sin definir</option>${NOTIF_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+      <div><label>Nombre</label><input type="text" class="np-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+    </div>
+    <div><label>Estado de notificación</label>
+      <select class="np-estado" data-idx="${idx}">
+        <option value="">Sin definir</option>
+        <option value="Notificado" ${persona.estadoNotificacion === 'Notificado' ? 'selected' : ''}>Notificado</option>
+        <option value="Pendiente" ${persona.estadoNotificacion === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+      </select>
+    </div>
+    <div class="subhead">Domicilios y búsquedas</div>
+    <div class="notif-table-wrap">
+      <table class="notif-table">
+        <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th><th class="col-del"></th></tr></thead>
+        <tbody class="np-domicilios-tbody" data-idx="${idx}">${(persona.domicilios || []).map((d, di) => notifDomicilioRowHtml(d, idx, di)).join('')}</tbody>
+      </table>
+    </div>
+    <button class="btn small" data-action="np-agregar-domicilio" data-idx="${idx}" type="button">+ Agregar domicilio</button>
+  </div>`;
+}
+
+// Notificación múltiple. Fallback histórico: si la causa no tiene personas
+// en el modelo nuevo, se muestra debajo (solo lectura) el registro antiguo
+// de una sola persona (c.notifNombre/c.notifEstado/c.domicilios), sin
+// migrarlo ni tocarlo — domicilios_notificacion queda intacta.
+function notificacionTabHtml(c) {
+  const personas = c.notificacionPersonas || [];
+  const hayHistorico = !personas.length && ((c.domicilios || []).length || c.notifNombre || c.notifEstado);
+  return `
+    <div class="subhead" style="margin-top:0; display:flex; align-items:center; justify-content:space-between;">
+      <span>Personas a notificar</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="margin:0; font-size:12px;">Cantidad de personas a notificar</label>
+        <input type="number" id="notif-cantidad" min="0" value="${personas.length}" style="width:64px;">
+      </div>
+    </div>
+    <div id="notif-personas-wrap">${personas.length ? personas.map((p, i) => notifPersonaBlockHtml(p, i)).join('') : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>'}</div>
+    <div style="margin-top:10px;"><button class="btn small primary" id="notif-guardar">Guardar notificación</button></div>
+    ${hayHistorico ? `
+    <div class="subhead" style="margin-top:26px; border-top:1px dashed var(--line); padding-top:16px;">Registro histórico (anterior al modelo de varias personas)</div>
+    <div class="ficha-empty" style="color:var(--ink-faint); margin-bottom:8px;">Se conserva tal cual, sin migrar. Al agregar personas arriba, la información nueva se guarda en el modelo actual.</div>
+    <div class="field-row">
+      <div class="field"><div class="k">Estado de notificación (histórico)</div><input type="text" class="ct-input" value="${escapeHtml(c.notifEstado || '')}" disabled></div>
+      <div class="field"><div class="k">Nombre (histórico)</div><input type="text" class="ct-input" value="${escapeHtml(c.notifNombre || '')}" disabled></div>
+    </div>
+    <div class="notif-table-wrap">
+      <table class="notif-table">
+        <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th></tr></thead>
+        <tbody>${(c.domicilios || []).map(d => `<tr><td>${escapeHtml(d.domicilio || '')}</td><td>${escapeHtml(d.estado || '')}</td><td>${escapeHtml(fmtFechaSolo(d.fecha) || '')}</td><td>${escapeHtml(d.folio || '')}</td><td>${escapeHtml(d.informadoPor || '')}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}
+  `;
+}
+
+function wireNotificacionTab(c, panel) {
+  let estadoPersonas = (c.notificacionPersonas || []).map(p => ({
+    id: p.id, parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estadoNotificacion,
+    domicilios: (p.domicilios || []).map(d => ({ id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha, folio: d.folio, informadoPor: d.informadoPor }))
+  }));
+
+  function refrescar() {
+    panel.querySelector('#notif-personas-wrap').innerHTML = estadoPersonas.length
+      ? estadoPersonas.map((p, i) => notifPersonaBlockHtml(p, i)).join('')
+      : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>';
+    panel.querySelector('#notif-cantidad').value = estadoPersonas.length;
+  }
+
+  const cantInput = panel.querySelector('#notif-cantidad');
+  if (cantInput) cantInput.addEventListener('input', () => {
+    const nueva = Math.max(0, parseInt(cantInput.value, 10) || 0);
+    while (estadoPersonas.length < nueva) estadoPersonas.push({ id: null, parte: '', nombre: '', estadoNotificacion: '', domicilios: [] });
+    while (estadoPersonas.length > nueva) estadoPersonas.pop();
+    refrescar();
+  });
+
+  const wrap = panel.querySelector('#notif-personas-wrap');
+  if (wrap) {
+    wrap.addEventListener('input', (e) => {
+      if (e.target.classList.contains('np-parte')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].parte = e.target.value; return; }
+      if (e.target.classList.contains('np-nombre')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].nombre = e.target.value.trim(); return; }
+      if (e.target.classList.contains('np-estado')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].estadoNotificacion = e.target.value; return; }
+      const tr = e.target.closest('tr[data-p-idx]');
+      if (!tr) return;
+      const pi = parseInt(tr.dataset.pIdx, 10);
+      const di = parseInt(tr.dataset.dIdx, 10);
+      const dom = estadoPersonas[pi].domicilios[di];
+      if (e.target.classList.contains('np-domicilio')) dom.domicilio = e.target.value.trim();
+      if (e.target.classList.contains('np-dom-estado')) dom.estado = e.target.value || null;
+      if (e.target.classList.contains('np-dom-fecha')) dom.fecha = e.target.value || null;
+      if (e.target.classList.contains('np-dom-folio')) dom.folio = e.target.value.trim();
+      if (e.target.classList.contains('np-dom-informado')) dom.informadoPor = e.target.value.trim();
+    });
+    wrap.addEventListener('click', (e) => {
+      const addBtn = e.target.closest('[data-action="np-agregar-domicilio"]');
+      if (addBtn) {
+        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].domicilios.push({ id: null, domicilio: '', estado: '', fecha: '', folio: '', informadoPor: '' });
+        refrescar();
+        return;
+      }
+      const delBtn = e.target.closest('[data-action="np-quitar-domicilio"]');
+      if (delBtn) {
+        estadoPersonas[parseInt(delBtn.dataset.pIdx, 10)].domicilios.splice(parseInt(delBtn.dataset.dIdx, 10), 1);
+        refrescar();
+      }
+    });
+  }
+
+  const guardarBtn = panel.querySelector('#notif-guardar');
+  if (guardarBtn) guardarBtn.addEventListener('click', async () => {
+    try {
+      const originalesPersonas = c.notificacionPersonas || [];
+      const idsPersonasFinales = new Set();
+      const nuevaListaPersonas = [];
+      for (let idx = 0; idx < estadoPersonas.length; idx++) {
+        const p = estadoPersonas[idx];
+        if (!p.nombre || !p.parte) continue;
+        let personaId = p.id;
+        if (personaId) {
+          await api.updateNotificacionPersona(personaId, { parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estadoNotificacion || null, orden: idx });
+        } else {
+          const creada = await api.createNotificacionPersona(CURRENT_USER.id, c.id, { parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estadoNotificacion || null, orden: idx });
+          personaId = creada.id;
+        }
+        idsPersonasFinales.add(personaId);
+
+        const originalPersona = originalesPersonas.find(op => op.id === personaId);
+        const originalesDomicilios = (originalPersona && originalPersona.domicilios) || [];
+        const idsDomiciliosFinales = new Set();
+        const nuevaListaDomicilios = [];
+        for (let dIdx = 0; dIdx < p.domicilios.length; dIdx++) {
+          const d = p.domicilios[dIdx];
+          if (!d.domicilio && !d.estado && !d.fecha && !d.folio && !d.informadoPor) continue;
+          let domId = d.id;
+          const dPatch = { domicilio: d.domicilio || null, estado: d.estado || null, fecha: d.fecha || null, folio: d.folio || null, informadoPor: d.informadoPor || null, orden: dIdx };
+          if (domId) await api.updateNotificacionDomicilio(domId, dPatch);
+          else { const creado = await api.createNotificacionDomicilio(personaId, dPatch); domId = creado.id; }
+          idsDomiciliosFinales.add(domId);
+          nuevaListaDomicilios.push({ id: domId, ...dPatch });
+        }
+        for (const od of originalesDomicilios) if (!idsDomiciliosFinales.has(od.id)) await api.deleteNotificacionDomicilio(od.id);
+
+        nuevaListaPersonas.push({ id: personaId, parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estadoNotificacion || null, orden: idx, domicilios: nuevaListaDomicilios });
+      }
+      for (const op of originalesPersonas) if (!idsPersonasFinales.has(op.id)) await api.deleteNotificacionPersona(op.id);
+
+      c.notificacionPersonas = nuevaListaPersonas;
+      toast('Notificación guardada');
+      openDetail(c.id, 'notificacion');
+    } catch (e) { toast('No se pudo guardar: ' + e.message); }
+  });
+}
+
+const OFICIO_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero'];
+const OFICIO_TRAMITACION_OPCIONES = ['Correo enviado a usuario/a', 'Tramitada por mano', 'Tramitada por correo', 'Pendiente de tramitar'];
+const OFICIO_RESPUESTA_OPCIONES = ['Contestada', 'Pendiente'];
+
+function oficioInstitucionRowHtml(inst, pIdx, iIdx) {
+  return `<tr data-p-idx="${pIdx}" data-i-idx="${iIdx}">
+    <td><input type="text" class="oi-institucion" value="${escapeHtml(inst.institucion || '')}"></td>
+    <td><select class="oi-tramitacion"><option value="">Sin definir</option>${OFICIO_TRAMITACION_OPCIONES.map(o => `<option value="${o}" ${inst.tramitacion === o ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
+    <td><select class="oi-respuesta"><option value="">Sin definir</option>${OFICIO_RESPUESTA_OPCIONES.map(o => `<option value="${o}" ${inst.respuesta === o ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
+    <td><input type="date" class="oi-fecha" value="${escapeHtml(inst.fecha || '')}"></td>
+    <td><input type="text" class="oi-folio" value="${escapeHtml(inst.folio || '')}"></td>
+    <td class="col-del"><button class="notif-row-del" data-action="oi-quitar-institucion" data-p-idx="${pIdx}" data-i-idx="${iIdx}">&times;</button></td>
+  </tr>`;
+}
+
+function oficioPersonaBlockHtml(persona, idx) {
+  return `<div class="agenda-form" data-persona-idx="${idx}" style="margin-bottom:14px;">
+    <div class="form-grid2">
+      <div><label>Parte</label><select class="op-parte" data-idx="${idx}"><option value="">Sin definir</option>${OFICIO_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+      <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+    </div>
+    <div class="subhead">Instituciones oficiadas</div>
+    <div class="notif-table-wrap">
+      <table class="notif-table">
+        <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-del"></th></tr></thead>
+        <tbody class="op-instituciones-tbody" data-idx="${idx}">${(persona.instituciones || []).map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii)).join('')}</tbody>
+      </table>
+    </div>
+    <button class="btn small" data-action="op-agregar-institucion" data-idx="${idx}" type="button">+ Agregar institución</button>
+  </div>`;
+}
+
+// Oficios: sección nueva e independiente de Notificación. Mismo modelo
+// (cantidad de personas -> bloques -> lista anidada), sin fallback histórico
+// porque no existe ningún dato anterior de Oficios en la aplicación.
+function oficiosTabHtml(c) {
+  const personas = c.oficiosPersonas || [];
+  return `
+    <div class="subhead" style="margin-top:0; display:flex; align-items:center; justify-content:space-between;">
+      <span>Personas</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="margin:0; font-size:12px;">Cantidad de personas</label>
+        <input type="number" id="oficio-cantidad" min="0" value="${personas.length}" style="width:64px;">
+      </div>
+    </div>
+    <div id="oficio-personas-wrap">${personas.length ? personas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('') : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>'}</div>
+    <div style="margin-top:10px;"><button class="btn small primary" id="oficio-guardar">Guardar oficios</button></div>
+  `;
+}
+
+function wireOficiosTab(c, panel) {
+  let estadoPersonas = (c.oficiosPersonas || []).map(p => ({
+    id: p.id, parte: p.parte, nombre: p.nombre,
+    instituciones: (p.instituciones || []).map(i => ({ id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta, fecha: i.fecha, folio: i.folio }))
+  }));
+
+  function refrescar() {
+    panel.querySelector('#oficio-personas-wrap').innerHTML = estadoPersonas.length
+      ? estadoPersonas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('')
+      : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>';
+    panel.querySelector('#oficio-cantidad').value = estadoPersonas.length;
+  }
+
+  const cantInput = panel.querySelector('#oficio-cantidad');
+  if (cantInput) cantInput.addEventListener('input', () => {
+    const nueva = Math.max(0, parseInt(cantInput.value, 10) || 0);
+    while (estadoPersonas.length < nueva) estadoPersonas.push({ id: null, parte: '', nombre: '', instituciones: [] });
+    while (estadoPersonas.length > nueva) estadoPersonas.pop();
+    refrescar();
+  });
+
+  const wrap = panel.querySelector('#oficio-personas-wrap');
+  if (wrap) {
+    wrap.addEventListener('input', (e) => {
+      if (e.target.classList.contains('op-parte')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].parte = e.target.value; return; }
+      if (e.target.classList.contains('op-nombre')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].nombre = e.target.value.trim(); return; }
+      const tr = e.target.closest('tr[data-p-idx]');
+      if (!tr) return;
+      const pi = parseInt(tr.dataset.pIdx, 10);
+      const ii = parseInt(tr.dataset.iIdx, 10);
+      const inst = estadoPersonas[pi].instituciones[ii];
+      if (e.target.classList.contains('oi-institucion')) inst.institucion = e.target.value.trim();
+      if (e.target.classList.contains('oi-tramitacion')) inst.tramitacion = e.target.value || null;
+      if (e.target.classList.contains('oi-respuesta')) inst.respuesta = e.target.value || null;
+      if (e.target.classList.contains('oi-fecha')) inst.fecha = e.target.value || null;
+      if (e.target.classList.contains('oi-folio')) inst.folio = e.target.value.trim();
+    });
+    wrap.addEventListener('click', (e) => {
+      const addBtn = e.target.closest('[data-action="op-agregar-institucion"]');
+      if (addBtn) {
+        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].instituciones.push({ id: null, institucion: '', tramitacion: '', respuesta: '', fecha: '', folio: '' });
+        refrescar();
+        return;
+      }
+      const delBtn = e.target.closest('[data-action="oi-quitar-institucion"]');
+      if (delBtn) {
+        estadoPersonas[parseInt(delBtn.dataset.pIdx, 10)].instituciones.splice(parseInt(delBtn.dataset.iIdx, 10), 1);
+        refrescar();
+      }
+    });
+  }
+
+  const guardarBtn = panel.querySelector('#oficio-guardar');
+  if (guardarBtn) guardarBtn.addEventListener('click', async () => {
+    try {
+      const originalesPersonas = c.oficiosPersonas || [];
+      const idsPersonasFinales = new Set();
+      const nuevaListaPersonas = [];
+      for (let idx = 0; idx < estadoPersonas.length; idx++) {
+        const p = estadoPersonas[idx];
+        if (!p.nombre || !p.parte) continue;
+        let personaId = p.id;
+        if (personaId) {
+          await api.updateOficioPersona(personaId, { parte: p.parte, nombre: p.nombre, orden: idx });
+        } else {
+          const creada = await api.createOficioPersona(CURRENT_USER.id, c.id, { parte: p.parte, nombre: p.nombre, orden: idx });
+          personaId = creada.id;
+        }
+        idsPersonasFinales.add(personaId);
+
+        const originalPersona = originalesPersonas.find(op => op.id === personaId);
+        const originalesInstituciones = (originalPersona && originalPersona.instituciones) || [];
+        const idsInstitucionesFinales = new Set();
+        const nuevaListaInstituciones = [];
+        for (let iIdx = 0; iIdx < p.instituciones.length; iIdx++) {
+          const inst = p.instituciones[iIdx];
+          if (!inst.institucion && !inst.tramitacion && !inst.respuesta && !inst.fecha && !inst.folio) continue;
+          let instId = inst.id;
+          const iPatch = { institucion: inst.institucion || null, tramitacion: inst.tramitacion || null, respuesta: inst.respuesta || null, fecha: inst.fecha || null, folio: inst.folio || null, orden: iIdx };
+          if (instId) await api.updateOficioInstitucion(instId, iPatch);
+          else { const creado = await api.createOficioInstitucion(personaId, iPatch); instId = creado.id; }
+          idsInstitucionesFinales.add(instId);
+          nuevaListaInstituciones.push({ id: instId, ...iPatch });
+        }
+        for (const oi of originalesInstituciones) if (!idsInstitucionesFinales.has(oi.id)) await api.deleteOficioInstitucion(oi.id);
+
+        nuevaListaPersonas.push({ id: personaId, parte: p.parte, nombre: p.nombre, orden: idx, instituciones: nuevaListaInstituciones });
+      }
+      for (const op of originalesPersonas) if (!idsPersonasFinales.has(op.id)) await api.deleteOficioPersona(op.id);
+
+      c.oficiosPersonas = nuevaListaPersonas;
+      toast('Oficios guardados');
+      openDetail(c.id, 'oficios');
+    } catch (e) { toast('No se pudo guardar: ' + e.message); }
+  });
+}
+
 function notifRowsHtml(c) {
   const rows = c.domicilios || [];
   const blank = { domicilio: '', estado: '', fecha: '', folio: '', informadoPor: '' };
@@ -778,6 +1099,29 @@ const GESTION_PRIORIDADES = ['Urgente', 'Semi urgente', 'No prioritario'];
 // gestión es una tarea propia (redactar, presentar, revisar) o una gestión
 // que depende de un tercero (contactar, solicitar, hacer seguimiento).
 const GESTION_TIPOS = ['Tarea', 'Gestión'];
+const CATEGORIA_POR_TIPO_GESTION = {
+  'Tarea': [
+    'Revisión de causa', 'Consulta a tutor', 'Contactar a usuario', 'Contactar a testigos',
+    'Preparar escrito', 'Enviar a tutor para revisión', 'Otra tarea'
+  ],
+  'Gestión': [
+    'Presentar escrito', 'Encargar notificación', 'Citar a usuario', 'Ir a tribunales',
+    'Tramitar oficio', 'Ir a CBR', 'Ir a otra institución', 'Otra Gestión'
+  ]
+};
+// Categoría dependiente de Tipo — mismo criterio de tolerancia histórica ya
+// usado en Antecedentes: un valor guardado que no calce con el catálogo del
+// tipo actual se agrega como opción adicional, sin perderse.
+function categoriaGestionOptionsHtml(tipo, valorActual) {
+  const opciones = CATEGORIA_POR_TIPO_GESTION[tipo] || [];
+  const esValorDePrueba = (valorActual || '').trim().toLowerCase() === 'prueba';
+  let opts = `<option value="">Sin definir</option>`;
+  opts += opciones.map(o => `<option value="${escapeHtml(o)}" ${valorActual === o ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
+  if (valorActual && !esValorDePrueba && !opciones.includes(valorActual)) {
+    opts += `<option value="${escapeHtml(valorActual)}" selected>${escapeHtml(valorActual)} (valor anterior)</option>`;
+  }
+  return opts;
+}
 
 function gestionEstadoClass(estado) {
   if (estado === 'Realizada') return 'calm-estado';
@@ -807,7 +1151,6 @@ function gestionCardHtml(c, g) {
       ${g.observaciones ? `<div class="gestion-obs">${escapeHtml(g.observaciones)}</div>` : ''}
       <div class="gestion-actions">
         <button data-action="edit-gestion" data-id="${g.id}">Editar</button>
-        <button data-action="agenda-gestion" data-id="${g.id}">+ Agenda</button>
         <button data-action="delete-gestion" data-id="${g.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
       </div>
     </div>`;
@@ -829,22 +1172,20 @@ function gestionFormHtml(g) {
   const estadoOptions = GESTION_ESTADOS.map(s => `<option value="${s}" ${e.estado === s ? 'selected' : ''}>${s}</option>`).join('');
   return `
   <div class="agenda-form">
-    <div class="subhead" style="margin-top:0;">${g ? 'Editar gestión' : 'Nueva gestión'}</div>
+    <div class="subhead" style="margin-top:0;">${g ? 'Editar gestión' : 'Nueva Gestión/Tarea'}</div>
     <div><label>Descripción</label><textarea id="gf-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
     <div class="form-grid2">
       <div><label>Tipo</label><select id="gf-tipo">${tipoOptions}</select></div>
-      <div><label>Categoría</label><input type="text" id="gf-categoria" value="${escapeHtml(e.categoria || '')}" placeholder="Ej: Notificación, Oficio, PJUD…"></div>
+      <div><label>Categoría</label><select id="gf-categoria">${categoriaGestionOptionsHtml(e.tipo || '', e.categoria || '')}</select></div>
     </div>
     <div class="form-grid2">
       <div><label>Prioridad</label><select id="gf-prioridad">${prioridadOptions}</select></div>
       <div><label>Estado</label><select id="gf-estado">${estadoOptions}</select></div>
     </div>
     <div class="form-grid2">
-      <div><label>Fecha de revisión</label><input type="date" id="gf-fecharevision" value="${escapeHtml(e.fechaRevision || '')}"></div>
+      <div><label>Fecha programada</label><input type="date" id="gf-fecharevision" value="${escapeHtml(e.fechaRevision || '')}"></div>
       <div><label>Fecha límite (opcional)</label><input type="date" id="gf-fechalimite" value="${escapeHtml(e.fechaLimite || '')}"></div>
     </div>
-    <div><label>Enlace de Drive (opcional)</label><input type="text" id="gf-drivelink" value="${escapeHtml(e.driveLink || '')}"></div>
-    <div><label>Observaciones</label><textarea id="gf-observaciones">${escapeHtml(e.observaciones || '')}</textarea></div>
     <div style="display:flex; gap:8px; margin-top:6px;">
       <button class="btn primary" id="save-gestion" type="button">Guardar gestión</button>
       <button class="btn ghost" id="cancel-gestion" type="button">Cancelar</button>
@@ -852,11 +1193,28 @@ function gestionFormHtml(g) {
   </div>`;
 }
 
+// Cronología jurídica: la fecha elegida en un <input type="date"> se envía
+// siempre con hora fija al mediodía UTC ("...T12:00:00Z") para que ningún
+// huso horario real pueda desplazarla al día anterior o siguiente. Al
+// mostrarla, se toman directamente los primeros 10 caracteres del valor
+// guardado (YYYY-MM-DD) — nunca se reconstruye vía `new Date(...)` en la
+// zona horaria local del navegador, que es la causa típica de ese
+// desplazamiento.
+function fechaCalendarioAExplicita(valorInputFecha) {
+  if (!valorInputFecha) return null;
+  return `${valorInputFecha}T12:00:00Z`;
+}
+function fechaExplicitaADisplaySolo(valorGuardado) {
+  if (!valorGuardado) return '';
+  return String(valorGuardado).slice(0, 10);
+}
+
 function cronologiaHtml(c) {
   const items = c.cronologia || [];
   if (items.length === 0) return '<div style="color:var(--ink-faint); font-size:13px;">Aún no hay actuaciones registradas.</div>';
   return `<div class="cron-timeline">${items.map(g => `
     <div class="cron-item" data-cron-id="${g.id}">
+      <div class="cron-date">${g.fecha ? escapeHtml(fechaExplicitaADisplaySolo(g.fecha)) : '—'}</div>
       <div class="cron-body" style="flex:1;">
         <div class="desc" data-view>${escapeHtml(g.descripcion)}</div>
         <div class="txt" data-edit style="display:none;">
@@ -864,7 +1222,7 @@ function cronologiaHtml(c) {
         </div>
         ${g.driveLink ? `<div class="meta"><a href="${escapeHtml(g.driveLink)}" target="_blank" rel="noopener">Ver documento ↗</a></div>` : ''}
       </div>
-      <div style="display:flex; gap:6px; align-self:flex-start;">
+      <div style="display:flex; gap:6px; align-self:center;">
         <button data-action="edit-cron" data-id="${g.id}">Editar</button>
         <button data-action="save-cron" data-id="${g.id}" style="display:none; border-color:var(--brass); color:var(--brass);">Guardar</button>
         <button data-action="delete-cron" data-id="${g.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
@@ -902,8 +1260,8 @@ function instruccionFormHtml(it) {
   <div class="agenda-form">
     <div class="subhead" style="margin-top:0;">${it ? 'Editar instrucción' : 'Nueva instrucción'}</div>
     <div class="form-grid2">
-      <div><label>Tutor</label><input type="text" id="if-tutor" value="${escapeHtml(e.tutor || '')}"></div>
-      <div><label>Fecha</label><input type="date" id="if-fecha" value="${escapeHtml(e.fecha || todayISO())}"></div>
+      <div><label>Tutor</label><select id="if-tutor"><option value="">Sin definir</option>${TUTOR_OPCIONES.map(t => `<option value="${escapeHtml(t)}" ${e.tutor === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></div>
+      <div><label>Fecha de instrucción</label><input type="date" id="if-fecha" value="${escapeHtml(e.fecha || todayISO())}"></div>
     </div>
     <div><label>Instrucción</label><textarea id="if-instruccion">${escapeHtml(e.instruccion || '')}</textarea></div>
     <div class="form-grid2">
@@ -990,8 +1348,7 @@ function buildFichaData(c) {
   const resumen = kv([
     ['Clave para recordar', c.clave],
     ['Estado actual', c.estado],
-    ['Resumen de la causa', c.resumen],
-    ['Comentarios', c.comentarios]
+    ['Resumen de la causa', c.resumen]
   ]);
   if (resumen.length) sections.push({ title: 'Resumen', kind: 'kv', rows: resumen });
 
@@ -1052,7 +1409,7 @@ function buildFichaData(c) {
   if (proximosEventos.length) sections.push({
     title: 'Próximos eventos', kind: 'table',
     headers: ['Tipo', 'Fecha', 'Hora', 'Título', 'Estado'], widths: [0.18, 0.14, 0.12, 0.40, 0.16],
-    rows: proximosEventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.horaInicio || '', e.titulo, e.estado])
+    rows: proximosEventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.horaInicio || '', eventoTituloEfectivo(e), e.estado])
   });
 
   if (c.driveFolderUrl) sections.push({ title: 'Documentación', kind: 'link', label: 'Carpeta de Google Drive', url: c.driveFolderUrl });
@@ -1289,13 +1646,34 @@ function quickActionsHtml(c) {
 // AGENDA JURÍDICA (por causa)
 // ============================================================================
 const AGENDA_TIPOS = [
-  'Audiencia', 'Cita con usuario', 'Reunión con tutor', 'Llamada', 'Plazo procesal',
+  'Audiencia', 'Cita con usuario', 'Reunión con tutor', 'Reunión con usuario', 'Llamada', 'Plazo procesal',
   'Presentación de escrito', 'Revisión de causa', 'Gestión importante', 'Recordatorio', 'Otro'
 ];
+// Opciones del formulario de Nuevo/Editar evento — reducidas a 4. AGENDA_TIPOS
+// (arriba) se mantiene completa y se sigue usando en el filtro de la agenda
+// para no perder acceso a eventos históricos con un tipo que ya no se ofrece.
+const AGENDA_TIPOS_FORM = ['Audiencia', 'Reunión con usuario', 'Reunión con tutor', 'Otro'];
+const MODALIDAD_OPCIONES = ['Presencial', 'Remota'];
+const TIPO_AUDIENCIA_OPCIONES = [
+  'Audiencia de conciliación', 'Audiencia de parientes', 'Audiencia de testigos',
+  'Audiencia de designación de perito', 'Audiencia de Contestación y Conciliación',
+  'Audiencia del discapacitado', 'Audiencia de reconocimiento deuda/firma'
+];
 const AGENDA_ESTADOS = ['Pendiente', 'Confirmado', 'Realizado', 'Suspendido', 'Reprogramado', 'Cancelado'];
+// Opciones del formulario — sin 'Confirmado' (deja de ofrecerse como opción
+// nueva; los eventos ya guardados con ese estado siguen siendo válidos).
+const AGENDA_ESTADOS_FORM = ['Pendiente', 'Realizado', 'Suspendido', 'Reprogramado', 'Cancelado'];
+// Título eliminado del formulario de Nuevo evento — los eventos nuevos no
+// tienen titulo. Para no mostrar vacío en ningún listado existente, se cae
+// al Tipo de evento (y, si es Audiencia, se agrega el tipo de audiencia).
+function eventoTituloEfectivo(e) {
+  if (e.titulo) return e.titulo;
+  if (e.tipo === 'Audiencia' && e.tipoAudiencia) return `${e.tipo} — ${e.tipoAudiencia}`;
+  return e.tipo || 'Evento';
+}
 const AGENDA_ESTADOS_ACTIVOS = ['Pendiente', 'Confirmado', 'Reprogramado'];
 const AGENDA_TIPO_ICONO = {
-  'Audiencia': '⚖', 'Cita con usuario': '🙋', 'Reunión con tutor': '👤', 'Llamada': '☎',
+  'Audiencia': '⚖', 'Cita con usuario': '🙋', 'Reunión con tutor': '👤', 'Reunión con usuario': '🧑‍🤝‍🧑', 'Llamada': '☎',
   'Plazo procesal': '⏱', 'Presentación de escrito': '📝', 'Revisión de causa': '🔍',
   'Gestión importante': '★', 'Recordatorio': '🔔', 'Otro': '•'
 };
@@ -1329,7 +1707,7 @@ function agendaEventCardHtml(e) {
   return `<div class="evento-card" data-evento-id="${e.id}">
     <div class="evento-icono">${icono}</div>
     <div class="evento-main">
-      <div class="evento-titulo">${escapeHtml(e.titulo)}</div>
+      <div class="evento-titulo">${escapeHtml(eventoTituloEfectivo(e))}</div>
       <div class="evento-meta">
         <span class="evento-tipo-tag">${escapeHtml(e.tipo)}</span>
         <span>${escapeHtml(fmtFechaSolo(e.fecha))}</span>
@@ -1373,9 +1751,15 @@ function agendaListHtml(c) {
 
 function agendaFormHtml(evento) {
   const e = evento || { tipo: 'Audiencia', estado: 'Pendiente' };
-  const tipoOptions = AGENDA_TIPOS.map(t => `<option value="${t}" ${e.tipo === t ? 'selected' : ''}>${t}</option>`).join('');
-  const estadoOptions = AGENDA_ESTADOS.map(s => `<option value="${s}" ${e.estado === s ? 'selected' : ''}>${s}</option>`).join('');
+  let tipoOptions = AGENDA_TIPOS_FORM.map(t => `<option value="${t}" ${e.tipo === t ? 'selected' : ''}>${t}</option>`).join('');
+  if (e.tipo && !AGENDA_TIPOS_FORM.includes(e.tipo)) tipoOptions += `<option value="${escapeHtml(e.tipo)}" selected>${escapeHtml(e.tipo)} (valor anterior)</option>`;
+  let estadoOptions = AGENDA_ESTADOS_FORM.map(s => `<option value="${s}" ${e.estado === s ? 'selected' : ''}>${s}</option>`).join('');
+  if (e.estado && !AGENDA_ESTADOS_FORM.includes(e.estado)) estadoOptions += `<option value="${escapeHtml(e.estado)}" selected>${escapeHtml(e.estado)} (valor anterior)</option>`;
   const prioridadOptions = ['', 'No prioritario', 'Semi urgente', 'Urgente'].map(p => `<option value="${p}" ${(e.prioridad || '') === p ? 'selected' : ''}>${p || 'Sin definir'}</option>`).join('');
+  let modalidadOptions = ['', ...MODALIDAD_OPCIONES].map(m => `<option value="${m}" ${(e.modalidad || '') === m ? 'selected' : ''}>${m || 'Sin definir'}</option>`).join('');
+  if (e.modalidad && !MODALIDAD_OPCIONES.includes(e.modalidad)) modalidadOptions += `<option value="${escapeHtml(e.modalidad)}" selected>${escapeHtml(e.modalidad)} (valor anterior)</option>`;
+  const esAudiencia = e.tipo === 'Audiencia';
+  const tipoAudienciaOptions = ['', ...TIPO_AUDIENCIA_OPCIONES].map(t => `<option value="${t}" ${(e.tipoAudiencia || '') === t ? 'selected' : ''}>${t || 'Sin definir'}</option>`).join('');
   return `
   <div class="agenda-form">
     <div class="subhead" style="margin-top:0;">${evento ? 'Editar evento' : 'Nuevo evento'}</div>
@@ -1383,7 +1767,10 @@ function agendaFormHtml(evento) {
       <div><label>Tipo de evento</label><select id="ev-tipo">${tipoOptions}</select></div>
       <div><label>Estado</label><select id="ev-estado">${estadoOptions}</select></div>
     </div>
-    <div><label>Título</label><input type="text" id="ev-titulo" value="${escapeHtml(e.titulo || '')}" placeholder="Ej: Audiencia de contestación"></div>
+    <div id="ev-tipoaudiencia-wrap" ${esAudiencia ? '' : 'hidden'}>
+      <label>Tipo de audiencia</label>
+      <select id="ev-tipoaudiencia">${tipoAudienciaOptions}</select>
+    </div>
     <div><label>Descripción</label><textarea id="ev-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
     <div class="form-grid2">
       <div><label>Fecha</label><input type="date" id="ev-fecha" value="${escapeHtml(e.fecha || '')}"></div>
@@ -1394,7 +1781,7 @@ function agendaFormHtml(evento) {
       <div><label>Hora de término</label><input type="text" id="ev-horaTermino" value="${escapeHtml(e.horaTermino || '')}" placeholder="HH:MM"></div>
     </div>
     <div class="form-grid2">
-      <div><label>Modalidad</label><input type="text" id="ev-modalidad" value="${escapeHtml(e.modalidad || '')}" placeholder="Presencial / Remota"></div>
+      <div><label>Modalidad</label><select id="ev-modalidad">${modalidadOptions}</select></div>
       <div><label>Ubicación</label><input type="text" id="ev-ubicacion" value="${escapeHtml(e.ubicacion || '')}"></div>
     </div>
     <div><label>Enlace de videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
@@ -1419,22 +1806,26 @@ function wireAgendaTab(c, panel) {
     formWrap.innerHTML = agendaFormHtml(evento);
     formWrap.hidden = false;
     formWrap.querySelector('#cancel-evento').addEventListener('click', closeForm);
+    formWrap.querySelector('#ev-tipo').addEventListener('change', () => {
+      const esAudiencia = formWrap.querySelector('#ev-tipo').value === 'Audiencia';
+      formWrap.querySelector('#ev-tipoaudiencia-wrap').hidden = !esAudiencia;
+    });
     formWrap.querySelector('#save-evento').addEventListener('click', async () => {
+      const tipoSel = formWrap.querySelector('#ev-tipo').value;
       const patch = {
-        tipo: formWrap.querySelector('#ev-tipo').value,
-        titulo: formWrap.querySelector('#ev-titulo').value.trim(),
+        tipo: tipoSel,
+        tipoAudiencia: tipoSel === 'Audiencia' ? (formWrap.querySelector('#ev-tipoaudiencia').value || null) : null,
         descripcion: formWrap.querySelector('#ev-descripcion').value.trim() || null,
         fecha: formWrap.querySelector('#ev-fecha').value || null,
         horaInicio: formWrap.querySelector('#ev-horaInicio').value.trim() || null,
         horaTermino: formWrap.querySelector('#ev-horaTermino').value.trim() || null,
-        modalidad: formWrap.querySelector('#ev-modalidad').value.trim() || null,
+        modalidad: formWrap.querySelector('#ev-modalidad').value || null,
         ubicacion: formWrap.querySelector('#ev-ubicacion').value.trim() || null,
         enlace: formWrap.querySelector('#ev-enlace').value.trim() || null,
         estado: formWrap.querySelector('#ev-estado').value,
         prioridad: formWrap.querySelector('#ev-prioridad').value || null,
         observaciones: formWrap.querySelector('#ev-observaciones').value.trim() || null
       };
-      if (!patch.titulo) { toast('El evento necesita un título'); return; }
       if (!patch.fecha) { toast('Selecciona una fecha para el evento'); return; }
       try {
         let eventoGuardado;
@@ -2207,6 +2598,34 @@ function allGestionesActivasFlat() {
 // Vista activa dentro de Centro de Trabajo: 'Tarea' o 'Gestión' (nunca una
 // tercera pestaña — "Sin tipo asignado" es un bloque aparte, no una vista).
 let centroTrabajoVista = 'Tarea';
+// Filtro de categoría dentro de la vista activa (capa nueva, no reemplaza la
+// clasificación temporal): null = sin filtro, string = categoría elegida.
+let centroTrabajoCategoriaFiltro = null;
+
+// Cuenta CAUSAS ÚNICAS (no gestiones) con al menos una gestión activa
+// (Pendiente/En espera) de esa categoría — si una misma causa tiene 2
+// gestiones activas iguales, cuenta 1 sola vez.
+function causasUnicasPorCategoria(vista, categoria) {
+  const activas = allGestionesActivasFlat().filter(g => g.tipo === vista && g.categoria === categoria);
+  const ids = new Set(activas.map(g => g.causa.id));
+  const causas = [];
+  ids.forEach(id => { const c = activas.find(g => g.causa.id === id).causa; causas.push(c); });
+  return causas;
+}
+
+function categoriaCardsHtml(vista) {
+  const categorias = CATEGORIA_POR_TIPO_GESTION[vista] || [];
+  return `<div class="work-grid" style="margin-bottom:18px;">
+    ${categorias.map(cat => {
+      const causas = causasUnicasPorCategoria(vista, cat);
+      const activa = centroTrabajoCategoriaFiltro === cat;
+      return `<div class="work-card" data-ct-categoria="${escapeHtml(cat)}" style="cursor:pointer; ${activa ? 'border-color:var(--brass);' : ''}">
+        <div class="work-desc">${escapeHtml(cat)}</div>
+        <div class="work-meta">${causas.length} causa${causas.length === 1 ? '' : 's'}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 
 function centroTrabajoBuckets(tipo) {
   const hoy = todayISO();
@@ -2263,6 +2682,7 @@ function workBucketHtml(title, items, emptyMsg) {
 function renderCentroTrabajo() {
   const b = centroTrabajoBuckets(centroTrabajoVista);
   const sinTipo = allGestionesActivasFlat().filter(g => !g.tipo);
+  const causasFiltradas = centroTrabajoCategoriaFiltro ? causasUnicasPorCategoria(centroTrabajoVista, centroTrabajoCategoriaFiltro) : [];
   const container = document.getElementById('list-container');
   container.innerHTML = `
     <div class="section-title">Centro de Trabajo</div>
@@ -2271,6 +2691,20 @@ function renderCentroTrabajo() {
       <button class="btn small ${centroTrabajoVista === 'Tarea' ? 'primary' : 'ghost'}" data-ct-vista="Tarea" type="button">Tareas pendientes</button>
       <button class="btn small ${centroTrabajoVista === 'Gestión' ? 'primary' : 'ghost'}" data-ct-vista="Gestión" type="button">Gestiones pendientes</button>
     </div>
+    <div class="subhead" style="margin-top:0;">Por categoría</div>
+    ${categoriaCardsHtml(centroTrabajoVista)}
+    ${centroTrabajoCategoriaFiltro ? `
+    <div class="work-bucket" style="margin-bottom:18px;">
+      <div class="work-bucket-h">${escapeHtml(centroTrabajoCategoriaFiltro)} <span class="n">${causasFiltradas.length}</span></div>
+      ${causasFiltradas.length ? `<div class="case-grid">${causasFiltradas.map(c => `
+        <div class="case-card" data-causa-id="${c.id}">
+          <div class="case-main">
+            <div class="titulo">${escapeHtml(tituloAutomatico(c) || c.titulo || 'Sin título')}</div>
+            <div class="meta"><span class="rol">${escapeHtml(c.rol || '')}</span><span>${escapeHtml(tribunalTexto(c) || '')}</span></div>
+          </div>
+        </div>`).join('')}</div>` : `<div class="dash-empty">Sin causas en esta categoría.</div>`}
+    </div>` : ''}
+    <div class="subhead" style="margin-top:0;">Por fecha</div>
     ${workBucketHtml('Hoy', b.hoy, 'No tienes nada para revisar hoy.')}
     ${workBucketHtml('Próximos 7 días', b.proximos7, 'Nada programado para los próximos 7 días.')}
     ${workBucketHtml('En espera', b.enEspera, 'No hay nada en espera.')}
@@ -2284,7 +2718,14 @@ function renderCentroTrabajo() {
     </div>` : ''}
   `;
   container.querySelectorAll('[data-ct-vista]').forEach(btn => {
-    btn.addEventListener('click', () => { centroTrabajoVista = btn.dataset.ctVista; renderCentroTrabajo(); });
+    btn.addEventListener('click', () => { centroTrabajoVista = btn.dataset.ctVista; centroTrabajoCategoriaFiltro = null; renderCentroTrabajo(); });
+  });
+  container.querySelectorAll('[data-ct-categoria]').forEach(card => {
+    card.addEventListener('click', () => {
+      const cat = card.dataset.ctCategoria;
+      centroTrabajoCategoriaFiltro = (centroTrabajoCategoriaFiltro === cat) ? null : cat;
+      renderCentroTrabajo();
+    });
   });
   container.querySelectorAll('[data-causa-id]').forEach(el => {
     el.addEventListener('click', () => {
@@ -5965,6 +6406,27 @@ function wireInformeFinalConfigurador(container) {
   });
 }
 
+// Informe Final — resumen de audiencias asistidas: se alimenta de Agenda,
+// solo tipo='Audiencia' y estado='Realizado', ordenadas cronológicamente.
+function resumenAudienciasAsistidas(causas) {
+  const filas = [];
+  causas.forEach(c => {
+    (c.agendaEventos || []).forEach(e => {
+      if (e.tipo === 'Audiencia' && e.estado === 'Realizado') {
+        filas.push({
+          tipoAudiencia: e.tipoAudiencia || '',
+          fecha: e.fecha || '',
+          rit: rolCompletoTexto(c) || '',
+          materia: 'Civil',
+          tribunal: tribunalTexto(c) || ''
+        });
+      }
+    });
+  });
+  filas.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+  return filas;
+}
+
 function informeFinalPreviewHtml() {
   const causas = informeFinalCausasFiltradas();
   const campos = Object.entries(informeFinalCampos).filter(([, v]) => v).map(([k]) => k);
@@ -5981,7 +6443,31 @@ function informeFinalPreviewHtml() {
   <div class="subhead">Campos seleccionados</div>
   <div class="ficha-empty" style="color:var(--ink-dim); margin-bottom:16px;">${camposLabels.length ? escapeHtml(camposLabels.join(' · ')) : 'Ningún campo adicional seleccionado (solo datos básicos del bloque).'}</div>
   ${causas.length === 0 ? '<div class="empty-msg">No hay causas que coincidan con el filtro elegido.</div>' : ''}
-  <div class="agenda-toolbar">
+
+  <div class="subhead" style="margin-top:22px;">Resumen de audiencias asistidas</div>
+  <div class="ficha-empty" style="color:var(--ink-faint); margin-top:-4px;">Incluye todas las audiencias realizadas en todas las causas, independiente del filtro configurado arriba para el Informe Final.</div>
+  ${(() => {
+    const audiencias = resumenAudienciasAsistidas(CAUSAS);
+    if (!audiencias.length) return `<div class="ficha-empty" style="color:var(--ink-faint);">No hay audiencias realizadas registradas.</div>`;
+    return `
+    <table class="ficha-table" style="width:100%;">
+      <thead><tr><th>TIPO AUDIENCIA</th><th>FECHA</th><th>RIT</th><th>MATERIA</th><th>TRIBUNAL</th></tr></thead>
+      <tbody>
+        ${audiencias.map(a => `<tr>
+          <td>${escapeHtml(a.tipoAudiencia)}</td>
+          <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
+          <td>${escapeHtml(a.rit)}</td>
+          <td>${escapeHtml(a.materia)}</td>
+          <td>${escapeHtml(a.tribunal)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:10px;">
+      <button class="btn small" id="informe-audiencias-excel" type="button">Descargar resumen en Excel</button>
+    </div>`;
+  })()}
+
+  <div class="agenda-toolbar" style="margin-top:20px;">
     <button class="btn small primary" id="informe-generar-pdf" ${causas.length === 0 ? 'disabled' : ''}>Generar PDF</button>
     <button class="btn small" id="informe-volver">Volver a configurar</button>
   </div>`;
@@ -5991,6 +6477,18 @@ function wireInformeFinalPreview(container) {
   container.querySelector('#informe-volver').addEventListener('click', () => {
     informeFinalEtapa = 'configurar';
     renderInformeFinal();
+  });
+  const excelBtn = container.querySelector('#informe-audiencias-excel');
+  if (excelBtn) excelBtn.addEventListener('click', () => {
+    const audiencias = resumenAudienciasAsistidas(CAUSAS);
+    const filasHoja = [
+      ['TIPO AUDIENCIA', 'FECHA', 'RIT', 'MATERIA', 'TRIBUNAL'],
+      ...audiencias.map(a => [a.tipoAudiencia, fmtFechaSolo(a.fecha), a.rit, a.materia, a.tribunal])
+    ];
+    const hoja = XLSX.utils.aoa_to_sheet(filasHoja);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Audiencias');
+    XLSX.writeFile(libro, `resumen_audiencias_${todayISO()}.xlsx`);
   });
   const genBtn = container.querySelector('#informe-generar-pdf');
   if (genBtn) genBtn.addEventListener('click', () => {
@@ -6072,7 +6570,7 @@ function construirBloqueCausaInforme(c, campos) {
     if (eventos.length) secciones.push({
       title: campos.proximosEventos ? 'Próximos eventos' : 'Audiencias futuras',
       kind: 'table', headers: ['Tipo', 'Fecha', 'Título'], widths: [0.2, 0.2, 0.6],
-      rows: eventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.titulo])
+      rows: eventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), eventoTituloEfectivo(e)])
     });
   }
 
@@ -6200,7 +6698,7 @@ function renderDashBlocks() {
       <div class="dash-row-item" data-causa-id="${e.causaId}">
         <span class="dash-icono">${AGENDA_TIPO_ICONO[e.tipo] || '•'}</span>
         <div class="dash-row-txt">
-          <div class="dash-row-title">${escapeHtml(e.titulo)}</div>
+          <div class="dash-row-title">${escapeHtml(eventoTituloEfectivo(e))}</div>
           <div class="dash-row-sub">${escapeHtml(fmtFechaSolo(e.fecha))}${e.horaInicio ? ' · ' + escapeHtml(e.horaInicio) : ''} · ${escapeHtml(causaShortLabel(e.causa))}${caratuladoTexto(e.causa) ? ' · ' + escapeHtml(caratuladoTexto(e.causa)) : ''}</div>
         </div>
         <span class="stamp evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
@@ -6211,15 +6709,15 @@ function renderDashBlocks() {
   const items = [];
   eventos.forEach(e => {
     if (!isEventoActivo(e)) return;
-    if (e.fecha === hoy) items.push({ text: `${e.tipo} hoy: ${e.titulo}`, causaId: e.causaId, tono: 'hoy' });
-    else if (e.fecha === manana) items.push({ text: `${e.tipo} mañana: ${e.titulo}`, causaId: e.causaId, tono: 'manana' });
-    else if (e.fecha < hoy) items.push({ text: `Evento vencido sin marcar como realizado: ${e.titulo}`, causaId: e.causaId, tono: 'vencido' });
+    if (e.fecha === hoy) items.push({ text: `${e.tipo} hoy: ${eventoTituloEfectivo(e)}`, causaId: e.causaId, tono: 'hoy' });
+    else if (e.fecha === manana) items.push({ text: `${e.tipo} mañana: ${eventoTituloEfectivo(e)}`, causaId: e.causaId, tono: 'manana' });
+    else if (e.fecha < hoy) items.push({ text: `Evento vencido sin marcar como realizado: ${eventoTituloEfectivo(e)}`, causaId: e.causaId, tono: 'vencido' });
     else if (e.tipo === 'Plazo procesal') {
       const d = daysUntil(e.fecha);
-      if (d !== null && d >= 0 && d <= 2) items.push({ text: `Plazo procesal ${d === 0 ? 'hoy' : d === 1 ? 'mañana' : `dentro de ${d} días`}: ${e.titulo}`, causaId: e.causaId, tono: 'plazo' });
+      if (d !== null && d >= 0 && d <= 2) items.push({ text: `Plazo procesal ${d === 0 ? 'hoy' : d === 1 ? 'mañana' : `dentro de ${d} días`}: ${eventoTituloEfectivo(e)}`, causaId: e.causaId, tono: 'plazo' });
     } else if (e.tipo === 'Gestión importante') {
       const d = daysUntil(e.fecha);
-      if (d !== null && d >= 0 && d <= 2) items.push({ text: `Gestión importante pendiente: ${e.titulo}`, causaId: e.causaId, tono: 'plazo' });
+      if (d !== null && d >= 0 && d <= 2) items.push({ text: `Gestión importante pendiente: ${eventoTituloEfectivo(e)}`, causaId: e.causaId, tono: 'plazo' });
     }
   });
   // orden: vencidos primero, luego hoy, luego mañana, luego plazos
@@ -6283,7 +6781,7 @@ function agendaFilterBarHtml() {
 function agendaEventRowHtml(e) {
   return `<div class="case-card evento-row" data-causa-id="${e.causaId}">
     <div class="case-main">
-      <div class="titulo">${AGENDA_TIPO_ICONO[e.tipo] || '•'} ${escapeHtml(e.titulo)}</div>
+      <div class="titulo">${AGENDA_TIPO_ICONO[e.tipo] || '•'} ${escapeHtml(eventoTituloEfectivo(e))}</div>
       <div class="meta">
         <span class="rol">${escapeHtml(causaShortLabel(e.causa))}</span>
         <span>${escapeHtml(e.tipo)}</span>
@@ -6333,7 +6831,7 @@ function agendaMonthViewHtml(events) {
     const dayEvents = byDate[iso] || [];
     cells += `<div class="cal-cell ${inMonth ? '' : 'cal-cell-out'} ${iso === hoy ? 'cal-cell-today' : ''}" data-day="${iso}">
       <div class="cal-daynum">${d.getDate()}</div>
-      ${dayEvents.slice(0, 3).map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.titulo)}</div>`).join('')}
+      ${dayEvents.slice(0, 3).map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(eventoTituloEfectivo(e))}</div>`).join('')}
       ${dayEvents.length > 3 ? `<div class="cal-more">+${dayEvents.length - 3} más</div>` : ''}
     </div>`;
   }
@@ -6362,7 +6860,7 @@ function agendaWeekViewHtml(events) {
     const dayEvents = (byDate[iso] || []).sort((a, b) => (a.horaInicio || '').localeCompare(b.horaInicio || ''));
     cols += `<div class="week-col ${iso === hoy ? 'week-col-today' : ''}">
       <div class="week-col-head">${d.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-      ${dayEvents.length ? dayEvents.map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}" data-causa-id="${e.causaId}">${e.horaInicio ? escapeHtml(e.horaInicio) + ' · ' : ''}${escapeHtml(e.titulo)}</div>`).join('') : `<div class="week-empty">—</div>`}
+      ${dayEvents.length ? dayEvents.map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}" data-causa-id="${e.causaId}">${e.horaInicio ? escapeHtml(e.horaInicio) + ' · ' : ''}${escapeHtml(eventoTituloEfectivo(e))}</div>`).join('') : `<div class="week-empty">—</div>`}
     </div>`;
   }
   const end = new Date(start); end.setDate(start.getDate() + 6);
@@ -6462,6 +6960,7 @@ function detailHtml(c) {
     <div class="dtab" data-tab="gestiones">Gestiones</div>
     <div class="dtab" data-tab="agenda">Agenda</div>
     <div class="dtab" data-tab="notificacion">Notificación</div>
+    <div class="dtab" data-tab="oficios">Oficios</div>
     <div class="dtab" data-tab="contacto">Contacto</div>
     <div class="dtab" data-tab="encargo-receptor">Encargo receptor</div>
     <div class="dtab" data-tab="exportar">Exportar ficha</div>
@@ -6469,10 +6968,16 @@ function detailHtml(c) {
 
   <div class="dtab-content" data-tab="resumen">
     ${c.objetivoApelacion ? `<div class="subhead" style="margin-top:0;">Objetivo de la apelación</div><p class="para">${escapeHtml(c.objetivoApelacion)}</p>` : ''}
-    <div class="subhead" style="margin-top:0;">Clave para recordar</div>
-    <input type="text" class="ct-input" id="rf-clave" value="${escapeHtml(c.clave || '')}">
-    <div class="subhead">Estado actual</div>
-    <textarea id="rf-estado" style="width:100%; min-height:80px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.estado || '')}</textarea>
+    <div class="form-grid2">
+      <div>
+        <div class="subhead" style="margin-top:0;">Clave para recordar</div>
+        <input type="text" class="ct-input" id="rf-clave" value="${escapeHtml(c.clave || '')}">
+      </div>
+      <div>
+        <div class="subhead" style="margin-top:0;">Estado actual</div>
+        <textarea id="rf-estado" style="width:100%; min-height:80px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.estado || '')}</textarea>
+      </div>
+    </div>
     <div class="subhead">Resumen de la causa</div>
     <textarea id="rf-resumen" style="width:100%; min-height:140px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.resumen || '')}</textarea>
 
@@ -6486,8 +6991,6 @@ function detailHtml(c) {
       <div style="font-size:11.5px; color:var(--ink-faint); margin-top:10px;">Este enlace se guarda al presionar "Guardar resumen", junto con el resto de los datos de esta pestaña.</div>
     </div>
 
-    <div class="subhead">Comentarios</div>
-    <textarea id="rf-comentarios" style="width:100%; min-height:80px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.comentarios || '')}</textarea>
     <div class="subhead">Observaciones de traspaso</div>
     <textarea id="rf-traspaso" placeholder="Información útil para quien reciba la causa después (no genera gestiones ni eventos)…" style="width:100%; min-height:70px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.observacionesTraspaso || '')}</textarea>
     <div style="margin-top:10px;">
@@ -6504,7 +7007,7 @@ function detailHtml(c) {
 
   <div class="dtab-content" data-tab="gestiones">
     <div class="agenda-toolbar">
-      <button class="btn small primary" id="add-gestion">+ Nueva gestión</button>
+      <button class="btn small primary" id="add-gestion">+ Nueva Gestión/Tarea</button>
     </div>
     <div id="gestion-form-wrap" class="agenda-form-wrap" hidden></div>
     <div id="gestion-list-wrap">${pendientesHtml(c)}</div>
@@ -6526,39 +7029,23 @@ function detailHtml(c) {
 
     <div class="subhead" style="margin-top:26px;">Cronología jurídica</div>
     <div id="tl-cronologia">${cronologiaHtml(c)}</div>
-    <div class="add-row">
-      <input type="text" id="new-cron" placeholder="Registrar actuación (incluye la fecha en el texto si corresponde)…">
-      <button class="btn small" id="add-cron">Registrar</button>
+    <div class="drive-box" style="margin-top:12px;">
+      <div style="display:grid; grid-template-columns:170px 1fr; gap:12px; align-items:end;">
+        <div><label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); display:block; margin-bottom:4px;">Fecha de actuación</label><input type="date" id="new-cron-fecha" value="${escapeHtml(todayISO())}"></div>
+        <div><label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); display:block; margin-bottom:4px;">Actuación</label><input type="text" id="new-cron" placeholder="Texto de la gestión realizada…" style="width:100%;"></div>
+      </div>
+      <div style="margin-top:12px; display:flex; justify-content:flex-end;">
+        <button class="btn small primary" id="add-cron">Registrar</button>
+      </div>
     </div>
   </div>
 
   <div class="dtab-content" data-tab="notificacion">
-    <div class="field-row">
-      <div class="field">
-        <div class="k">Estado de notificación</div>
-        <select class="ct-input" id="nt-estado">
-          <option value="">Sin definir</option>
-          <option value="Notificado">Notificado</option>
-          <option value="Pendiente">Pendiente</option>
-        </select>
-      </div>
-      <div class="field"><div class="k">Nombre</div><input type="text" class="ct-input" id="nt-nombre" value="${escapeHtml(c.notifNombre || '')}" placeholder="Persona a notificar"></div>
-    </div>
-    <div class="subhead">Domicilios y búsquedas</div>
-    <div class="notif-table-wrap">
-      <table class="notif-table">
-        <thead><tr>
-          <th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th><th class="col-del"></th>
-        </tr></thead>
-        <tbody id="notif-tbody">${notifRowsHtml(c)}</tbody>
-      </table>
-    </div>
-    <div style="margin-top:10px;">
-      <button class="btn small" id="add-domicilio">+ Agregar domicilio</button>
-    </div>
-    <div style="margin-top:14px;">
-      <button class="btn small primary" id="save-notificacion">Guardar notificación</button>
-    </div>
+    ${notificacionTabHtml(c)}
+  </div>
+
+  <div class="dtab-content" data-tab="oficios">
+    ${oficiosTabHtml(c)}
   </div>
 
   <div class="dtab-content" data-tab="contacto">
@@ -6682,8 +7169,6 @@ function wireDetailEvents(c) {
     if (el) el.addEventListener('input', refreshCaratuladoPreview);
   });
 
-  const notifEstadoSel = panel.querySelector('#nt-estado'); if (notifEstadoSel) notifEstadoSel.value = c.notifEstado || '';
-
   // ---------- Accesos rápidos ----------
   panel.querySelector('[data-action="qa-drive"]').addEventListener('click', () => {
     if (c.driveFolderUrl) window.open(c.driveFolderUrl, '_blank', 'noopener,noreferrer');
@@ -6754,7 +7239,6 @@ function wireDetailEvents(c) {
       estado: panel.querySelector('#rf-estado').value.trim() || null,
       resumen: panel.querySelector('#rf-resumen').value.trim() || null,
       driveFolderUrl: panel.querySelector('#rf-drive-url').value.trim() || null,
-      comentarios: panel.querySelector('#rf-comentarios').value.trim() || null,
       observacionesTraspaso: panel.querySelector('#rf-traspaso').value.trim() || null
     };
     try {
@@ -6771,60 +7255,11 @@ function wireDetailEvents(c) {
   wireInstruccionesTab(c, panel);
   wireCronologiaEvents(c, panel);
 
-  // ---------- Notificación ----------
-  function collectNotificacion() {
-    const rows = panel.querySelectorAll('#notif-tbody tr');
-    const newDomicilios = [];
-    rows.forEach(tr => {
-      const domicilio = tr.querySelector('.nd-domicilio').value.trim();
-      const estado = tr.querySelector('.nd-estado').value;
-      const fecha = tr.querySelector('.nd-fecha').value;
-      const folio = tr.querySelector('.nd-folio').value.trim();
-      const informadoPor = tr.querySelector('.nd-informado').value.trim();
-      if (domicilio || estado || fecha || folio || informadoPor) {
-        newDomicilios.push({ domicilio: domicilio || null, estado: estado || null, fecha: fecha || null, folio: folio || null, informadoPor: informadoPor || null });
-      }
-    });
-    return newDomicilios;
-  }
+  // ---------- Notificación (múltiples personas, con fallback histórico) ----------
+  wireNotificacionTab(c, panel);
 
-  const saveNotif = panel.querySelector('#save-notificacion');
-  if (saveNotif) saveNotif.addEventListener('click', async () => {
-    const domicilios = collectNotificacion();
-    const patch = { notifEstado: panel.querySelector('#nt-estado').value || null, notifNombre: panel.querySelector('#nt-nombre').value.trim() || null };
-    try {
-      await api.updateCausa(c.id, patch);
-      await api.replaceDomicilios(CURRENT_USER.id, c.id, domicilios);
-      Object.assign(c, patch);
-      c.domicilios = domicilios;
-      toast('Notificación guardada');
-      render();
-    } catch (e) { toast('No se pudo guardar: ' + e.message); }
-  });
-
-  const addDomicilio = panel.querySelector('#add-domicilio');
-  if (addDomicilio) addDomicilio.addEventListener('click', async () => {
-    const domicilios = collectNotificacion();
-    domicilios.push({ domicilio: null, estado: null, fecha: null, folio: null, informadoPor: null });
-    try {
-      await api.replaceDomicilios(CURRENT_USER.id, c.id, domicilios);
-      c.domicilios = domicilios;
-      openDetail(c.id, 'notificacion');
-    } catch (e) { toast('No se pudo agregar: ' + e.message); }
-  });
-
-  panel.querySelectorAll('[data-action="del-domicilio"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const domicilios = collectNotificacion();
-      const idx = parseInt(btn.dataset.idx, 10);
-      domicilios.splice(idx, 1);
-      try {
-        await api.replaceDomicilios(CURRENT_USER.id, c.id, domicilios);
-        c.domicilios = domicilios;
-        openDetail(c.id, 'notificacion');
-      } catch (e) { toast('No se pudo eliminar: ' + e.message); }
-    });
-  });
+  // ---------- Oficios (nueva sección, independiente de Notificación) ----------
+  wireOficiosTab(c, panel);
 
   // ---------- Contacto ----------
   const saveContacto = panel.querySelector('#save-contacto');
@@ -6926,17 +7361,19 @@ function wireGestionesTab(c, panel) {
     formWrap.innerHTML = gestionFormHtml(gestion);
     formWrap.hidden = false;
     formWrap.querySelector('#cancel-gestion').addEventListener('click', closeForm);
+    formWrap.querySelector('#gf-tipo').addEventListener('change', () => {
+      const tipoSel = formWrap.querySelector('#gf-tipo').value;
+      formWrap.querySelector('#gf-categoria').innerHTML = categoriaGestionOptionsHtml(tipoSel, '');
+    });
     formWrap.querySelector('#save-gestion').addEventListener('click', async () => {
       const patch = {
         descripcion: formWrap.querySelector('#gf-descripcion').value.trim(),
-        categoria: formWrap.querySelector('#gf-categoria').value.trim() || null,
+        categoria: formWrap.querySelector('#gf-categoria').value || null,
         tipo: formWrap.querySelector('#gf-tipo').value || null,
         prioridad: formWrap.querySelector('#gf-prioridad').value || null,
         estado: formWrap.querySelector('#gf-estado').value,
         fechaRevision: formWrap.querySelector('#gf-fecharevision').value || null,
-        fechaLimite: formWrap.querySelector('#gf-fechalimite').value || null,
-        driveLink: formWrap.querySelector('#gf-drivelink').value.trim() || null,
-        observaciones: formWrap.querySelector('#gf-observaciones').value.trim() || null
+        fechaLimite: formWrap.querySelector('#gf-fechalimite').value || null
       };
       if (!patch.descripcion) { toast('La gestión necesita una descripción'); return; }
       if (!patch.tipo) { toast('Selecciona si es una Tarea o una Gestión'); return; }
@@ -6982,21 +7419,6 @@ function wireGestionListButtons(c, panel, openForm, listWrap) {
         toast('Gestión eliminada');
         render();
       } catch (err) { toast('No se pudo eliminar: ' + err.message); }
-    });
-  });
-  listWrap.querySelectorAll('[data-action="agenda-gestion"]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const g = (c.gestionesPendientes || []).find(x => x.id === btn.dataset.id);
-      if (!g) return;
-      const tabEl = panel.querySelector('.dtab[data-tab="agenda"]');
-      if (tabEl) tabEl.click();
-      const addBtn = panel.querySelector('#add-evento');
-      if (addBtn) addBtn.click();
-      setTimeout(() => {
-        const tituloInput = panel.querySelector('#ev-titulo');
-        if (tituloInput) tituloInput.value = g.descripcion;
-      }, 0);
-      toast('Completa la fecha del evento en la Agenda');
     });
   });
 }
@@ -7119,10 +7541,13 @@ function wireCronologiaEvents(c, panel) {
   const addCron = panel.querySelector('#add-cron');
   if (addCron) addCron.addEventListener('click', async () => {
     const inp = panel.querySelector('#new-cron');
+    const fechaInp = panel.querySelector('#new-cron-fecha');
     const val = inp.value.trim();
     if (!val) return;
+    if (!fechaInp.value) { toast('Elige la fecha de la actuación'); return; }
     try {
-      const nuevo = await api.addCronologia(CURRENT_USER.id, c.id, val, null, CURRENT_USER.nombre || CURRENT_USER.email);
+      const fechaExplicita = fechaCalendarioAExplicita(fechaInp.value);
+      const nuevo = await api.addCronologia(CURRENT_USER.id, c.id, val, null, CURRENT_USER.nombre || CURRENT_USER.email, fechaExplicita);
       c.cronologia = c.cronologia || [];
       c.cronologia.unshift({ id: nuevo.id, descripcion: nuevo.descripcion, driveLink: nuevo.drive_link, usuarioNombre: nuevo.usuario_nombre, fecha: nuevo.fecha });
       toast('Actuación registrada');

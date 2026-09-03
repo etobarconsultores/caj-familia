@@ -117,7 +117,33 @@ function causaFromDb(row) {
     intervinientes: (row.intervinientes || [])
       .slice()
       .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
-      .map(i => ({ id: i.id, tipoParte: i.tipo_parte, nombre: i.nombre, orden: i.orden }))
+      .map(i => ({ id: i.id, tipoParte: i.tipo_parte, nombre: i.nombre, orden: i.orden })),
+    notificacionPersonas: (row.notificacion_personas || [])
+      .slice()
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      .map(p => ({
+        id: p.id, parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estado_notificacion, orden: p.orden,
+        domicilios: (p._domicilios || [])
+          .slice()
+          .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+          .map(d => ({
+            id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha,
+            folio: d.folio, informadoPor: d.informado_por, orden: d.orden
+          }))
+      })),
+    oficiosPersonas: (row.oficios_personas || [])
+      .slice()
+      .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      .map(p => ({
+        id: p.id, parte: p.parte, nombre: p.nombre, orden: p.orden,
+        instituciones: (p._instituciones || [])
+          .slice()
+          .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+          .map(i => ({
+            id: i.id, institucion: i.institucion, tramitacion: i.tramitacion,
+            respuesta: i.respuesta, fecha: i.fecha, folio: i.folio, orden: i.orden
+          }))
+      }))
   };
 }
 
@@ -157,7 +183,8 @@ function causaPatchToDb(patch) {
 // esa causa queda sin esa información específica, pero sigue apareciendo.
 const CAUSA_CHILD_TABLES = [
   'gestiones_pendientes', 'cronologia', 'domicilios_notificacion',
-  'hitos', 'agenda_eventos', 'instrucciones_tutor', 'intervinientes'
+  'hitos', 'agenda_eventos', 'instrucciones_tutor', 'intervinientes',
+  'notificacion_personas', 'oficios_personas'
 ];
 
 async function fetchChildRows(table, causaIds) {
@@ -186,6 +213,31 @@ function agruparPorCausa(rows) {
   return map;
 }
 
+async function fetchGrandchildRows(table, personaIds) {
+  if (!personaIds.length) return [];
+  try {
+    const { data, error } = await supabase.from(table).select('*').in('persona_id', personaIds);
+    if (error) {
+      console.error(`No se pudieron cargar los datos de "${table}":`, error.message);
+      return [];
+    }
+    return data || [];
+  } catch (e) {
+    console.error(`Error inesperado cargando "${table}":`, e);
+    return [];
+  }
+}
+
+function agruparPorPersona(rows) {
+  const map = new Map();
+  rows.forEach(r => {
+    const key = r.persona_id;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(r);
+  });
+  return map;
+}
+
 async function fetchCausasConRelaciones(filtroIds) {
   let query = supabase.from('causas').select('*').order('created_at', { ascending: false });
   if (filtroIds) query = query.in('id', filtroIds);
@@ -200,6 +252,18 @@ async function fetchCausasConRelaciones(filtroIds) {
   const porTabla = {};
   CAUSA_CHILD_TABLES.forEach((table, i) => { porTabla[table] = agruparPorCausa(resultados[i]); });
 
+  // notificacion_domicilios y oficios_instituciones dependen únicamente de
+  // persona_id (sin causa_id propio) — se cargan en un segundo paso, usando
+  // los ids de las personas ya obtenidas, y se anidan dentro de cada una.
+  const notifPersonasIds = resultados[CAUSA_CHILD_TABLES.indexOf('notificacion_personas')].map(p => p.id);
+  const oficiosPersonasIds = resultados[CAUSA_CHILD_TABLES.indexOf('oficios_personas')].map(p => p.id);
+  const [notifDomiciliosRaw, oficiosInstitucionesRaw] = await Promise.all([
+    fetchGrandchildRows('notificacion_domicilios', notifPersonasIds),
+    fetchGrandchildRows('oficios_instituciones', oficiosPersonasIds)
+  ]);
+  const domiciliosPorPersona = agruparPorPersona(notifDomiciliosRaw);
+  const institucionesPorPersona = agruparPorPersona(oficiosInstitucionesRaw);
+
   return causasRaw.map(row => causaFromDb({
     ...row,
     gestiones_pendientes: porTabla.gestiones_pendientes.get(row.id) || [],
@@ -208,7 +272,13 @@ async function fetchCausasConRelaciones(filtroIds) {
     hitos: porTabla.hitos.get(row.id) || [],
     agenda_eventos: porTabla.agenda_eventos.get(row.id) || [],
     instrucciones_tutor: porTabla.instrucciones_tutor.get(row.id) || [],
-    intervinientes: porTabla.intervinientes.get(row.id) || []
+    intervinientes: porTabla.intervinientes.get(row.id) || [],
+    notificacion_personas: (porTabla.notificacion_personas.get(row.id) || []).map(p => ({
+      ...p, _domicilios: domiciliosPorPersona.get(p.id) || []
+    })),
+    oficios_personas: (porTabla.oficios_personas.get(row.id) || []).map(p => ({
+      ...p, _instituciones: institucionesPorPersona.get(p.id) || []
+    }))
   }));
 }
 
@@ -316,13 +386,13 @@ export async function deleteInterviniente(id) {
 }
 
 // ---------- Cronología ----------
-export async function addCronologia(userId, causaId, descripcion, driveLink, usuarioNombre) {
+export async function addCronologia(userId, causaId, descripcion, driveLink, usuarioNombre, fechaActuacion) {
   const { data, error } = await supabase
     .from('cronologia')
     .insert({
       user_id: userId, causa_id: causaId, descripcion,
       drive_link: driveLink || null, usuario_nombre: usuarioNombre || null,
-      fecha: new Date().toISOString()
+      fecha: fechaActuacion || new Date().toISOString()
     })
     .select()
     .single();
@@ -334,6 +404,7 @@ export async function updateCronologia(id, patch) {
   const dbPatch = {};
   if (patch.descripcion !== undefined) dbPatch.descripcion = patch.descripcion;
   if (patch.driveLink !== undefined) dbPatch.drive_link = patch.driveLink;
+  if (patch.fecha !== undefined) dbPatch.fecha = patch.fecha;
   const { error } = await supabase.from('cronologia').update(dbPatch).eq('id', id);
   if (error) throw error;
 }
@@ -344,6 +415,102 @@ export async function deleteCronologia(id) {
 }
 
 // ---------- Domicilios de notificación ----------
+// ---------- Notificación múltiple: personas + sus domicilios ----------
+function notifPersonaPatchToDb(patch) {
+  const map = { parte: 'parte', nombre: 'nombre', estadoNotificacion: 'estado_notificacion', orden: 'orden' };
+  const out = {};
+  Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
+  return out;
+}
+export async function createNotificacionPersona(userId, causaId, patch) {
+  const dbPatch = notifPersonaPatchToDb(patch);
+  dbPatch.user_id = userId;
+  dbPatch.causa_id = causaId;
+  const { data, error } = await supabase.from('notificacion_personas').insert(dbPatch).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateNotificacionPersona(id, patch) {
+  const { data, error } = await supabase.from('notificacion_personas').update(notifPersonaPatchToDb(patch)).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteNotificacionPersona(id) {
+  const { error } = await supabase.from('notificacion_personas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+function notifDomicilioPatchToDb(patch) {
+  const map = { domicilio: 'domicilio', estado: 'estado', fecha: 'fecha', folio: 'folio', informadoPor: 'informado_por', orden: 'orden' };
+  const out = {};
+  Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
+  return out;
+}
+export async function createNotificacionDomicilio(personaId, patch) {
+  const dbPatch = notifDomicilioPatchToDb(patch);
+  dbPatch.persona_id = personaId;
+  const { data, error } = await supabase.from('notificacion_domicilios').insert(dbPatch).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateNotificacionDomicilio(id, patch) {
+  const { data, error } = await supabase.from('notificacion_domicilios').update(notifDomicilioPatchToDb(patch)).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteNotificacionDomicilio(id) {
+  const { error } = await supabase.from('notificacion_domicilios').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ---------- Oficios: personas + instituciones oficiadas ----------
+function oficioPersonaPatchToDb(patch) {
+  const map = { parte: 'parte', nombre: 'nombre', orden: 'orden' };
+  const out = {};
+  Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
+  return out;
+}
+export async function createOficioPersona(userId, causaId, patch) {
+  const dbPatch = oficioPersonaPatchToDb(patch);
+  dbPatch.user_id = userId;
+  dbPatch.causa_id = causaId;
+  const { data, error } = await supabase.from('oficios_personas').insert(dbPatch).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateOficioPersona(id, patch) {
+  const { data, error } = await supabase.from('oficios_personas').update(oficioPersonaPatchToDb(patch)).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteOficioPersona(id) {
+  const { error } = await supabase.from('oficios_personas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+function oficioInstitucionPatchToDb(patch) {
+  const map = { institucion: 'institucion', tramitacion: 'tramitacion', respuesta: 'respuesta', fecha: 'fecha', folio: 'folio', orden: 'orden' };
+  const out = {};
+  Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
+  return out;
+}
+export async function createOficioInstitucion(personaId, patch) {
+  const dbPatch = oficioInstitucionPatchToDb(patch);
+  dbPatch.persona_id = personaId;
+  const { data, error } = await supabase.from('oficios_instituciones').insert(dbPatch).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function updateOficioInstitucion(id, patch) {
+  const { data, error } = await supabase.from('oficios_instituciones').update(oficioInstitucionPatchToDb(patch)).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+}
+export async function deleteOficioInstitucion(id) {
+  const { error } = await supabase.from('oficios_instituciones').delete().eq('id', id);
+  if (error) throw error;
+}
+
 export async function replaceDomicilios(userId, causaId, domicilios) {
   const { error: delErr } = await supabase.from('domicilios_notificacion').delete().eq('causa_id', causaId);
   if (delErr) throw delErr;
@@ -480,6 +647,7 @@ export async function deleteEncargo(id) {
 function eventoFromDb(e) {
   return {
     id: e.id, causaId: e.causa_id, tipo: e.tipo, titulo: e.titulo, descripcion: e.descripcion,
+    tipoAudiencia: e.tipo_audiencia,
     fecha: e.fecha, horaInicio: e.hora_inicio, horaTermino: e.hora_termino,
     modalidad: e.modalidad, ubicacion: e.ubicacion, enlace: e.enlace,
     estado: e.estado, prioridad: e.prioridad, observaciones: e.observaciones,
@@ -494,6 +662,7 @@ function eventoFromDb(e) {
 function eventoPatchToDb(patch) {
   const map = {
     tipo: 'tipo', titulo: 'titulo', descripcion: 'descripcion', fecha: 'fecha',
+    tipoAudiencia: 'tipo_audiencia',
     horaInicio: 'hora_inicio', horaTermino: 'hora_termino', modalidad: 'modalidad',
     ubicacion: 'ubicacion', enlace: 'enlace', estado: 'estado', prioridad: 'prioridad',
     observaciones: 'observaciones', creadoPor: 'creado_por',
