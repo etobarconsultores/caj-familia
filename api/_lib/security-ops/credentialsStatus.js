@@ -1,12 +1,8 @@
-import { requerirMetodo, obtenerUsuarioDesdeRequest, extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../_lib/supabaseServer.js';
-import { esUuidValido } from '../_lib/validation.js';
+import { extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../supabaseServer.js';
+import { esUuidValido } from '../validation.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'POST')) return;
+export async function credentialsStatus(req, res, usuario) {
   try {
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
     const { causaId } = req.body || {};
     if (!esUuidValido(causaId)) return res.status(400).json({ error: 'causaId inválido.' });
 
@@ -37,7 +33,7 @@ export default async function handler(req, res) {
       claveUnicaGuardada: !!(data && data.clave_unica_enc)
     });
   } catch (e) {
-    console.error('credentials/status error:', e.message);
+    console.error('credentials.status error:', e.message);
     res.status(500).json({ error: 'No se pudo consultar el estado de las credenciales.' });
   }
 }

@@ -1,13 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import { requerirMetodo, obtenerUsuarioDesdeRequest, crearClienteAdmin } from '../../_lib/supabaseServer.js';
-import { hashearPin, formatoPinValido } from '../../_lib/pin.js';
+import { crearClienteAdmin } from '../supabaseServer.js';
+import { hashearPin, formatoPinValido } from '../pin.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'POST')) return;
+export async function pinReset(req, res, usuario) {
   try {
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
     const { currentPassword, newPin, newPinConfirm } = req.body || {};
     if (!currentPassword) {
       return res.status(400).json({ error: 'Ingresa tu contraseña actual.' });
@@ -46,7 +42,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({ ok: true });
   } catch (e) {
-    console.error('security/pin/reset error:', e.message);
+    console.error('pin.reset error:', e.message);
     res.status(500).json({ error: 'No se pudo restablecer el PIN.' });
   }
 }

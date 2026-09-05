@@ -1,13 +1,12 @@
-import { requerirMetodo, obtenerUsuarioDesdeRequest, extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../_lib/supabaseServer.js';
-import { cifrarCredencial } from '../_lib/crypto.js';
-import { esUuidValido, columnaParaCampo, eliminarEsValido, eliminarEsTrue } from '../_lib/validation.js';
+import { extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../supabaseServer.js';
+import { cifrarCredencial } from '../crypto.js';
+import { esUuidValido, columnaParaCampo, eliminarEsValido, eliminarEsTrue } from '../validation.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'POST')) return;
+// Lógica idéntica a la del antiguo api/credentials/save.js. El método y el
+// JWT ya fueron validados una sola vez por el dispatcher (api/security.js),
+// que pasa `usuario` ya resuelto.
+export async function credentialsSave(req, res, usuario) {
   try {
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
     const { causaId, campo, valor, eliminar } = req.body || {};
 
     if (!esUuidValido(causaId)) {
@@ -73,7 +72,7 @@ export default async function handler(req, res) {
   } catch (e) {
     // Nunca se loguea el valor de la credencial, ni en texto plano ni ya
     // cifrado -- solo el mensaje técnico interno.
-    console.error('credentials/save error:', e.message);
+    console.error('credentials.save error:', e.message);
     res.status(500).json({ error: 'No se pudo guardar la credencial.' });
   }
 }

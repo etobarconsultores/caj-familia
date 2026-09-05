@@ -1,12 +1,8 @@
-import { requerirMetodo, obtenerUsuarioDesdeRequest, crearClienteAdmin } from '../../_lib/supabaseServer.js';
-import { hashearPin, formatoPinValido } from '../../_lib/pin.js';
+import { crearClienteAdmin } from '../supabaseServer.js';
+import { hashearPin, formatoPinValido } from '../pin.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'POST')) return;
+export async function pinCreate(req, res, usuario) {
   try {
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
     const { pin, pinConfirm } = req.body || {};
     if (!formatoPinValido(pin)) {
       return res.status(400).json({ error: 'El PIN debe tener exactamente 4 dígitos.' });
@@ -36,7 +32,7 @@ export default async function handler(req, res) {
     res.status(200).json({ ok: true });
   } catch (e) {
     // Nunca se loguea el PIN ni el hash -- solo el mensaje técnico interno.
-    console.error('security/pin/create error:', e.message);
+    console.error('pin.create error:', e.message);
     res.status(500).json({ error: 'No se pudo crear el PIN.' });
   }
 }

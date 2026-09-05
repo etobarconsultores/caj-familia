@@ -1,11 +1,7 @@
-import { requerirMetodo, obtenerUsuarioDesdeRequest, crearClienteAdmin } from '../../_lib/supabaseServer.js';
+import { crearClienteAdmin } from '../supabaseServer.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'GET')) return;
+export async function pinStatus(req, res, usuario) {
   try {
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
     const admin = crearClienteAdmin();
     const { data, error } = await admin
       .from('security_settings')
@@ -18,7 +14,7 @@ export default async function handler(req, res) {
     // o no una fila para esta usuaria.
     res.status(200).json({ pinConfigurado: !!data });
   } catch (e) {
-    console.error('security/pin/status error:', e.message);
+    console.error('pin.status error:', e.message);
     res.status(500).json({ error: 'No se pudo consultar el estado del PIN.' });
   }
 }

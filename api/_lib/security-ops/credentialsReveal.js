@@ -1,17 +1,15 @@
-import { requerirMetodo, obtenerUsuarioDesdeRequest, extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../_lib/supabaseServer.js';
-import { compararPin, formatoPinValido, iniciarIntentoPin, reiniciarIntentosPin } from '../_lib/pin.js';
-import { minutosRestantesDesde } from '../_lib/throttle.js';
-import { descifrarCredencial } from '../_lib/crypto.js';
-import { esUuidValido, columnaParaCampo } from '../_lib/validation.js';
+import { extraerJwt, crearClienteConJWT, crearClienteAdmin } from '../supabaseServer.js';
+import { compararPin, formatoPinValido, iniciarIntentoPin, reiniciarIntentosPin } from '../pin.js';
+import { minutosRestantesDesde } from '../throttle.js';
+import { descifrarCredencial } from '../crypto.js';
+import { esUuidValido, columnaParaCampo } from '../validation.js';
 
-export default async function handler(req, res) {
-  if (!requerirMetodo(req, res, 'POST')) return;
+// Lógica idéntica a la del antiguo api/credentials/reveal.js (mismo orden
+// de 10 pasos). El método y el JWT ya fueron validados una sola vez por el
+// dispatcher (api/security.js), que pasa `usuario` ya resuelto.
+export async function credentialsReveal(req, res, usuario) {
   try {
-    // 1) Validar el JWT y obtener la usuaria autenticada.
-    const usuario = await obtenerUsuarioDesdeRequest(req);
-    if (!usuario) return res.status(401).json({ error: 'No autenticado' });
-
-    // 2) Validar causaId, campo y formato de PIN -- antes de crear
+    // 1) Validar causaId, campo y formato de PIN -- antes de crear
     // cualquier cliente de Supabase.
     const { causaId, campo, pin } = req.body || {};
 
@@ -26,11 +24,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'El PIN debe tener exactamente 4 dígitos.' });
     }
 
-    // 3) Crear el cliente Supabase con el JWT de la propia usuaria.
+    // 2) Crear el cliente Supabase con el JWT de la propia usuaria.
     const jwt = extraerJwt(req);
     const clienteUsuaria = crearClienteConJWT(jwt);
 
-    // 4) Verificar que la causa exista y le pertenezca, dejando que RLS
+    // 3) Verificar que la causa exista y le pertenezca, dejando que RLS
     // autorice o rechace -- esto ocurre ANTES de tocar service_role o
     // cualquier cosa relacionada con el PIN. No se usa service_role para
     // decidir esto bajo ninguna circunstancia.
@@ -44,12 +42,12 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'La causa no existe o no te pertenece.' });
     }
 
-    // 5) Solo después de confirmar la propiedad de la causa, crear/usar
+    // 4) Solo después de confirmar la propiedad de la causa, crear/usar
     // el cliente service_role -- necesario porque security_settings y
     // case_credentials no tienen policies para authenticated.
     const admin = crearClienteAdmin();
 
-    // 6) Reservar el intento de forma ATÓMICA, ANTES de leer pin_hash y
+    // 5) Reservar el intento de forma ATÓMICA, ANTES de leer pin_hash y
     // ANTES de comparar nada. De miles de solicitudes concurrentes, como
     // máximo 5 por ciclo de 15 minutos reciben allowed=true -- el resto
     // se rechaza acá mismo, sin gastar ningún bcrypt.compare.
@@ -59,7 +57,7 @@ export default async function handler(req, res) {
     } catch (errReserva) {
       // Fallar cerrado: si no se pudo reservar el intento de forma
       // segura, NO se compara nada y NO se revela nada.
-      console.error('credentials/reveal: fallo al reservar intento:', errReserva.message);
+      console.error('credentials.reveal: fallo al reservar intento:', errReserva.message);
       return res.status(500).json({ error: 'No se pudo verificar el PIN de forma segura. Intenta nuevamente.' });
     }
 
@@ -68,7 +66,7 @@ export default async function handler(req, res) {
       return res.status(423).json({ error: `PIN bloqueado temporalmente. Intenta en ${minutos} minuto(s).` });
     }
 
-    // 7) Recién con el cupo ya reservado, leer security_settings y
+    // 6) Recién con el cupo ya reservado, leer security_settings y
     // comparar el PIN con bcrypt. Nunca se devuelve pin_hash al cliente.
     const { data: settings, error: errSettings } = await admin
       .from('security_settings')
@@ -95,17 +93,17 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'PIN incorrecto.' });
     }
 
-    // 8) PIN correcto -> reinicio atómico del ciclo. Si esto falla, se
+    // 7) PIN correcto -> reinicio atómico del ciclo. Si esto falla, se
     // falla cerrado: no se revela la credencial.
     try {
       await reiniciarIntentosPin(admin, usuario.id);
     } catch (errReset) {
-      console.error('credentials/reveal: fallo al reiniciar intentos tras PIN correcto:', errReset.message);
+      console.error('credentials.reveal: fallo al reiniciar intentos tras PIN correcto:', errReset.message);
       return res.status(500).json({ error: 'No se pudo completar la verificación de forma segura. Intenta nuevamente.' });
     }
 
-    // 9) Leer case_credentials -- la propiedad de la causa ya fue
-    // confirmada en el paso 4, así que esta lectura con service_role es
+    // 8) Leer case_credentials -- la propiedad de la causa ya fue
+    // confirmada en el paso 3, así que esta lectura con service_role es
     // solo para acceder a una tabla sin policies para authenticated, no
     // para decidir pertenencia.
     const { data: cred, error: errCred } = await admin
@@ -118,12 +116,12 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: 'No hay una credencial guardada para este campo.' });
     }
 
-    // 10) Descifrar únicamente la credencial solicitada y devolverla.
+    // 9) Descifrar únicamente la credencial solicitada y devolverla.
     const valor = descifrarCredencial(cred[columna], { userId: usuario.id, causaId, campo });
     res.status(200).json({ valor });
   } catch (e) {
     // Nunca se loguea el PIN, el hash, el texto plano ni el ciphertext.
-    console.error('credentials/reveal error:', e.message);
+    console.error('credentials.reveal error:', e.message);
     res.status(500).json({ error: 'No se pudo revelar la credencial.' });
   }
 }
