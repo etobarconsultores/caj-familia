@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
+    "bcryptjs": "^2.4.3",
     "googleapis": "^144.0.0",
     "jspdf": "^2.5.2",
     "pdfjs-dist": "^3.11.174",
