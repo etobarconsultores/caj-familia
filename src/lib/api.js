@@ -1067,10 +1067,18 @@ export async function fetchMisAccesos(userId) {
 // auth.uid() = id; las policies de RLS operan a nivel de fila, no de
 // columna, así que cubren telefono sin necesitar ninguna policy nueva),
 // sin necesitar service_role ni ningún endpoint propio.
-export async function updateProfileDatos(userId, { nombreCompleto, telefono }) {
+export async function updateProfileDatos(userId, { nombreCompleto, telefono, recoveryEmail, recoveryPhone } = {}) {
+  const cambios = {};
+  if (nombreCompleto !== undefined) cambios.nombre_completo = nombreCompleto;
+  if (telefono !== undefined) cambios.telefono = telefono;
+  if (recoveryEmail !== undefined) cambios.recovery_email = recoveryEmail;
+  if (recoveryPhone !== undefined) cambios.recovery_phone = recoveryPhone;
+
+  if (Object.keys(cambios).length === 0) return;
+
   const { error } = await supabase
     .from('profiles')
-    .update({ nombre_completo: nombreCompleto, telefono })
+    .update(cambios)
     .eq('id', userId);
   if (error) throw error;
 }

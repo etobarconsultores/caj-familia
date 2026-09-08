@@ -13,6 +13,10 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text,
   nombre_completo text,
+  telefono text,
+  avatar_url text,
+  recovery_email text,
+  recovery_phone text,
   created_at timestamptz not null default now()
 );
 

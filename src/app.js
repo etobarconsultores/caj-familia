@@ -1036,10 +1036,16 @@ function mostrarSeccionCuenta(seccion) {
       </div>
 
       <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Teléfono de recuperación</div>
-      <div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente.</div>
+      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:8px;">Número alternativo para fines de seguridad y asistencia de recuperación.</div>
+      <input id="cuenta-recovery-phone" type="tel" value="${CURRENT_USER.recoveryPhone || ''}" placeholder="Ej. +56 9 1234 5678" />
 
       <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Correo de recuperación</div>
-      <div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente.</div>
+      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:8px;">Correo alternativo para avisos de seguridad y asistencia de recuperación.</div>
+      <input id="cuenta-recovery-email" type="email" value="${CURRENT_USER.recoveryEmail || ''}" placeholder="correo@ejemplo.com" />
+
+      <div style="margin-top:12px;">
+        <button type="button" class="btn" id="cuenta-guardar-recovery">Guardar datos de recuperación</button>
+      </div>
 
       <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">PIN de seguridad</div>
       <div id="cuenta-pin-section">
@@ -1055,6 +1061,40 @@ function mostrarSeccionCuenta(seccion) {
     cargarEstadoTotp(cont);
     cargarEstadoSeguridad();
     renderCierreCuentaSeccion(cont);
+
+    const btnGuardarRecovery = cont.querySelector("#cuenta-guardar-recovery");
+    if (btnGuardarRecovery) {
+      btnGuardarRecovery.addEventListener("click", async () => {
+        const recoveryEmail = cont.querySelector("#cuenta-recovery-email")?.value.trim() || "";
+        const recoveryPhone = cont.querySelector("#cuenta-recovery-phone")?.value.trim() || "";
+
+        if (recoveryEmail && (!recoveryEmail.includes("@") || !recoveryEmail.includes("."))) {
+          toast("Ingresa un correo de recuperación válido.");
+          return;
+        }
+
+        if (recoveryEmail && CURRENT_USER.email && recoveryEmail.toLowerCase() === CURRENT_USER.email.toLowerCase()) {
+          toast("El correo de recuperación debe ser distinto del correo principal.");
+          return;
+        }
+
+        btnGuardarRecovery.disabled = true;
+        try {
+          await api.updateProfileDatos(CURRENT_USER.id, {
+            recoveryEmail: recoveryEmail || null,
+            recoveryPhone: recoveryPhone || null
+          });
+          CURRENT_USER.recoveryEmail = recoveryEmail || null;
+          CURRENT_USER.recoveryPhone = recoveryPhone || null;
+          toast("Datos de recuperación guardados.");
+        } catch (e) {
+          console.error("No se pudieron guardar los datos de recuperación:", e);
+          toast("No se pudieron guardar los datos de recuperación.");
+        } finally {
+          btnGuardarRecovery.disabled = false;
+        }
+      });
+    }
     return;
   }
 
@@ -1447,11 +1487,13 @@ function cerrarPantallaLegalGate() {
 }
 
 async function onSessionReady(session) {
-  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, avatarUrl: null };
+  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, recoveryEmail: null, recoveryPhone: null, avatarUrl: null };
   try {
-    const { data: profile } = await supabase.from('profiles').select('nombre_completo, telefono').eq('id', CURRENT_USER.id).single();
+    const { data: profile } = await supabase.from('profiles').select('nombre_completo, telefono, recovery_email, recovery_phone').eq('id', CURRENT_USER.id).single();
     if (profile?.nombre_completo) CURRENT_USER.nombre = profile.nombre_completo;
     CURRENT_USER.telefono = profile?.telefono || null;
+      CURRENT_USER.recoveryEmail = profile?.recovery_email || null;
+      CURRENT_USER.recoveryPhone = profile?.recovery_phone || null;
   } catch (e) { /* perfil aún no creado por el trigger, no es crítico */ }
 
   // avatar_url (que en realidad guarda una RUTA, no una URL pública -- el
