@@ -8,7 +8,17 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 // ============================================================================
 // Estado
 // ============================================================================
-let CURRENT_USER = null;       // { id, email, nombre }
+let CURRENT_USER = null;       // { id, email, nombre, telefono, avatarUrl }
+
+// Flags de activación para funciones que dependen de una migración SQL o de
+// un bucket de Storage todavía NO ejecutados/creados en Supabase. El código
+// de integración de cada una ya está escrito y es seguro (nunca se invoca
+// mientras el flag esté en false), pero permanece inactivo hasta el paso
+// manual correspondiente -- ver la documentación entregada junto con esta
+// ronda para el procedimiento exacto de activación.
+const PRACTICA_TABLAS_DISPONIBLES = true; // requiere sql/migration_v1_7_practica_y_avatar.sql
+const AVATAR_STORAGE_DISPONIBLE = true;   // requiere crear el bucket "avatars" + sus policies
+const LEGAL_CURRENT_VERSION = '1.0';   // versión vigente de Términos, Privacidad y Seguridad
 let CAUSAS = [];
 let ENCARGOS = [];
 let RECEPTORES = [];
@@ -178,9 +188,23 @@ function wireAuthUI() {
     const nombre = document.getElementById('register-nombre').value.trim();
     const email = document.getElementById('register-email').value.trim();
     const password = document.getElementById('register-password').value;
+
+    const termsAccepted = document.getElementById('register-accept-terms')?.checked === true;
+    const privacyAcknowledged = document.getElementById('register-ack-privacy')?.checked === true;
+    const securityAcknowledged = document.getElementById('register-ack-security')?.checked === true;
+
+    if (!termsAccepted || !privacyAcknowledged || !securityAcknowledged) {
+      errEl.textContent = 'Debes aceptar los Términos y declarar haber leído las políticas de Privacidad y Seguridad para crear tu cuenta.';
+      return;
+    }
+
     try {
       const { signUp } = await import('./auth.js');
-      await signUp(email, password, nombre);
+      await signUp(email, password, nombre, {
+        termsAccepted,
+        privacyAcknowledged,
+        securityAcknowledged
+      });
       okEl.textContent = 'Cuenta creada. Revisa tu correo para confirmar (si tu proyecto lo requiere) y luego inicia sesión.';
       setTimeout(() => switchAuthForm('login'), 2500);
     } catch (err) {
@@ -203,10 +227,14 @@ function wireAuthUI() {
     }
   });
 
-  document.getElementById('btn-logout').addEventListener('click', async () => {
-    const { signOut } = await import('./auth.js');
-    await signOut();
-  });
+  const avatarBtn = document.getElementById('avatar-btn');
+  if (avatarBtn) {
+    actualizarAvatar();
+    avatarBtn.addEventListener('click', () => alternarMenuAvatar());
+    // Nota: #avatar-btn ya es un <button> real -- Enter/Espacio ya activan
+    // "click" de forma nativa. No se agrega un keydown adicional para no
+    // duplicar la apertura/cierre del menú.
+  }
 
   const btnCambiarModulo = document.getElementById('btn-cambiar-modulo');
   if (btnCambiarModulo) btnCambiarModulo.addEventListener('click', () => volverASelectorModulo());
@@ -221,6 +249,862 @@ function wireAuthUI() {
   });
 }
 
+// ============================================================================
+// Seguridad de la cuenta (PIN) — modal dinámico, mismo patrón ya usado en
+// abrirImportadorTurnoMensualPdf: se elimina cualquier instancia previa, se
+// inserta en document.body, se cierra con X o con clic afuera. No agrega
+// ningún elemento a index.html ni ninguna clase nueva a style.css.
+// ============================================================================
+
+function formatoPinValidoLocal(pin) {
+  return typeof pin === 'string' && /^\d{4}$/.test(pin);
+}
+
+// Limpieza defensiva: nunca dejar un PIN ni una contraseña en el DOM más
+// tiempo del necesario. Se llama tras una operación exitosa y al cancelar
+// o cerrar el modal.
+function limpiarCamposSeguridad(contenedor) {
+  if (!contenedor) return;
+  contenedor.querySelectorAll('input[type="password"]').forEach(inp => { inp.value = ''; });
+}
+
+// ---------- Sección "Datos de la cuenta" (solo lectura) ----------
+function datosCuentaHtml() {
+  return `
+    <div><label>Nombre</label><input type="text" class="ct-input" id="cuenta-nombre-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.nombre) || '')}"></div>
+    <div><label>Correo electrónico</label><input type="text" class="ct-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.email) || '')}" disabled></div>
+    <div><label>Teléfono</label><input type="text" class="ct-input" id="cuenta-telefono-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.telefono) || '')}"></div>
+    <div style="margin-top:10px;"><button class="btn small primary" id="cuenta-guardar-datos" type="button">Guardar cambios</button></div>
+  `;
+}
+
+// ---------- Sección "Seguridad de acceso" (cambiar contraseña) ----------
+function mostrarVistaPassword(vista) {
+  const cont = document.getElementById('cuenta-password-section');
+  if (!cont) return;
+
+  if (vista === 'compacto') {
+    cont.innerHTML = `<button class="btn small" id="cuenta-ir-cambiar-password" type="button">Cambiar contraseña</button>`;
+    cont.querySelector('#cuenta-ir-cambiar-password').addEventListener('click', () => mostrarVistaPassword('form'));
+    return;
+  }
+
+  if (vista === 'form') {
+    cont.innerHTML = `
+      <div><label>Contraseña actual</label><input type="password" id="cp-current" autocomplete="off"></div>
+      <div><label>Contraseña nueva</label><input type="password" id="cp-new" autocomplete="off"></div>
+      <div><label>Confirmar contraseña nueva</label><input type="password" id="cp-new-confirm" autocomplete="off"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn small primary" id="cuenta-guardar-password" type="button">Guardar contraseña</button>
+        <button class="btn small" id="cuenta-cancelar-password" type="button">Cancelar</button>
+      </div>
+    `;
+    cont.querySelector('#cuenta-cancelar-password').addEventListener('click', () => {
+      limpiarCamposSeguridad(cont);
+      mostrarVistaPassword('compacto');
+    });
+    cont.querySelector('#cuenta-guardar-password').addEventListener('click', async () => {
+      const actual = cont.querySelector('#cp-current').value;
+      const nueva = cont.querySelector('#cp-new').value;
+      const nuevaConfirm = cont.querySelector('#cp-new-confirm').value;
+      if (!actual) { toast('Ingresa tu contraseña actual.'); return; }
+      if (!nueva || nueva.length < 6) { toast('La contraseña nueva debe tener al menos 6 caracteres.'); return; }
+      if (nueva !== nuevaConfirm) { toast('Las contraseñas nuevas no coinciden.'); return; }
+      try {
+        const { verificarContrasenaActual, changePassword } = await import('./auth.js');
+        // 1) Verificar la contraseña actual con un cliente TEMPORAL Y
+        // AISLADO -- nunca con el cliente principal -- para no disparar
+        // SIGNED_IN sobre la sesión real de la app.
+        await verificarContrasenaActual(CURRENT_USER.email, actual);
+        // 2) Recién aquí, aplicar la nueva con el cliente principal. Esto
+        // sí dispara USER_UPDATED -- manejado en onAuthStateChange (no
+        // vuelve a ejecutar loadAll()).
+        await changePassword(nueva);
+        limpiarCamposSeguridad(cont);
+        toast('Contraseña actualizada correctamente');
+        mostrarVistaPassword('compacto');
+      } catch (e) {
+        toast(traducirError(e.message));
+      }
+    });
+    return;
+  }
+}
+
+// ---------- Sección "PIN de seguridad" (misma lógica ya construida y
+// probada, ahora dentro de #cuenta-pin-section en vez de su propio modal) ----------
+function mostrarVistaSeguridad(vista, contexto) {
+  const body = document.getElementById('cuenta-pin-section');
+  if (!body) return;
+
+  if (vista === 'cargando') {
+    body.innerHTML = `<div style="color:var(--ink-faint); font-size:13px;">Cargando…</div>`;
+    return;
+  }
+
+  if (vista === 'error') {
+    body.innerHTML = `<div style="color:var(--urgent); font-size:13px;">${escapeHtml((contexto && contexto.mensaje) || 'Ocurrió un error.')}</div>`;
+    return;
+  }
+
+  if (vista === 'configurar') {
+    body.innerHTML = `
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Define un PIN de 4 dígitos para revelar credenciales guardadas en Contacto.</div>
+      <div><label>PIN nuevo</label><input type="password" id="sg-pin" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div><label>Confirmar PIN</label><input type="password" id="sg-pin-confirm" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div style="margin-top:10px;"><button class="btn small primary" id="sg-guardar-configurar" type="button">Guardar PIN</button></div>
+    `;
+    body.querySelector('#sg-guardar-configurar').addEventListener('click', async () => {
+      const pin = body.querySelector('#sg-pin').value;
+      const pinConfirm = body.querySelector('#sg-pin-confirm').value;
+      if (!formatoPinValidoLocal(pin)) { toast('El PIN debe tener exactamente 4 dígitos.'); return; }
+      if (pin !== pinConfirm) { toast('Los PIN no coinciden.'); return; }
+      try {
+        await api.pinCreate(pin, pinConfirm);
+        limpiarCamposSeguridad(body);
+        toast('PIN configurado correctamente');
+        mostrarVistaSeguridad('resumen');
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+    return;
+  }
+
+  if (vista === 'resumen') {
+    body.innerHTML = `
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">PIN configurado.</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn small" id="sg-ir-cambiar" type="button">Cambiar PIN</button>
+        <button class="btn small" id="sg-ir-restablecer" type="button">Restablecer PIN</button>
+      </div>
+    `;
+    body.querySelector('#sg-ir-cambiar').addEventListener('click', () => mostrarVistaSeguridad('cambiar'));
+    body.querySelector('#sg-ir-restablecer').addEventListener('click', () => mostrarVistaSeguridad('restablecer'));
+    return;
+  }
+
+  if (vista === 'cambiar') {
+    body.innerHTML = `
+      <div><label>PIN actual</label><input type="password" id="sg-current-pin" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div><label>PIN nuevo</label><input type="password" id="sg-new-pin" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div><label>Confirmar PIN nuevo</label><input type="password" id="sg-new-pin-confirm" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn small primary" id="sg-guardar-cambiar" type="button">Guardar</button>
+        <button class="btn small" id="sg-cancelar" type="button">Cancelar</button>
+      </div>
+    `;
+    body.querySelector('#sg-cancelar').addEventListener('click', () => {
+      limpiarCamposSeguridad(body);
+      mostrarVistaSeguridad('resumen');
+    });
+    body.querySelector('#sg-guardar-cambiar').addEventListener('click', async () => {
+      const currentPin = body.querySelector('#sg-current-pin').value;
+      const newPin = body.querySelector('#sg-new-pin').value;
+      const newPinConfirm = body.querySelector('#sg-new-pin-confirm').value;
+      if (!formatoPinValidoLocal(newPin)) { toast('El PIN nuevo debe tener exactamente 4 dígitos.'); return; }
+      if (newPin !== newPinConfirm) { toast('Los PIN nuevos no coinciden.'); return; }
+      try {
+        await api.pinChange(currentPin, newPin, newPinConfirm);
+        limpiarCamposSeguridad(body);
+        toast('PIN actualizado correctamente');
+        mostrarVistaSeguridad('resumen');
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+    return;
+  }
+
+  if (vista === 'restablecer') {
+    body.innerHTML = `
+      <div><label>Contraseña actual de la cuenta</label><input type="password" id="sg-current-password" autocomplete="off"></div>
+      <div><label>PIN nuevo</label><input type="password" id="sg-new-pin" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div><label>Confirmar PIN nuevo</label><input type="password" id="sg-new-pin-confirm" maxlength="4" inputmode="numeric" autocomplete="off"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn small primary" id="sg-guardar-restablecer" type="button">Guardar</button>
+        <button class="btn small" id="sg-cancelar" type="button">Cancelar</button>
+      </div>
+    `;
+    body.querySelector('#sg-cancelar').addEventListener('click', () => {
+      limpiarCamposSeguridad(body);
+      mostrarVistaSeguridad('resumen');
+    });
+    body.querySelector('#sg-guardar-restablecer').addEventListener('click', async () => {
+      const currentPassword = body.querySelector('#sg-current-password').value;
+      const newPin = body.querySelector('#sg-new-pin').value;
+      const newPinConfirm = body.querySelector('#sg-new-pin-confirm').value;
+      if (!formatoPinValidoLocal(newPin)) { toast('El PIN nuevo debe tener exactamente 4 dígitos.'); return; }
+      if (newPin !== newPinConfirm) { toast('Los PIN nuevos no coinciden.'); return; }
+      try {
+        await api.pinReset(currentPassword, newPin, newPinConfirm);
+        limpiarCamposSeguridad(body);
+        toast('PIN restablecido correctamente');
+        mostrarVistaSeguridad('resumen');
+      } catch (e) {
+        toast(e.message);
+      }
+    });
+    return;
+  }
+}
+
+// Se llama una sola vez al abrir el panel -- nunca se vuelve a consultar
+// pin.status después de crear/cambiar/restablecer, tal como se pidió.
+async function cargarEstadoSeguridad() {
+  mostrarVistaSeguridad('cargando');
+  try {
+    const estado = await api.pinStatus();
+    if (estado && estado.pinConfigurado) {
+      mostrarVistaSeguridad('resumen');
+    } else {
+      mostrarVistaSeguridad('configurar');
+    }
+  } catch (e) {
+    mostrarVistaSeguridad('error', { mensaje: e.message });
+  }
+}
+
+// ---------- Modal "Administración de cuenta" (reemplaza al modal
+// independiente de Seguridad/PIN) ----------
+// ---------- Avatar + menú de cuenta (reemplaza a .user-chip/#btn-mi-cuenta/#btn-logout) ----------
+function inicialAvatar() {
+  const fuente = (CURRENT_USER && (CURRENT_USER.nombre || CURRENT_USER.email)) || '';
+  const letra = fuente.trim().charAt(0).toUpperCase();
+  return letra || '?';
+}
+
+function actualizarAvatar() {
+  const btn = document.getElementById('avatar-btn');
+  if (!btn) return;
+  if (CURRENT_USER && CURRENT_USER.avatarUrl) {
+    btn.innerHTML = `<img src="${escapeHtml(CURRENT_USER.avatarUrl)}" alt="" style="width:100%; height:100%; border-radius:50%; object-fit:cover; object-position:center; display:block;">`;
+  } else {
+    btn.innerHTML = `<span id="avatar-inicial">${escapeHtml(inicialAvatar())}</span>`;
+  }
+}
+
+async function cerrarSesionApp() {
+  // Mismo flujo de logout de siempre -- no se duplica ninguna lógica.
+  const { signOut } = await import('./auth.js');
+  await signOut();
+}
+
+// Referencia a los listeners de document del menú abierto -- permite
+// quitarlos explícitamente al cerrar, para no duplicarlos nunca si el
+// menú se vuelve a abrir.
+let _avatarMenuHandlers = null;
+
+function cerrarMenuAvatar() {
+  const menu = document.getElementById('avatar-menu');
+  if (menu) menu.remove();
+  if (_avatarMenuHandlers) {
+    document.removeEventListener('click', _avatarMenuHandlers.click, true);
+    document.removeEventListener('keydown', _avatarMenuHandlers.keydown, true);
+    _avatarMenuHandlers = null;
+  }
+}
+
+function abrirMenuAvatar() {
+  document.getElementById('avatar-menu')?.remove();
+
+  const btn = document.getElementById('avatar-btn');
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const nombre = (CURRENT_USER && CURRENT_USER.nombre) || '';
+  const correo = (CURRENT_USER && CURRENT_USER.email) || '';
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="avatar-menu" id="avatar-menu" role="menu" style="top:${rect.bottom + 8}px; right:${Math.max(8, window.innerWidth - rect.right)}px;">
+      <div class="avatar-menu-header">
+        <div class="avatar-menu-nombre">${escapeHtml(nombre || correo || '')}</div>
+        ${nombre ? `<div class="avatar-menu-correo">${escapeHtml(correo)}</div>` : ''}
+      </div>
+      <button type="button" class="avatar-menu-item" id="avatar-item-cuenta" role="menuitem">Administrar tu cuenta</button>
+      <button type="button" class="avatar-menu-item" id="avatar-item-privacidad" role="menuitem">Política de privacidad</button>
+      <button type="button" class="avatar-menu-item" id="avatar-item-seguridad" role="menuitem">Política de seguridad</button>
+      <button type="button" class="avatar-menu-item" id="avatar-item-condiciones" role="menuitem">Condiciones de uso</button>
+      <div class="avatar-menu-sep"></div>
+      <button type="button" class="avatar-menu-item" id="avatar-item-logout" role="menuitem">Cerrar sesión</button>
+    </div>
+  `);
+
+  document.getElementById('avatar-item-cuenta').addEventListener('click', () => {
+    cerrarMenuAvatar();
+    abrirModalAdministracionCuenta();
+  });
+  document.getElementById('avatar-item-privacidad').addEventListener('click', () => {
+    cerrarMenuAvatar();
+    window.open('/legal/privacidad.html', '_blank', 'noopener,noreferrer');
+  });
+  document.getElementById('avatar-item-seguridad').addEventListener('click', () => {
+    cerrarMenuAvatar();
+    window.open('/legal/seguridad.html', '_blank', 'noopener,noreferrer');
+  });
+  document.getElementById('avatar-item-condiciones').addEventListener('click', () => {
+    cerrarMenuAvatar();
+    window.open('/legal/terminos.html', '_blank', 'noopener,noreferrer');
+  });
+  document.getElementById('avatar-item-logout').addEventListener('click', () => {
+    cerrarMenuAvatar();
+    cerrarSesionApp();
+  });
+
+  // Cerrar al hacer clic afuera o con Escape. Se agregan DESPUÉS de que el
+  // click que abrió el menú ya terminó su fase de captura en document, así
+  // que ese mismo click nunca dispara el cierre inmediato.
+  const onDocClick = (e) => {
+    const menu = document.getElementById('avatar-menu');
+    const avatarBtn = document.getElementById('avatar-btn');
+    if (!menu) return;
+    if (menu.contains(e.target) || (avatarBtn && avatarBtn.contains(e.target))) return;
+    cerrarMenuAvatar();
+  };
+  const onDocKeydown = (e) => {
+    if (e.key === 'Escape') cerrarMenuAvatar();
+  };
+  _avatarMenuHandlers = { click: onDocClick, keydown: onDocKeydown };
+  document.addEventListener('click', onDocClick, true);
+  document.addEventListener('keydown', onDocKeydown, true);
+}
+
+function alternarMenuAvatar() {
+  if (document.getElementById('avatar-menu')) {
+    cerrarMenuAvatar();
+  } else {
+    abrirMenuAvatar();
+  }
+}
+
+let _cuentaEscHandler = null;
+
+function cerrarModalCuenta() {
+  const overlay = document.getElementById('cuenta-overlay');
+  if (!overlay) return;
+  overlay.querySelectorAll('input[type="password"]').forEach(inp => { inp.value = ''; });
+  if (_cuentaEscHandler) {
+    document.removeEventListener('keydown', _cuentaEscHandler, true);
+    _cuentaEscHandler = null;
+  }
+  overlay.remove();
+}
+
+// Contenido de cada sección del panel -- una sola visible a la vez. La
+// lógica de "Seguridad y acceso" (contraseña + PIN) es exactamente la ya
+// existente (mostrarVistaPassword/cargarEstadoSeguridad/mostrarVistaSeguridad),
+// sin ningún cambio interno -- solo se le da un contenedor nuevo donde vivir.
+// Foto de perfil: mientras AVATAR_STORAGE_DISPONIBLE sea false, solo
+// muestra un aviso -- nunca llama a Storage. Cuando se active, muestra
+// vista previa (inicial o foto actual), selección de archivo, y subida.
+function renderAvatarSeccion(cont) {
+  const row = cont.querySelector('#cuenta-avatar-row');
+  if (!row) return;
+  const previewInicial = (CURRENT_USER && CURRENT_USER.avatarUrl)
+    ? `<img src="${escapeHtml(CURRENT_USER.avatarUrl)}" alt="">`
+    : escapeHtml(inicialAvatar());
+
+  if (!AVATAR_STORAGE_DISPONIBLE) {
+    row.innerHTML = `
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
+        <div class="cuenta-avatar-preview">${previewInicial}</div>
+        <div style="color:var(--ink-faint); font-size:12px;">La foto de perfil estará disponible próximamente (requiere completar la configuración de almacenamiento).</div>
+      </div>
+    `;
+    return;
+  }
+
+  row.innerHTML = `
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
+      <div class="cuenta-avatar-preview" id="cuenta-avatar-preview">${previewInicial}</div>
+      <div>
+        <input type="file" id="cuenta-avatar-input" accept="image/png,image/jpeg,image/webp" style="display:none;">
+        <button class="btn small" id="cuenta-avatar-elegir" type="button">Seleccionar imagen</button>
+        <button class="btn small primary" id="cuenta-avatar-subir" type="button" disabled>Subir foto</button>
+      </div>
+    </div>
+  `;
+  const inputFile = row.querySelector('#cuenta-avatar-input');
+  const btnElegir = row.querySelector('#cuenta-avatar-elegir');
+  const btnSubir = row.querySelector('#cuenta-avatar-subir');
+  const preview = row.querySelector('#cuenta-avatar-preview');
+  let archivoSeleccionado = null;
+
+  btnElegir.addEventListener('click', () => inputFile.click());
+  inputFile.addEventListener('change', () => {
+    const file = inputFile.files && inputFile.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('La imagen no puede superar 2 MB.'); inputFile.value = ''; return; }
+    archivoSeleccionado = file;
+    const urlPreview = URL.createObjectURL(file);
+    preview.innerHTML = `<img src="${urlPreview}" alt="">`;
+    btnSubir.disabled = false;
+  });
+  btnSubir.addEventListener('click', async () => {
+    if (!archivoSeleccionado) return;
+    btnSubir.disabled = true;
+    try {
+      const ruta = await api.uploadAvatar(CURRENT_USER.id, archivoSeleccionado);
+      await api.updateProfileAvatarUrl(CURRENT_USER.id, ruta);
+      CURRENT_USER.avatarPath = ruta;
+      // La URL firmada se resuelve aparte, solo para mostrarla ahora mismo
+      // -- nunca se persiste (expira; ver getAvatarSignedUrl en api.js).
+      CURRENT_USER.avatarUrl = await api.getAvatarSignedUrl(ruta);
+      actualizarAvatar();
+      toast('Foto de perfil actualizada correctamente');
+    } catch (e) {
+      toast('No se pudo subir la foto: ' + e.message);
+      btnSubir.disabled = false;
+    }
+  });
+}
+
+// Datos de práctica: mientras PRACTICA_TABLAS_DISPONIBLES sea false, solo
+// muestra el aviso de "próximas versiones" -- nunca llama a
+// fetchPracticaUsuaria, así que nunca consulta una tabla inexistente.
+function fechaIsoADdMmYyyy(fechaIso) {
+  if (!fechaIso) return '';
+  const m = String(fechaIso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+}
+
+function fechaDdMmYyyyAIso(valor) {
+  const m = String(valor || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return null;
+  const dia = Number(m[1]);
+  const mes = Number(m[2]);
+  const anio = Number(m[3]);
+  const d = new Date(Date.UTC(anio, mes - 1, dia));
+  if (d.getUTCFullYear() !== anio || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+async function renderPracticaSeccion(cont) {
+  const sec = cont.querySelector('#cuenta-practica-section');
+  if (!sec) return;
+  if (!PRACTICA_TABLAS_DISPONIBLES) return; // ya quedó el aviso por defecto en el HTML
+
+  sec.innerHTML = `<div style="color:var(--ink-faint); font-size:12.5px;">Cargando…</div>`;
+
+  try {
+    const practica = await api.fetchPracticaUsuaria(CURRENT_USER.id);
+
+    sec.innerHTML = `
+      <div><label>CAJ asignado</label><input type="text" class="ct-input" id="practica-caj" value="${escapeHtml(practica?.cajAsignado || '')}" placeholder="Ej.: Lo Prado"></div>
+      <div><label>Dirección de CAJ</label><input type="text" class="ct-input" id="practica-direccion" value="${escapeHtml(practica?.direccionCaj || '')}"></div>
+      <div><label>Inicio de práctica</label><input type="text" class="ct-input" id="practica-inicio" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaInicio || ''))}"></div>
+      <div><label>Término de práctica</label><input type="text" class="ct-input" id="practica-termino" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaTermino || ''))}"></div>
+      <div style="margin-top:10px;"><button class="btn small primary" id="practica-guardar" type="button">Guardar datos de práctica</button></div>
+    `;
+
+    const inputCaj = sec.querySelector('#practica-caj');
+    const inputDireccion = sec.querySelector('#practica-direccion');
+    const inputInicio = sec.querySelector('#practica-inicio');
+    const inputTermino = sec.querySelector('#practica-termino');
+    const btnGuardar = sec.querySelector('#practica-guardar');
+
+    btnGuardar.addEventListener('click', async () => {
+      const cajAsignado = inputCaj.value.trim();
+      const direccionCaj = inputDireccion.value.trim();
+      const fechaInicio = fechaDdMmYyyyAIso(inputInicio.value);
+      const fechaTermino = fechaDdMmYyyyAIso(inputTermino.value);
+
+      if (!cajAsignado) { toast('Ingresa tu CAJ asignado.'); return; }
+      if (!direccionCaj) { toast('Ingresa la dirección de tu CAJ.'); return; }
+      if (!fechaInicio) { toast('La fecha de inicio debe tener formato DD-MM-AAAA.'); return; }
+      if (!fechaTermino) { toast('La fecha de término debe tener formato DD-MM-AAAA.'); return; }
+      if (fechaTermino < fechaInicio) { toast('La fecha de término no puede ser anterior al inicio.'); return; }
+
+      btnGuardar.disabled = true;
+      try {
+        const guardada = await api.savePracticaUsuaria(CURRENT_USER.id, {
+          practicaId: practica?.id || null,
+          cajAsignado,
+          direccionCaj,
+          fechaInicio,
+          fechaTermino
+        });
+        inputCaj.value = guardada.cajAsignado || cajAsignado;
+        inputInicio.value = fechaIsoADdMmYyyy(guardada.fechaInicio);
+        inputTermino.value = fechaIsoADdMmYyyy(guardada.fechaTermino);
+        inputDireccion.value = guardada.direccionCaj || direccionCaj;
+        toast('Datos de práctica actualizados correctamente');
+      } catch (e) {
+        console.error('Error guardando práctica:', e);
+        toast('No se pudieron guardar los datos de práctica: ' + e.message);
+      } finally {
+        btnGuardar.disabled = false;
+      }
+    });
+  } catch (e) {
+    console.error('Error cargando práctica:', e);
+    sec.innerHTML = `<div style="color:var(--urgent); font-size:12.5px;">No se pudo cargar la información de práctica.</div>`;
+  }
+}
+
+// ---------- Verificación en 2 pasos (TOTP) ----------
+// Estado en memoria de la sección, propio del panel abierto en este
+// momento -- se reconstruye cada vez que se entra a "Seguridad y acceso".
+let _totpEstado = { estado: 'cargando' };
+
+function render2FA(cont) {
+  const sec = cont.querySelector('#cuenta-totp-section');
+  if (!sec) return;
+  const e = _totpEstado;
+
+  if (e.estado === 'cargando') {
+    sec.innerHTML = `<div style="color:var(--ink-faint); font-size:12.5px;">Cargando…</div>`;
+    return;
+  }
+
+  if (e.estado === 'error') {
+    sec.innerHTML = `<div style="color:var(--urgent); font-size:12.5px;">${escapeHtml(e.mensaje || 'No se pudo consultar el estado.')}</div>`;
+    return;
+  }
+
+  if (e.estado === 'no_configurado') {
+    sec.innerHTML = `<button class="btn small" id="totp-configurar" type="button">Configurar verificación en 2 pasos</button>`;
+    sec.querySelector('#totp-configurar').addEventListener('click', () => iniciarConfiguracionTotp(cont));
+    return;
+  }
+
+  if (e.estado === 'configurando') {
+    sec.innerHTML = `
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Escanea este código con tu aplicación autenticadora (Google Authenticator, Authy, etc.) y luego ingresa el código de 6 dígitos que te muestre.</div>
+      <img src="${escapeHtml(e.qr)}" alt="Código QR" style="width:180px; height:180px; background:#fff; border-radius:6px; padding:6px; display:block;">
+      <div style="margin-top:8px; font-size:11.5px; color:var(--ink-faint);">¿No puedes escanearlo? Ingresa este código manualmente en tu aplicación autenticadora:</div>
+      <div style="font-family:var(--font-mono); font-size:13px; color:var(--ink-dim); word-break:break-all; margin-bottom:10px;">${escapeHtml(e.secret)}</div>
+      <div><label>Código de 6 dígitos</label><input type="text" class="ct-input" id="totp-codigo" maxlength="6" inputmode="numeric" autocomplete="off"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn small primary" id="totp-verificar" type="button">Verificar</button>
+        <button class="btn small" id="totp-cancelar" type="button">Cancelar</button>
+      </div>
+    `;
+    sec.querySelector('#totp-verificar').addEventListener('click', () => verificarCodigoTotp(cont));
+    sec.querySelector('#totp-cancelar').addEventListener('click', () => cancelarConfiguracionTotp(cont));
+    return;
+  }
+
+  if (e.estado === 'activo') {
+    sec.innerHTML = `
+      <div style="color:var(--ink-dim); font-size:12.5px; margin-bottom:8px;">Verificación en 2 pasos activa.</div>
+      <button class="btn small" id="totp-desactivar" type="button" style="border-color:var(--urgent); color:var(--urgent);">Desactivar verificación en 2 pasos</button>
+    `;
+    sec.querySelector('#totp-desactivar').addEventListener('click', () => desactivarTotp(cont));
+    return;
+  }
+
+  if (e.estado === 'confirmando_desactivacion') {
+    sec.innerHTML = `
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Tu sesión actual no tiene el segundo factor verificado. Ingresa tu código de 6 dígitos para confirmar la desactivación.</div>
+      <div><label>Código de 6 dígitos</label><input type="text" class="ct-input" id="totp-codigo-desactivar" maxlength="6" inputmode="numeric" autocomplete="off"></div>
+      <div id="totp-error-desactivar" style="color:var(--urgent); font-size:12px; margin-top:6px; min-height:14px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn small primary" id="totp-confirmar-desactivar" type="button">Confirmar y desactivar</button>
+        <button class="btn small" id="totp-cancelar-desactivar" type="button">Cancelar</button>
+      </div>
+    `;
+    sec.querySelector('#totp-confirmar-desactivar').addEventListener('click', () => confirmarDesactivacionConCodigo(cont));
+    sec.querySelector('#totp-cancelar-desactivar').addEventListener('click', () => {
+      _totpEstado = { estado: 'activo', factorId: e.factorId };
+      render2FA(cont);
+    });
+    return;
+  }
+}
+
+// Se llama una vez al entrar a "Seguridad y acceso": consulta los factores
+// ya inscritos (mfaListFactors) para decidir el estado inicial. Nunca
+// imprime nada de la respuesta en consola.
+async function cargarEstadoTotp(cont) {
+  _totpEstado = { estado: 'cargando' };
+  render2FA(cont);
+  try {
+    const { mfaListFactors } = await import('./auth.js');
+    const data = await mfaListFactors();
+    const factorActivo = (data.totp || []).find(f => f.status === 'verified');
+    _totpEstado = factorActivo ? { estado: 'activo', factorId: factorActivo.id } : { estado: 'no_configurado' };
+  } catch (e) {
+    _totpEstado = { estado: 'error', mensaje: e.message };
+  }
+  render2FA(cont);
+}
+
+async function iniciarConfiguracionTotp(cont) {
+  try {
+    const { mfaEnrollTotp } = await import('./auth.js');
+    const data = await mfaEnrollTotp();
+    // qr_code y secret nunca se imprimen en consola -- solo se guardan en
+    // memoria para pintar el QR y el texto de respaldo.
+    _totpEstado = { estado: 'configurando', factorId: data.id, qr: data.totp.qr_code, secret: data.totp.secret };
+    render2FA(cont);
+  } catch (e) {
+    toast('No se pudo iniciar la configuración: ' + e.message);
+  }
+}
+
+async function verificarCodigoTotp(cont) {
+  const sec = cont.querySelector('#cuenta-totp-section');
+  const input = sec.querySelector('#totp-codigo');
+  const code = input.value.trim();
+  if (!/^\d{6}$/.test(code)) { toast('El código debe tener exactamente 6 dígitos.'); return; }
+  try {
+    const { mfaVerificarTotp } = await import('./auth.js');
+    await mfaVerificarTotp(_totpEstado.factorId, code);
+    _totpEstado = { estado: 'activo', factorId: _totpEstado.factorId };
+    render2FA(cont);
+    toast('Verificación en 2 pasos activada correctamente');
+  } catch (e) {
+    toast('Código incorrecto o expirado: ' + e.message);
+  }
+}
+
+// Cancelar durante la inscripción: además de volver a la vista inicial,
+// intenta limpiar el factor "unverified" recién creado (best-effort -- si
+// falla, no es crítico, Supabase permite reintentar la inscripción igual).
+async function cancelarConfiguracionTotp(cont) {
+  const factorId = _totpEstado.factorId;
+  _totpEstado = { estado: 'no_configurado' };
+  render2FA(cont);
+  if (factorId) {
+    try {
+      const { mfaDesinscribir } = await import('./auth.js');
+      await mfaDesinscribir(factorId);
+    } catch (e) { /* limpieza best-effort, no crítico */ }
+  }
+}
+
+async function desactivarTotp(cont) {
+  if (!window.confirm('¿Desactivar la verificación en 2 pasos? Ya no se te pedirá un código adicional al iniciar sesión.')) return;
+
+  let nivel;
+  try {
+    const { mfaGetAal } = await import('./auth.js');
+    nivel = await mfaGetAal();
+  } catch (e) {
+    toast('No se pudo verificar tu nivel de sesión: ' + e.message);
+    return;
+  }
+
+  if (nivel.currentLevel !== 'aal2') {
+    // Supabase exige aal2 para desenrolar un factor verificado -- no se
+    // asume que la sesión ya está elevada: se pide el código primero.
+    _totpEstado = { estado: 'confirmando_desactivacion', factorId: _totpEstado.factorId };
+    render2FA(cont);
+    return;
+  }
+
+  await ejecutarDesenrolamientoTotp(cont, _totpEstado.factorId);
+}
+
+async function confirmarDesactivacionConCodigo(cont) {
+  const sec = cont.querySelector('#cuenta-totp-section');
+  const input = sec.querySelector('#totp-codigo-desactivar');
+  const errEl = sec.querySelector('#totp-error-desactivar');
+  const code = input.value.trim();
+  if (!/^\d{6}$/.test(code)) { errEl.textContent = 'El código debe tener exactamente 6 dígitos.'; return; }
+  const factorId = _totpEstado.factorId;
+  try {
+    const { mfaVerificarTotp } = await import('./auth.js');
+    // Eleva la sesión a aal2 -- dispara MFA_CHALLENGE_VERIFIED, pero como
+    // _gateEsperandoVerificacion sigue en false acá (no venimos del login),
+    // el callback global de onAuthStateChange no hace nada extra.
+    await mfaVerificarTotp(factorId, code);
+    await ejecutarDesenrolamientoTotp(cont, factorId);
+  } catch (e) {
+    errEl.textContent = 'Código incorrecto o expirado.';
+  }
+}
+
+async function ejecutarDesenrolamientoTotp(cont, factorId) {
+  try {
+    const { mfaDesinscribir } = await import('./auth.js');
+    await mfaDesinscribir(factorId);
+    _totpEstado = { estado: 'no_configurado' };
+    render2FA(cont);
+    toast('Verificación en 2 pasos desactivada');
+  } catch (e) {
+    toast('No se pudo desactivar: ' + e.message);
+  }
+}
+
+// Sección "Cerrar cuenta" dentro de Seguridad y acceso. La verificación
+// real de la contraseña ocurre en el backend (account.requestClosure,
+// api/_lib/account-ops/requestClosure.js) -- acá solo se recolecta el
+// valor y se envía, sin duplicar ninguna lógica de verificación en el
+// frontend.
+function renderCierreCuentaSeccion(cont) {
+  const sec = cont.querySelector('#cuenta-cierre-section');
+  if (!sec) return;
+  sec.innerHTML = `
+    <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Al cerrar tu cuenta, quedará pendiente de eliminación hasta 30 días. Puedes reactivarla en cualquier momento antes de esa fecha volviendo a iniciar sesión.</div>
+    <button class="btn small" id="cuenta-ir-cerrar" type="button" style="border-color:var(--urgent); color:var(--urgent);">Cerrar cuenta</button>
+  `;
+  sec.querySelector('#cuenta-ir-cerrar').addEventListener('click', () => {
+    sec.innerHTML = `
+      <div style="color:var(--urgent); font-size:12px; margin-bottom:8px;">Esta acción podrá revertirse mientras la cuenta se encuentre pendiente de eliminación. Una vez completada la eliminación definitiva, no podrá deshacerse. Tu cuenta quedará pendiente de eliminación por hasta 30 días. Ingresa tu contraseña actual para confirmar.</div>
+      <div><label>Contraseña actual</label><input type="password" id="cierre-current-password" autocomplete="off"></div>
+      <div id="cierre-error" style="color:var(--urgent); font-size:12px; margin-top:6px; min-height:14px;"></div>
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn small primary" id="cierre-confirmar" type="button" style="border-color:var(--urgent); color:var(--urgent);">Confirmar cierre de cuenta</button>
+        <button class="btn small" id="cierre-cancelar" type="button">Cancelar</button>
+      </div>
+    `;
+    sec.querySelector('#cierre-cancelar').addEventListener('click', () => renderCierreCuentaSeccion(cont));
+    sec.querySelector('#cierre-confirmar').addEventListener('click', async () => {
+      const input = sec.querySelector('#cierre-current-password');
+      const errEl = sec.querySelector('#cierre-error');
+      const password = input.value;
+      if (!password) { errEl.textContent = 'Ingresa tu contraseña actual.'; return; }
+      if (!window.confirm('¿Confirmas que quieres cerrar tu cuenta? Quedará pendiente de eliminación hasta 30 días, y podrás reactivarla antes de esa fecha volviendo a iniciar sesión.')) return;
+      try {
+        const resultado = await api.requestAccountClosure(password);
+        toast('Tu cuenta quedó pendiente de eliminación. Cerrando sesión...');
+        cerrarModalCuenta();
+        // La sesión ya fue invalidada del lado del servidor (todas las
+        // sesiones de la cuenta) -- esto además limpia el estado local del
+        // propio navegador de inmediato, sin esperar a que expire el
+        // access token vigente.
+        const { signOut } = await import('./auth.js');
+        await signOut();
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    });
+  });
+}
+
+function mostrarSeccionCuenta(seccion) {
+  document.querySelectorAll('.cuenta-nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.seccion === seccion);
+  });
+  const cont = document.getElementById('cuenta-contenido');
+  if (!cont) return;
+
+  if (seccion === 'info') {
+    cont.innerHTML = `
+      <div class="subhead" style="margin-top:0;">Información personal</div>
+      <div id="cuenta-avatar-row"></div>
+      ${datosCuentaHtml()}
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Datos de práctica</div>
+      <div id="cuenta-practica-section">
+        <div style="color:var(--ink-faint); font-size:12.5px;">Más información personal estará disponible en próximas versiones.</div>
+      </div>
+    `;
+    const btnGuardarDatos = cont.querySelector('#cuenta-guardar-datos');
+    if (btnGuardarDatos) {
+      btnGuardarDatos.addEventListener('click', async () => {
+        const inputNombre = cont.querySelector('#cuenta-nombre-input');
+        const inputTelefono = cont.querySelector('#cuenta-telefono-input');
+        const nuevoNombre = inputNombre.value.trim();
+        const nuevoTelefono = inputTelefono.value.trim();
+        if (!nuevoNombre) { toast('El nombre no puede quedar vacío.'); return; }
+        try {
+          // Una sola operación de update sobre public.profiles -- guarda
+          // nombre_completo y telefono juntos. RLS (profiles_update_own)
+          // ya permite esta escritura con el cliente normal, sin
+          // service_role ni backend nuevo.
+          await api.updateProfileDatos(CURRENT_USER.id, { nombreCompleto: nuevoNombre, telefono: nuevoTelefono || null });
+          CURRENT_USER.nombre = nuevoNombre;
+          CURRENT_USER.telefono = nuevoTelefono || null;
+          inputNombre.value = nuevoNombre;
+          inputTelefono.value = nuevoTelefono;
+          // El avatar (inicial) se actualiza de inmediato; el menú del
+          // avatar ya se reconstruye desde CURRENT_USER cada vez que se
+          // abre, así que reflejará el nombre nuevo la próxima vez sin
+          // necesitar ningún código adicional acá.
+          actualizarAvatar();
+          toast('Información personal actualizada correctamente');
+        } catch (e) {
+          toast('No se pudo guardar: ' + e.message);
+        }
+      });
+    }
+    renderAvatarSeccion(cont);
+    renderPracticaSeccion(cont);
+    return;
+  }
+
+  if (seccion === 'seguridad') {
+    cont.innerHTML = `
+      <div class="subhead" style="margin-top:0;">Contraseña de CAJ-Civil</div>
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Esta es la contraseña con la que inicias sesión en CAJ-Civil — distinta del PIN de 4 dígitos de abajo, que solo se usa para revelar credenciales guardadas en Contacto.</div>
+      <div id="cuenta-password-section"></div>
+
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Verificación en 2 pasos</div>
+      <div id="cuenta-totp-section">
+        <div style="color:var(--ink-faint); font-size:12.5px;">Cargando…</div>
+      </div>
+
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Teléfono de recuperación</div>
+      <div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente.</div>
+
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Correo de recuperación</div>
+      <div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente.</div>
+
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">PIN de seguridad</div>
+      <div id="cuenta-pin-section">
+        <div style="color:var(--ink-faint); font-size:13px;">Cargando…</div>
+      </div>
+
+      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Cerrar cuenta</div>
+      <div id="cuenta-cierre-section"></div>
+    `;
+    // Reutilización textual, sin cambios internos, de la lógica ya
+    // construida y probada en rondas anteriores.
+    mostrarVistaPassword('compacto');
+    cargarEstadoTotp(cont);
+    cargarEstadoSeguridad();
+    renderCierreCuentaSeccion(cont);
+    return;
+  }
+
+  if (seccion === 'suscripcion') {
+    cont.innerHTML = `
+      <div class="subhead" style="margin-top:0;">Administrar suscripción</div>
+      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:14px;">La gestión de planes y pagos estará disponible próximamente.</div>
+      <div><div class="k">Suscripción actual</div><div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:12px;">Disponible próximamente</div></div>
+      <div><div class="k">Cambiar plan</div><div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:12px;">Disponible próximamente</div></div>
+      <div><div class="k">Administrar forma de pago</div><div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente</div></div>
+    `;
+    return;
+  }
+}
+
+function abrirModalAdministracionCuenta() {
+  // Elimina cualquier instancia anterior antes de crear otra -- mismo
+  // patrón ya usado en abrirImportadorTurnoMensualPdf.
+  document.getElementById('cuenta-overlay')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="tm-overlay show" id="cuenta-overlay">
+      <div class="cuenta-panel" id="cuenta-panel">
+        <div class="tm-panel-head">
+          <h3>Administrar tu cuenta</h3>
+          <button class="close-x" id="cuenta-cerrar" type="button">&times;</button>
+        </div>
+        <div class="cuenta-panel-body">
+          <nav class="cuenta-nav">
+            <button type="button" class="cuenta-nav-item" data-seccion="info">Información personal</button>
+            <button type="button" class="cuenta-nav-item" data-seccion="seguridad">Seguridad y acceso</button>
+            <button type="button" class="cuenta-nav-item" data-seccion="suscripcion">Administrar suscripción</button>
+          </nav>
+          <div class="cuenta-contenido" id="cuenta-contenido"></div>
+        </div>
+      </div>
+    </div>
+  `);
+  const overlay = document.getElementById('cuenta-overlay');
+  overlay.addEventListener('click', (e) => { if (e.target.id === 'cuenta-overlay') cerrarModalCuenta(); });
+  document.getElementById('cuenta-cerrar').addEventListener('click', cerrarModalCuenta);
+  document.querySelectorAll('.cuenta-nav-item').forEach(btn => {
+    btn.addEventListener('click', () => mostrarSeccionCuenta(btn.dataset.seccion));
+  });
+
+  _cuentaEscHandler = (e) => { if (e.key === 'Escape') cerrarModalCuenta(); };
+  document.addEventListener('keydown', _cuentaEscHandler, true);
+
+  mostrarSeccionCuenta('info');
+}
+
 function traducirError(msg) {
   if (!msg) return 'Ocurrió un error. Intenta nuevamente.';
   if (msg.includes('Invalid login credentials')) return 'Correo o contraseña incorrectos.';
@@ -229,14 +1113,366 @@ function traducirError(msg) {
   return msg;
 }
 
-async function onSessionReady(session) {
-  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null };
+// ---------- Gate de verificación en 2 pasos al iniciar sesión ----------
+// true mientras se está esperando que la usuaria complete el desafío MFA
+// del LOGIN (no el de inscribir/desactivar un factor dentro de Administrar
+// cuenta, que se maneja aparte). Se usa para que el manejo global de
+// MFA_CHALLENGE_VERIFIED en onAuthStateChange sepa si debe (o no) terminar
+// de entrar a la app.
+let _gateEsperandoVerificacion = false;
+
+// Se llama para CADA SIGNED_IN/INITIAL_SESSION -- antes de onSessionReady().
+// Decide si la sesión ya alcanza el nivel de autenticación necesario, o si
+// hay que exigir el segundo factor antes de dejar pasar.
+async function verificarAalYEntrar(session) {
+  let nivel;
   try {
-    const { data: profile } = await supabase.from('profiles').select('nombre_completo').eq('id', CURRENT_USER.id).single();
+    const { mfaGetAal } = await import('./auth.js');
+    nivel = await mfaGetAal();
+  } catch (e) {
+    // Fallar CERRADO: si no se puede determinar el nivel de autenticación,
+    // no se asume que es seguro entrar. Se informa sin datos sensibles y se
+    // ofrece únicamente cerrar sesión (no hay nada más seguro que ofrecer).
+    console.error('No se pudo verificar el nivel de autenticación de la sesión.');
+    mostrarPantallaMfaGate({ soloError: true });
+    return;
+  }
+
+  if (nivel.nextLevel === 'aal2' && nivel.currentLevel !== 'aal2') {
+    // La usuaria tiene un factor TOTP verificado y la sesión todavía no lo
+    // completó -- se exige el desafío ANTES de entrar. onSessionReady() NO
+    // se llama todavía; se llama únicamente tras el MFA_CHALLENGE_VERIFIED
+    // correspondiente (ver el callback de onAuthStateChange).
+    _gateEsperandoVerificacion = true;
+    mostrarPantallaMfaGate({});
+    return;
+  }
+
+  // Sin factor pendiente (currentLevel ya es aal2, o la usuaria no tiene
+  // ningún factor inscrito -- nextLevel sería 'aal1'): antes de cargar la
+  // app se verifica que la cuenta no esté pendiente de cierre.
+  await verificarCierrePendienteYEntrar(session);
+}
+
+// ---------- Gate de cierre de cuenta pendiente ----------
+async function verificarCierrePendienteYEntrar(session) {
+  let estado;
+  try {
+    estado = await api.fetchAccountDeletionStatus(session.user.id);
+  } catch (e) {
+    // CORRECCIÓN: falla CERRADO, igual que el gate de MFA. Si no se puede
+    // determinar si la cuenta está pendiente de cierre, NO se asume que
+    // es seguro continuar -- se bloquea con una pantalla que ofrece
+    // reintentar o cerrar sesión, y nunca se llega a
+    // verificarLegalYEntrar()/onSessionReady().
+    console.error('No se pudo verificar el estado de cierre de la cuenta.');
+    mostrarPantallaCierrePendiente(session, null, { soloError: true });
+    return;
+  }
+  if (estado) {
+    mostrarPantallaCierrePendiente(session, estado, { soloError: false });
+    return;
+  }
+  // Sin cierre pendiente: si veníamos de una pantalla de error (reintentar
+  // con éxito), hay que cerrarla explícitamente antes de continuar --
+  // nunca se llegó a mostrarPantallaCierrePendiente() de nuevo en este
+  // camino, así que nadie más la habría cerrado.
+  cerrarPantallaCierrePendiente();
+  await verificarLegalYEntrar(session);
+}
+
+function mostrarPantallaCierrePendiente(session, estado, opciones = {}) {
+  const soloError = !!opciones.soloError;
+  document.getElementById('cierre-gate-overlay')?.remove();
+
+  let cuerpoHtml;
+  if (soloError) {
+    cuerpoHtml = `
+      <div style="color:var(--urgent); font-size:12.5px; line-height:1.5; margin-bottom:12px;">No se pudo verificar el estado de cierre de tu cuenta. Por seguridad, no es posible continuar hasta confirmarlo.</div>
+      <button class="btn small primary" id="cierre-gate-reintentar" type="button">Reintentar</button>
+    `;
+  } else {
+    let fecha = '';
+    try {
+      fecha = new Date(estado.scheduled_deletion_at).toLocaleDateString('es-CL', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (e) { /* formato inesperado -- se muestra vacío antes que romper */ }
+    cuerpoHtml = `
+      <div style="color:var(--ink-dim); font-size:13px; line-height:1.5; margin-bottom:12px;">Solicitaste cerrar tu cuenta. Se eliminará definitivamente a más tardar el <strong>${escapeHtml(fecha)}</strong> si no la reactivas antes de esa fecha.</div>
+      <div id="cierre-gate-error" style="color:var(--urgent); font-size:12px; margin-bottom:10px; min-height:14px;"></div>
+      <button class="btn small primary" id="cierre-gate-reactivar" type="button">Reactivar cuenta</button>
+    `;
+  }
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="tm-overlay show" id="cierre-gate-overlay">
+      <div style="background:var(--bg-elev); border:1px solid var(--line); border-radius:10px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,.5); overflow:hidden;">
+        <div class="tm-panel-head">
+          <h3>${soloError ? 'Verificación de cuenta' : 'Cuenta pendiente de eliminación'}</h3>
+        </div>
+        <div class="tm-panel-body" id="cierre-gate-body">
+          ${cuerpoHtml}
+          <div style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
+            <button class="btn small" id="cierre-gate-logout" type="button">Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  document.getElementById('cierre-gate-logout').addEventListener('click', async () => {
+    const { signOut } = await import('./auth.js');
+    await signOut();
+  });
+
+  if (soloError) {
+    document.getElementById('cierre-gate-reintentar').addEventListener('click', () => {
+      verificarCierrePendienteYEntrar(session);
+    });
+    return;
+  }
+
+  document.getElementById('cierre-gate-reactivar').addEventListener('click', async () => {
+    const btn = document.getElementById('cierre-gate-reactivar');
+    const errEl = document.getElementById('cierre-gate-error');
+    btn.disabled = true;
+    errEl.textContent = '';
+    try {
+      // No se pide contraseña adicional -- llegar hasta acá ya implica
+      // sesión autenticada y MFA completado si correspondía.
+      await api.reactivateAccount();
+      cerrarPantallaCierrePendiente();
+      await verificarLegalYEntrar(session);
+    } catch (e) {
+      errEl.textContent = 'No se pudo reactivar la cuenta. Intenta nuevamente.';
+      btn.disabled = false;
+    }
+  });
+}
+
+function cerrarPantallaCierrePendiente() {
+  document.getElementById('cierre-gate-overlay')?.remove();
+}
+
+// Pantalla bloqueante de verificación en 2 pasos durante el login.
+// A propósito NO tiene botón de cierre (X), NO se cierra con clic afuera y
+// NO se cierra con Escape -- no se puede saltar este desafío. La única
+// salida es verificar el código o cerrar sesión.
+function mostrarPantallaMfaGate({ soloError }) {
+  document.getElementById('mfa-gate-overlay')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="tm-overlay show" id="mfa-gate-overlay">
+      <div style="background:var(--bg-elev); border:1px solid var(--line); border-radius:10px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.5); overflow:hidden;">
+        <div class="tm-panel-head">
+          <h3>Verificación en 2 pasos</h3>
+        </div>
+        <div class="tm-panel-body" id="mfa-gate-body">
+          ${soloError ? `
+            <div style="color:var(--urgent); font-size:12.5px;">No se pudo verificar tu sesión. Cierra sesión e inténtalo nuevamente.</div>
+          ` : `
+            <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:8px;">Ingresa el código de 6 dígitos de tu aplicación autenticadora para continuar.</div>
+            <div><label>Código de 6 dígitos</label><input type="text" class="ct-input" id="mfa-gate-codigo" maxlength="6" inputmode="numeric" autocomplete="off"></div>
+            <div id="mfa-gate-error" style="color:var(--urgent); font-size:12px; margin-top:6px; min-height:14px;"></div>
+            <div style="margin-top:12px;"><button class="btn small primary" id="mfa-gate-verificar" type="button">Verificar</button></div>
+          `}
+          <div style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px;">
+            <button class="btn small" id="mfa-gate-logout" type="button">Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  document.getElementById('mfa-gate-logout').addEventListener('click', async () => {
+    _gateEsperandoVerificacion = false;
+    const { signOut } = await import('./auth.js');
+    await signOut();
+  });
+
+  if (soloError) return;
+
+  const btnVerificar = document.getElementById('mfa-gate-verificar');
+  const inputCodigo = document.getElementById('mfa-gate-codigo');
+  const errEl = document.getElementById('mfa-gate-error');
+
+  btnVerificar.addEventListener('click', async () => {
+    const codigo = inputCodigo.value.trim();
+    errEl.textContent = '';
+    if (!/^\d{6}$/.test(codigo)) { errEl.textContent = 'El código debe tener exactamente 6 dígitos.'; return; }
+    btnVerificar.disabled = true;
+    try {
+      const { mfaListFactors, mfaVerificarTotp } = await import('./auth.js');
+      const factores = await mfaListFactors();
+      const factor = (factores.totp || []).find(f => f.status === 'verified');
+      if (!factor) {
+        errEl.textContent = 'No se encontró tu factor de verificación. Cierra sesión e inténtalo nuevamente.';
+        btnVerificar.disabled = false;
+        return;
+      }
+      // Éxito: dispara MFA_CHALLENGE_VERIFIED, manejado en el callback
+      // principal de onAuthStateChange (cierra esta pantalla y llama a
+      // verificarLegalYEntrar() exactamente una vez, gracias a
+      // _gateEsperandoVerificacion).
+      await mfaVerificarTotp(factor.id, codigo);
+    } catch (e) {
+      errEl.textContent = 'Código incorrecto o expirado.';
+      btnVerificar.disabled = false;
+    }
+  });
+}
+
+function cerrarPantallaMfaGate() {
+  document.getElementById('mfa-gate-overlay')?.remove();
+}
+
+// ---------- Gate de documentos legales vigentes ----------
+// Se ejecuta DESPUÉS del control MFA y ANTES de onSessionReady(). De este
+// modo una cuenta antigua que todavía no tenga constancia de la versión
+// vigente no entra a la aplicación hasta completar este paso.
+function legalAcceptanceCompleta(rows) {
+  const porTipo = new Map((rows || []).map(r => [r.document_type, r]));
+  return porTipo.get('terms')?.document_version === LEGAL_CURRENT_VERSION
+    && porTipo.get('terms')?.action === 'accepted'
+    && porTipo.get('privacy')?.document_version === LEGAL_CURRENT_VERSION
+    && porTipo.get('privacy')?.action === 'acknowledged'
+    && porTipo.get('security')?.document_version === LEGAL_CURRENT_VERSION
+    && porTipo.get('security')?.action === 'acknowledged';
+}
+
+async function verificarLegalYEntrar(session) {
+  try {
+    const rows = await api.fetchLegalAcceptances(session.user.id, LEGAL_CURRENT_VERSION);
+    if (legalAcceptanceCompleta(rows)) {
+      cerrarPantallaLegalGate();
+      await onSessionReady(session);
+      return;
+    }
+    mostrarPantallaLegalGate(session, { soloError: false });
+  } catch (e) {
+    console.error('No se pudo verificar la aceptación de los documentos legales vigentes:', e);
+    mostrarPantallaLegalGate(session, { soloError: true });
+  }
+}
+
+function mostrarPantallaLegalGate(session, { soloError = false } = {}) {
+  cerrarPantallaLegalGate();
+
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="tm-overlay show" id="legal-gate-overlay">
+      <div style="background:var(--bg-elev); border:1px solid var(--line); border-radius:10px; width:100%; max-width:520px; box-shadow:0 20px 60px rgba(0,0,0,.5); overflow:hidden;">
+        <div class="tm-panel-head">
+          <h3>Documentos legales de Práctica Juris</h3>
+        </div>
+        <div class="tm-panel-body" id="legal-gate-body">
+          ${soloError ? `
+            <div style="color:var(--urgent); font-size:12.5px; line-height:1.5;">No se pudo verificar el estado de los documentos legales de tu cuenta. Cierra sesión e inténtalo nuevamente.</div>
+          ` : `
+            <div style="color:var(--ink-faint); font-size:12.5px; line-height:1.55; margin-bottom:14px;">
+              Para continuar debes revisar los documentos legales vigentes, versión ${LEGAL_CURRENT_VERSION}.
+            </div>
+
+            <div style="display:grid; gap:12px; font-size:12.5px; line-height:1.5;">
+              <label style="display:flex; align-items:flex-start; gap:9px; cursor:pointer; text-transform:none; letter-spacing:0;">
+                <input type="checkbox" id="legal-gate-terms" style="width:16px; height:16px; min-width:16px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+                <span>He leído y acepto los <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Términos y Condiciones de Uso</a> de Práctica Juris.</span>
+              </label>
+
+              <label style="display:flex; align-items:flex-start; gap:9px; cursor:pointer; text-transform:none; letter-spacing:0;">
+                <input type="checkbox" id="legal-gate-privacy" style="width:16px; height:16px; min-width:16px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+                <span>Declaro haber leído y comprendido la <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Política de Privacidad</a> de Práctica Juris.</span>
+              </label>
+
+              <label style="display:flex; align-items:flex-start; gap:9px; cursor:pointer; text-transform:none; letter-spacing:0;">
+                <input type="checkbox" id="legal-gate-security" style="width:16px; height:16px; min-width:16px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+                <span>Declaro haber leído y comprendido la <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Política de Seguridad y Protección de Datos</a> de Práctica Juris.</span>
+              </label>
+            </div>
+
+            <div id="legal-gate-error" style="color:var(--urgent); font-size:12px; margin-top:10px; min-height:16px;"></div>
+            <div style="margin-top:12px;">
+              <button class="btn small primary" id="legal-gate-accept" type="button" disabled>Continuar</button>
+            </div>
+          `}
+
+          <div style="margin-top:12px; border-top:1px solid var(--line); padding-top:10px;">
+            <button class="btn small" id="legal-gate-logout" type="button">Cerrar sesión</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  document.getElementById('legal-gate-logout').addEventListener('click', async () => {
+    const { signOut } = await import('./auth.js');
+    await signOut();
+  });
+
+  if (soloError) return;
+
+  const terms = document.getElementById('legal-gate-terms');
+  const privacy = document.getElementById('legal-gate-privacy');
+  const security = document.getElementById('legal-gate-security');
+  const btn = document.getElementById('legal-gate-accept');
+  const errEl = document.getElementById('legal-gate-error');
+
+  const actualizarBoton = () => {
+    btn.disabled = !(terms.checked && privacy.checked && security.checked);
+  };
+  terms.addEventListener('change', actualizarBoton);
+  privacy.addEventListener('change', actualizarBoton);
+  security.addEventListener('change', actualizarBoton);
+
+  btn.addEventListener('click', async () => {
+    if (!(terms.checked && privacy.checked && security.checked)) return;
+    btn.disabled = true;
+    errEl.textContent = '';
+
+    try {
+      await api.acceptCurrentLegalDocuments();
+      const rows = await api.fetchLegalAcceptances(session.user.id, LEGAL_CURRENT_VERSION);
+      if (!legalAcceptanceCompleta(rows)) {
+        throw new Error('No se pudo confirmar el registro completo de los documentos legales.');
+      }
+      cerrarPantallaLegalGate();
+      await onSessionReady(session);
+    } catch (e) {
+      console.error('No se pudo registrar la aceptación de los documentos legales:', e);
+      errEl.textContent = 'No se pudo registrar la aceptación. Intenta nuevamente o cierra sesión.';
+      actualizarBoton();
+    }
+  });
+}
+
+function cerrarPantallaLegalGate() {
+  document.getElementById('legal-gate-overlay')?.remove();
+}
+
+async function onSessionReady(session) {
+  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, avatarUrl: null };
+  try {
+    const { data: profile } = await supabase.from('profiles').select('nombre_completo, telefono').eq('id', CURRENT_USER.id).single();
     if (profile?.nombre_completo) CURRENT_USER.nombre = profile.nombre_completo;
+    CURRENT_USER.telefono = profile?.telefono || null;
   } catch (e) { /* perfil aún no creado por el trigger, no es crítico */ }
 
-  document.getElementById('user-email').textContent = CURRENT_USER.nombre || CURRENT_USER.email;
+  // avatar_url (que en realidad guarda una RUTA, no una URL pública -- el
+  // bucket recomendado es privado) se consulta APARTE, y solo si el flag
+  // está activo -- esa columna todavía no existe en Supabase (pendiente de
+  // sql/migration_v1_7_practica_y_avatar.sql). Mezclarla en el select de
+  // arriba rompería también la carga de nombre/teléfono mientras la
+  // migración no se ejecute.
+  if (AVATAR_STORAGE_DISPONIBLE) {
+    try {
+      const { data: perfilAvatar } = await supabase.from('profiles').select('avatar_url').eq('id', CURRENT_USER.id).single();
+      CURRENT_USER.avatarPath = perfilAvatar?.avatar_url || null;
+      if (CURRENT_USER.avatarPath) {
+        // La URL firmada se resuelve bajo demanda y nunca se persiste --
+        // expira; ver getAvatarSignedUrl en src/lib/api.js.
+        CURRENT_USER.avatarUrl = await api.getAvatarSignedUrl(CURRENT_USER.avatarPath);
+      }
+    } catch (e) { /* columna aún no existe, perfil no creado, o sin foto -- no crítico */ }
+  }
+
+  actualizarAvatar();
 
   // CAJ-Civil independiente: sin arquitectura modular. Se entra directo al
   // flujo Civil, sin consultar user_modules/organizations/modules. Todo lo
@@ -1071,6 +2307,257 @@ function wireOficiosTab(c, panel) {
     } catch (e) { toast('No se pudo guardar: ' + e.message); }
   });
 }
+
+// Duración que permanece visible una credencial revelada antes de
+// ocultarse sola. No hay un criterio ya aprobado para este valor -- queda
+// aislado acá, en una sola constante, fácil de ajustar más adelante.
+const DURACION_REVELADO_MS = 20000; // 20 segundos
+
+// Íconos de ojo (SVG inline, sin depender de ninguna librería de íconos).
+// Tachado = credencial oculta (o inexistente); visible = credencial
+// revelada en este momento.
+function iconoOjoSvg(revelado) {
+  if (revelado) {
+    return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+  }
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.7 21.7 0 0 1 5.06-6.06"/><path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.7 21.7 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}
+
+// Campo de credencial sensible (Clave PJUD / Clave única) para Contacto.
+// Nunca interpola el valor real -- ni la máscara ni el input lo llevan
+// nunca en el HTML inicial. El estado ("Guardada"/"Sin definir") y la
+// máscara (vacía o "********") se resuelven después, de forma asíncrona,
+// vía credentialsStatus(). El valor real solo aparece en el DOM
+// momentáneamente cuando la propia usuaria lo revela a propósito.
+// Credencial sensible (Clave PJUD / Clave única) presentada como un campo
+// normal de la ficha: misma clase .ct-input (mismo alto/borde que RUT,
+// Correo, etc.), con la máscara y el ojo DENTRO del recuadro. Debajo,
+// acciones discretas (Cambiar clave/Agregar clave, Eliminar). El editor
+// de contraseña nueva permanece oculto hasta que se pide explícitamente,
+// para no aumentar la altura del bloque en su estado normal. Nunca
+// interpola el valor real en ningún punto del HTML inicial.
+function campoCredencialHtml(campo, etiqueta) {
+  return `
+  <div class="field cred-field" data-campo="${campo}">
+    <div class="k">${etiqueta} — <span class="cred-badge" id="cred-badge-${campo}" style="font-weight:400;">Cargando…</span></div>
+    <div class="ct-input" id="cred-box-${campo}" style="display:flex; align-items:center; gap:6px; padding-right:4px;">
+      <span class="cred-mask" id="cred-mask-${campo}" style="flex:1; font-family:var(--font-mono); font-size:13px; color:var(--ink-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+      <button type="button" data-action="cred-toggle-reveal" data-campo="${campo}" id="cred-eye-${campo}" title="Mostrar credencial" aria-label="Mostrar credencial" style="background:none; border:none; padding:4px; margin:0; cursor:pointer; display:flex; align-items:center; color:var(--ink-dim); flex:none;">${iconoOjoSvg(false)}</button>
+    </div>
+    <div style="margin-top:4px; font-size:11.5px;">
+      <button type="button" data-action="cred-abrir-editor" data-campo="${campo}" id="cred-link-editor-${campo}" style="background:none; border:none; padding:0; color:var(--brass); cursor:pointer; text-decoration:underline; font-size:11.5px;">Agregar clave</button><span id="cred-link-sep-${campo}" style="display:none; color:var(--ink-faint);"> · </span><button type="button" data-action="cred-delete" data-campo="${campo}" id="cred-link-eliminar-${campo}" style="display:none; background:none; border:none; padding:0; color:var(--urgent); cursor:pointer; text-decoration:underline; font-size:11.5px;">Eliminar</button>
+    </div>
+    <div id="cred-editor-${campo}" style="display:none; margin-top:6px;">
+      <input type="password" class="ct-input" id="ct-${campo}" placeholder="Nueva credencial" style="width:100%;">
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button type="button" class="btn small primary" data-action="cred-guardar-editor" data-campo="${campo}">Guardar cambio</button>
+        <button type="button" class="btn small" data-action="cred-cancelar-editor" data-campo="${campo}">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Aplica el estado visual (máscara + ícono + acciones discretas) de una
+// credencial. estado: 'vacio' (sin definir) | 'oculta' (guardada, oculta)
+// | 'revelada' (guardada, mostrando el valor real -- el llamador ya debe
+// haber puesto ese valor en el span de máscara antes de llamar acá con
+// 'revelada').
+function aplicarEstadoVisualCredencial(panel, campo, estado) {
+  const mask = panel.querySelector(`#cred-mask-${campo}`);
+  const btn = panel.querySelector(`#cred-eye-${campo}`);
+  const linkEditor = panel.querySelector(`#cred-link-editor-${campo}`);
+  const sep = panel.querySelector(`#cred-link-sep-${campo}`);
+  const linkEliminar = panel.querySelector(`#cred-link-eliminar-${campo}`);
+  if (!btn) return;
+
+  if (estado === 'vacio') {
+    if (mask) mask.textContent = '';
+    btn.innerHTML = iconoOjoSvg(false);
+    btn.title = 'Mostrar credencial';
+    btn.setAttribute('aria-label', 'Mostrar credencial');
+    if (linkEditor) linkEditor.textContent = 'Agregar clave';
+    if (sep) sep.style.display = 'none';
+    if (linkEliminar) linkEliminar.style.display = 'none';
+  } else if (estado === 'oculta') {
+    if (mask) mask.textContent = '********';
+    btn.innerHTML = iconoOjoSvg(false);
+    btn.title = 'Mostrar credencial';
+    btn.setAttribute('aria-label', 'Mostrar credencial');
+    if (linkEditor) linkEditor.textContent = 'Cambiar clave';
+    if (sep) sep.style.display = '';
+    if (linkEliminar) linkEliminar.style.display = '';
+  } else if (estado === 'revelada') {
+    btn.innerHTML = iconoOjoSvg(true);
+    btn.title = 'Ocultar credencial';
+    btn.setAttribute('aria-label', 'Ocultar credencial');
+    // Las acciones discretas (Cambiar clave/Eliminar) quedan como estaban
+    // -- revelar no cambia si la credencial existe o no.
+  }
+}
+
+// Estado inicial de las credenciales de Contacto (Guardada/Sin definir) +
+// si existe un PIN configurado, y el wiring de revelar/ocultar, abrir/
+// cancelar/guardar el editor, y Eliminar. Se llama una vez al abrir la
+// ficha. Guardar y Eliminar son acciones inmediatas (llaman a
+// credentialsSave apenas se confirman) -- ya no dependen de presionar
+// "Guardar contacto", que ahora solo maneja los campos normales.
+function wireCredencialesContacto(c, panel) {
+  const CAMPOS = ['claveWeb', 'claveUnica'];
+  panel._credEstadoUI = panel._credEstadoUI || {};
+  CAMPOS.forEach(campo => { panel._credEstadoUI[campo] = { guardada: false, revelada: false, timeoutId: null }; });
+
+  // Estado inicial: credentialsStatus + pinStatus en paralelo. Los badges
+  // arrancan en "Cargando…" (ya en el HTML) y se actualizan acá, de forma
+  // asíncrona -- nunca se conoce el valor real, solo si existe o no.
+  (async () => {
+    try {
+      const [estadoCred, estadoPin] = await Promise.all([
+        api.credentialsStatus(c.id),
+        api.pinStatus()
+      ]);
+      panel._pinConfigurado = !!(estadoPin && estadoPin.pinConfigurado);
+      const guardadas = { claveWeb: !!estadoCred?.claveWebGuardada, claveUnica: !!estadoCred?.claveUnicaGuardada };
+      CAMPOS.forEach(campo => {
+        panel._credEstadoUI[campo].guardada = guardadas[campo];
+        const badge = panel.querySelector(`#cred-badge-${campo}`);
+        if (badge) badge.textContent = guardadas[campo] ? 'Guardada' : 'Sin definir';
+        aplicarEstadoVisualCredencial(panel, campo, guardadas[campo] ? 'oculta' : 'vacio');
+      });
+    } catch (e) {
+      CAMPOS.forEach(campo => {
+        const badge = panel.querySelector(`#cred-badge-${campo}`);
+        if (badge) badge.textContent = 'No se pudo consultar';
+      });
+    }
+  })();
+
+  // Abrir el editor (mismo botón para "Agregar clave" y "Cambiar clave").
+  panel.querySelectorAll('[data-action="cred-abrir-editor"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const campo = btn.dataset.campo;
+      const editor = panel.querySelector(`#cred-editor-${campo}`);
+      const input = panel.querySelector(`#ct-${campo}`);
+      if (input) { input.value = ''; }
+      if (editor) editor.style.display = 'block';
+      if (input) input.focus();
+    });
+  });
+
+  // Cancelar: cierra el editor sin modificar nada.
+  panel.querySelectorAll('[data-action="cred-cancelar-editor"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const campo = btn.dataset.campo;
+      const editor = panel.querySelector(`#cred-editor-${campo}`);
+      const input = panel.querySelector(`#ct-${campo}`);
+      if (input) input.value = '';
+      if (editor) editor.style.display = 'none';
+    });
+  });
+
+  // Guardar cambio: acción inmediata -- llama a credentialsSave apenas se
+  // confirma, sin esperar al botón "Guardar contacto". Mismo mecanismo de
+  // credentialsSave de siempre (cifra server-side, AAD, etc.).
+  panel.querySelectorAll('[data-action="cred-guardar-editor"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const campo = btn.dataset.campo;
+      const input = panel.querySelector(`#ct-${campo}`);
+      const valor = input ? input.value.trim() : '';
+      if (!valor) { toast('Escribe un valor antes de guardar.'); return; }
+      try {
+        await api.credentialsSave(c.id, campo, valor, false);
+        const estadoUI = panel._credEstadoUI[campo];
+        clearTimeout(estadoUI.timeoutId);
+        estadoUI.timeoutId = null;
+        estadoUI.revelada = false;
+        estadoUI.guardada = true;
+        const badge = panel.querySelector(`#cred-badge-${campo}`);
+        if (badge) badge.textContent = 'Guardada';
+        aplicarEstadoVisualCredencial(panel, campo, 'oculta');
+        if (input) input.value = '';
+        const editor = panel.querySelector(`#cred-editor-${campo}`);
+        if (editor) editor.style.display = 'none';
+        toast('Credencial guardada');
+      } catch (e) {
+        toast('No se pudo guardar: ' + e.message);
+      }
+    });
+  });
+
+  // Eliminar: acción explícita e inmediata, con confirmación -- nunca
+  // ocurre por dejar campos vacíos. Mismo mecanismo de credentialsSave
+  // (eliminar=true) de siempre.
+  panel.querySelectorAll('[data-action="cred-delete"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const campo = btn.dataset.campo;
+      if (!window.confirm('¿Eliminar esta credencial guardada? Esta acción no se puede deshacer.')) return;
+      try {
+        await api.credentialsSave(c.id, campo, null, true);
+        const estadoUI = panel._credEstadoUI[campo];
+        clearTimeout(estadoUI.timeoutId);
+        estadoUI.timeoutId = null;
+        estadoUI.revelada = false;
+        estadoUI.guardada = false;
+        const badge = panel.querySelector(`#cred-badge-${campo}`);
+        if (badge) badge.textContent = 'Sin definir';
+        aplicarEstadoVisualCredencial(panel, campo, 'vacio');
+        const editor = panel.querySelector(`#cred-editor-${campo}`);
+        if (editor) editor.style.display = 'none';
+        toast('Credencial eliminada');
+      } catch (e) {
+        toast('No se pudo eliminar: ' + e.message);
+      }
+    });
+  });
+
+  // Revelar/ocultar: un solo botón de ícono dentro del recuadro, que
+  // alterna según el estado actual. Mismo flujo de PIN de siempre -- solo
+  // cambia la presentación.
+  panel.querySelectorAll('[data-action="cred-toggle-reveal"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const campo = btn.dataset.campo;
+      const estadoUI = panel._credEstadoUI[campo];
+
+      // Ya está revelada: ocultar de inmediato, sin esperar el
+      // temporizador. Se cancela el temporizador pendiente para que no
+      // dispare después sobre un estado que ya cambió.
+      if (estadoUI.revelada) {
+        clearTimeout(estadoUI.timeoutId);
+        estadoUI.timeoutId = null;
+        estadoUI.revelada = false;
+        aplicarEstadoVisualCredencial(panel, campo, estadoUI.guardada ? 'oculta' : 'vacio');
+        return;
+      }
+
+      // El ojo tachado puede estar presente aunque no exista credencial
+      // -- en ese caso, simplemente no intenta revelar nada.
+      if (!estadoUI.guardada) return;
+
+      if (!panel._pinConfigurado) {
+        toast('Primero debes configurar un PIN de seguridad.');
+        return;
+      }
+      const pin = window.prompt('Ingresa tu PIN de seguridad de 4 dígitos:');
+      if (pin === null) return; // canceló el prompt
+      if (!/^\d{4}$/.test(pin)) { toast('El PIN debe tener exactamente 4 dígitos.'); return; }
+      try {
+        const resultado = await api.credentialsReveal(c.id, campo, pin);
+        const mask = panel.querySelector(`#cred-mask-${campo}`);
+        if (mask) mask.textContent = resultado.valor;
+        estadoUI.revelada = true;
+        aplicarEstadoVisualCredencial(panel, campo, 'revelada');
+        clearTimeout(estadoUI.timeoutId);
+        estadoUI.timeoutId = setTimeout(() => {
+          estadoUI.revelada = false;
+          estadoUI.timeoutId = null;
+          aplicarEstadoVisualCredencial(panel, campo, estadoUI.guardada ? 'oculta' : 'vacio');
+        }, DURACION_REVELADO_MS);
+      } catch (e) {
+        toast('No se pudo revelar: ' + e.message);
+      }
+    });
+  });
+}
+
 
 function notifRowsHtml(c) {
   const rows = c.domicilios || [];
@@ -7051,12 +8538,14 @@ function detailHtml(c) {
 
   <div class="dtab-content" data-tab="contacto">
     <div class="contact-grid">
+      <div class="field"><div class="k">Nombre <span style="font-weight:400; font-size:11px; color:var(--ink-faint);">(se edita desde Antecedentes)</span></div><input type="text" class="ct-input" value="${escapeHtml(patrocinadoEfectivo(c) || '')}" disabled></div>
       <div class="field"><div class="k">RUT</div><input type="text" class="ct-input" id="ct-rut" value="${escapeHtml(c.rut || '')}"></div>
       <div class="field"><div class="k">Correo</div><input type="text" class="ct-input" id="ct-correo" value="${escapeHtml(c.correo || '')}"></div>
       <div class="field"><div class="k">Correo alternativo</div><input type="text" class="ct-input" id="ct-correoAlt" value="${escapeHtml(c.correoAlt || '')}"></div>
-      <div class="field"><div class="k">Clave portal PJUD</div><input type="text" class="ct-input" id="ct-claveWeb" value="${escapeHtml(c.claveWeb || '')}"></div>
-      <div class="field"><div class="k">Clave única</div><input type="text" class="ct-input" id="ct-claveUnica" value="${escapeHtml(c.claveUnica || '')}"></div>
+      ${campoCredencialHtml('claveWeb', 'Clave portal PJUD')}
+      ${campoCredencialHtml('claveUnica', 'Clave única')}
       <div class="field"><div class="k">Teléfono</div><input type="text" class="ct-input" id="ct-telefono" value="${escapeHtml(c.telefono || '')}"></div>
+      <div class="field"><div class="k">Teléfono alternativo</div><input type="text" class="ct-input" id="ct-telefonoAlt" value="${escapeHtml(c.telefonoAlt || '')}"></div>
       <div class="field"><div class="k">Nota</div><input type="text" class="ct-input" id="ct-nota" value="${escapeHtml(c.nota || '')}"></div>
     </div>
     <div style="margin-top:14px;">
@@ -7263,18 +8752,23 @@ function wireDetailEvents(c) {
   wireOficiosTab(c, panel);
 
   // ---------- Contacto ----------
+  wireCredencialesContacto(c, panel);
   const saveContacto = panel.querySelector('#save-contacto');
   if (saveContacto) saveContacto.addEventListener('click', async () => {
     const patch = {
       rut: panel.querySelector('#ct-rut').value.trim() || null,
       correo: panel.querySelector('#ct-correo').value.trim() || null,
       correoAlt: panel.querySelector('#ct-correoAlt').value.trim() || null,
-      claveWeb: panel.querySelector('#ct-claveWeb').value.trim() || null,
-      claveUnica: panel.querySelector('#ct-claveUnica').value.trim() || null,
       telefono: panel.querySelector('#ct-telefono').value.trim() || null,
+      telefonoAlt: panel.querySelector('#ct-telefonoAlt').value.trim() || null,
       nota: panel.querySelector('#ct-nota').value.trim() || null
     };
-    try { await api.updateCausa(c.id, patch); Object.assign(c, patch); toast('Contacto guardado'); render(); }
+    try {
+      await api.updateCausa(c.id, patch);
+      Object.assign(c, patch);
+      toast('Contacto guardado');
+      render();
+    }
     catch (e) { toast('No se pudo guardar: ' + e.message); }
   });
 
@@ -8198,9 +9692,52 @@ export async function initApp() {
   // luego en cada login/logout/refresh. Así evitamos que dos rutas distintas
   // (una llamada manual a getSession() y este listener) decidan por su cuenta
   // qué pantalla mostrar y terminen pisándose.
-  onAuthStateChange((session) => {
+  //
+  // USER_UPDATED (disparado por auth.updateUser, p. ej. al cambiar la
+  // contraseña desde Administración de cuenta) y TOKEN_REFRESHED (disparado
+  // automáticamente al recuperar el foco de la pestaña) NO deben volver a
+  // ejecutar onSessionReady()/loadAll() -- eso recargaría toda la lista de
+  // causas innecesariamente. Solo se actualizan los datos visibles de la
+  // cuenta.
+  //
+  // MFA_CHALLENGE_VERIFIED se maneja aparte (ver más abajo): puede venir de
+  // 2 escenarios distintos -- completar el desafío de login (ahí sí hay que
+  // entrar a la app, exactamente una vez) o verificar un código dentro de
+  // Administrar cuenta al inscribir/desactivar un factor (ahí NO hay que
+  // hacer nada acá, ya lo maneja esa misma pantalla).
+  //
+  // SIGNED_IN (login real) e INITIAL_SESSION (carga de página con sesión ya
+  // existente) ya NO entran directo a onSessionReady(): primero pasan por
+  // verificarAalYEntrar(), que exige completar el segundo factor si la
+  // usuaria tiene uno inscrito y la sesión todavía no alcanzó aal2; después
+  // verificarLegalYEntrar() controla la versión legal vigente.
+  onAuthStateChange((event, session) => {
     if (session) {
-      onSessionReady(session);
+      if (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+        if (!CURRENT_USER) CURRENT_USER = { id: null, email: null, nombre: null };
+        CURRENT_USER.id = session.user.id;
+        CURRENT_USER.email = session.user.email;
+        CURRENT_USER.nombre = session.user.user_metadata?.nombre_completo || CURRENT_USER.nombre;
+        actualizarAvatar();
+        return;
+      }
+      if (event === 'MFA_CHALLENGE_VERIFIED') {
+        if (_gateEsperandoVerificacion) {
+          // Veníamos del gate de login: cerrar esa pantalla y continuar
+          // exactamente una vez hacia el control de cierre pendiente
+          // (que a su vez continúa hacia el legal). La bandera se apaga
+          // ANTES de continuar para que un evento duplicado no repita
+          // la entrada.
+          _gateEsperandoVerificacion = false;
+          cerrarPantallaMfaGate();
+          verificarCierrePendienteYEntrar(session);
+        }
+        // Si no veníamos del gate (verificación hecha dentro de Administrar
+        // cuenta), no se hace nada acá -- ya lo maneja esa pantalla.
+        return;
+      }
+      // SIGNED_IN / INITIAL_SESSION.
+      verificarAalYEntrar(session);
     } else {
       CAUSAS = [];
       ENCARGOS = [];
@@ -8209,6 +9746,9 @@ export async function initApp() {
       borrarSeleccionModuloGuardada();
       document.getElementById('familia-screen').hidden = true;
       document.getElementById('module-select-screen').hidden = true;
+      cerrarPantallaMfaGate();
+      cerrarPantallaCierrePendiente();
+      cerrarPantallaLegalGate();
       showAuthScreen();
     }
   });

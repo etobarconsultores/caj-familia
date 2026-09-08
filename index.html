@@ -47,6 +47,33 @@
         <label>Contraseña (mínimo 6 caracteres)</label>
         <input type="password" id="register-password" required minlength="6" autocomplete="new-password">
       </div>
+
+      <div class="auth-legal-consent" style="margin-top:4px; display:grid; gap:10px; font-size:12px; line-height:1.45;">
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="register-accept-terms" required style="margin-top:3px; flex:0 0 auto;">
+          <span>
+            He leído y acepto los
+            <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer">Términos y Condiciones de Uso de Práctica Juris</a>.
+          </span>
+        </label>
+
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="register-ack-privacy" required style="margin-top:3px; flex:0 0 auto;">
+          <span>
+            Declaro haber leído y comprendido la
+            <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer">Política de Privacidad de Práctica Juris</a>.
+          </span>
+        </label>
+
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="register-ack-security" required style="margin-top:3px; flex:0 0 auto;">
+          <span>
+            Declaro haber leído y comprendido la
+            <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer">Política de Seguridad y Protección de Datos de Práctica Juris</a>.
+          </span>
+        </label>
+      </div>
+
       <div class="auth-error" id="register-error"></div>
       <div class="auth-success" id="register-success"></div>
       <button type="submit" class="btn primary">Crear cuenta</button>
@@ -65,6 +92,14 @@
     <div class="auth-switch" id="auth-switch">
       ¿No tienes cuenta? <a id="link-to-register">Regístrate</a><br>
       <a id="link-to-forgot" style="display:inline-block; margin-top:8px;">¿Olvidaste tu contraseña?</a>
+    </div>
+
+    <div class="auth-legal-links" style="margin-top:16px; font-size:12px; line-height:1.6; color:#7a8491; text-align:center;">
+      <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer">Términos y Condiciones</a>
+      <span> · </span>
+      <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer">Política de Privacidad</a>
+      <span> · </span>
+      <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer">Política de Seguridad</a>
     </div>
   </div>
 </div>
@@ -100,10 +135,9 @@
 
   <div class="topbar">
     <button class="menu-toggle" id="menu-toggle">☰ Carpetas</button>
-    <div class="user-chip"><span class="dot"></span><span id="user-email"></span></div>
     <span class="org-module-chip" id="org-module-chip" hidden></span>
     <button class="btn small ghost" id="btn-cambiar-modulo" hidden>Cambiar módulo</button>
-    <button class="btn small ghost" id="btn-logout">Cerrar sesión</button>
+    <button class="avatar-btn" id="avatar-btn" type="button" role="button" tabindex="0" title="Cuenta"><span id="avatar-inicial"></span></button>
   </div>
 
   <div class="shell">

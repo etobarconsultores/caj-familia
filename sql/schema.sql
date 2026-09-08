@@ -629,5 +629,21 @@ create policy "agenda_update_own" on public.agenda_eventos for update using (aut
 create policy "agenda_delete_own" on public.agenda_eventos for delete using (auth.uid() = user_id);
 
 -- ============================================================================
+-- Cierre de cuenta -- ver migration_v1_9_account_deletion_requests.sql
+-- PENDIENTE DE EJECUCIÓN -- este objeto todavía NO existe en Supabase.
+-- ============================================================================
+create table if not exists public.account_deletion_requests (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  requested_at timestamptz not null default now(),
+  scheduled_deletion_at timestamptz not null,
+  requested_from text
+);
+
+alter table public.account_deletion_requests enable row level security;
+
+drop policy if exists "account_deletion_requests_select_own" on public.account_deletion_requests;
+create policy "account_deletion_requests_select_own" on public.account_deletion_requests for select to authenticated using (auth.uid() = user_id);
+
+-- ============================================================================
 -- FIN DEL ESQUEMA
 -- ============================================================================

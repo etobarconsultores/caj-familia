@@ -40,9 +40,8 @@ function causaFromDb(row) {
     correo: row.correo,
     correoAlt: row.correo_alt,
     telefono: row.telefono,
+    telefonoAlt: row.telefono_alt,
     nota: row.nota,
-    claveWeb: row.clave_web,
-    claveUnica: row.clave_unica,
     prioridad: row.prioridad,
     etapa: row.etapa,
     plazo: row.plazo,
@@ -156,7 +155,7 @@ function causaPatchToDb(patch) {
     materia: 'materia', submateria: 'submateria', parte: 'parte', representacion: 'representacion',
     recurso: 'recurso', rolCA: 'rol_ca', tutor: 'tutor',
     patrocinado: 'patrocinado', rut: 'rut', correo: 'correo', correoAlt: 'correo_alt',
-    telefono: 'telefono', nota: 'nota', claveWeb: 'clave_web', claveUnica: 'clave_unica',
+    telefono: 'telefono', telefonoAlt: 'telefono_alt', nota: 'nota',
     prioridad: 'prioridad', etapa: 'etapa', plazo: 'plazo', clave: 'clave', estado: 'estado',
     objetivoApelacion: 'objetivo_apelacion', resumen: 'resumen', comentarios: 'comentarios',
     fechaIngreso: 'fecha_ingreso', fechaAudiencia: 'fecha_audiencia', hora: 'hora_audiencia',
@@ -953,8 +952,89 @@ export async function googlePendingCount() {
   return googleApiFetch('pending-count');
 }
 
+// ============================================================================
+// Seguridad — llamadas al backend consolidado (api/security.js). Mismo
+// patrón que googleApiFetch: el frontend nunca ve la clave maestra de
+// cifrado ni el hash del PIN, todo pasa por este único endpoint con el
+// token de sesión de Supabase en el header Authorization.
+// ============================================================================
+async function securityApiFetch(operation, body = {}) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token;
+  if (!token) throw new Error('Sesión no disponible. Vuelve a iniciar sesión.');
+
+  const resp = await fetch('/api/security', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ operation, ...body })
+  });
+
+  let data = null;
+  try { data = await resp.json(); } catch (_) { /* respuesta sin cuerpo JSON */ }
+
+  if (!resp.ok) {
+    throw new Error((data && data.error) || `Error del servidor (${resp.status})`);
+  }
+  return data;
+}
+
+export async function credentialsSave(causaId, campo, valor, eliminar = false) {
+  return securityApiFetch('credentials.save', { causaId, campo, valor, eliminar });
+}
+
+export async function credentialsReveal(causaId, campo, pin) {
+  return securityApiFetch('credentials.reveal', { causaId, campo, pin });
+}
+
+export async function credentialsStatus(causaId) {
+  return securityApiFetch('credentials.status', { causaId });
+}
+
+export async function pinCreate(pin, pinConfirm) {
+  return securityApiFetch('pin.create', { pin, pinConfirm });
+}
+
+export async function pinChange(currentPin, newPin, newPinConfirm) {
+  return securityApiFetch('pin.change', { currentPin, newPin, newPinConfirm });
+}
+
+export async function pinReset(currentPassword, newPin, newPinConfirm) {
+  return securityApiFetch('pin.reset', { currentPassword, newPin, newPinConfirm });
+}
+
+export async function pinStatus() {
+  return securityApiFetch('pin.status');
+}
+
 export async function googleSyncBatch(patch) {
   return googleApiFetch('sync-pending', { method: 'POST', body: patch });
+}
+
+// ============================================================================
+// Constancias legales vigentes.
+// La lectura usa el cliente normal y queda limitada por RLS a la propia
+// usuaria. La escritura NO se abre mediante INSERT directo: para cuentas
+// anteriores al flujo de registro se usa la RPC
+// public.accept_current_legal_documents(), que toma el user_id desde
+// auth.uid() en Supabase.
+// ============================================================================
+export async function fetchLegalAcceptances(userId, documentVersion = '1.0') {
+  const { data, error } = await supabase
+    .from('legal_acceptances')
+    .select('document_type, document_version, action, source, accepted_at')
+    .eq('user_id', userId)
+    .eq('document_version', documentVersion);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function acceptCurrentLegalDocuments() {
+  const { data, error } = await supabase.rpc('accept_current_legal_documents');
+  if (error) throw error;
+  return data || [];
 }
 
 // ============================================================================
@@ -980,3 +1060,167 @@ export async function fetchMisAccesos(userId) {
     role: r.role
   }));
 }
+
+// Actualiza nombre y teléfono del propio perfil en una sola operación de
+// update sobre public.profiles. Usa el cliente normal -- RLS ya permite a
+// cada usuaria actualizar su propia fila (policy "profiles_update_own",
+// auth.uid() = id; las policies de RLS operan a nivel de fila, no de
+// columna, así que cubren telefono sin necesitar ninguna policy nueva),
+// sin necesitar service_role ni ningún endpoint propio.
+export async function updateProfileDatos(userId, { nombreCompleto, telefono }) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ nombre_completo: nombreCompleto, telefono })
+    .eq('id', userId);
+  if (error) throw error;
+}
+
+// ============================================================================
+// Datos de práctica (CAJ asignado) -- requieren las tablas de
+// sql/migration_v1_7_practica_y_avatar.sql, todavía NO ejecutada. Estas
+// funciones son seguras de tener definidas (no se ejecutan solas), pero no
+// deben llamarse desde la UI hasta activarlas -- ver PRACTICA_TABLAS_DISPONIBLES
+// en src/app.js.
+// ============================================================================
+
+// Datos de práctica propios de cada usuaria. `caj_asignado`, dirección y fechas
+// viven en practica_usuaria porque pueden variar entre usuarios. La relación
+// histórica con `cajs` se conserva para filas antiguas, pero ya no condiciona
+// la edición del perfil.
+export async function fetchPracticaUsuaria(userId) {
+  const { data, error } = await supabase
+    .from('practica_usuaria')
+    .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino, cajs(nombre)')
+    .eq('user_id', userId)
+    .order('fecha_inicio', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: data.id,
+    cajAsignado: data.caj_asignado || data.cajs?.nombre || null,
+    direccionCaj: data.direccion_caj || null,
+    fechaInicio: data.fecha_inicio,
+    fechaTermino: data.fecha_termino
+  };
+}
+
+// Crea la primera práctica de una usuaria o actualiza la vigente. El CAJ se
+// guarda como texto propio de la asignación para que cada cuenta pueda indicar
+// libremente su centro (Lo Prado, Cerro Navia, Lo Espejo, etc.).
+export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, direccionCaj, fechaInicio, fechaTermino }) {
+  const patch = {
+    caj_asignado: cajAsignado,
+    direccion_caj: direccionCaj || null,
+    fecha_inicio: fechaInicio,
+    fecha_termino: fechaTermino
+  };
+
+  let query;
+  if (practicaId) {
+    query = supabase
+      .from('practica_usuaria')
+      .update(patch)
+      .eq('id', practicaId)
+      .eq('user_id', userId)
+      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino')
+      .single();
+  } else {
+    query = supabase
+      .from('practica_usuaria')
+      .insert({ user_id: userId, caj_id: null, ...patch })
+      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino')
+      .single();
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return {
+    id: data.id,
+    cajAsignado: data.caj_asignado || null,
+    direccionCaj: data.direccion_caj || null,
+    fechaInicio: data.fecha_inicio,
+    fechaTermino: data.fecha_termino
+  };
+}
+
+// ============================================================================
+// Foto de perfil -- requiere el bucket de Storage de
+// sql/migration_v1_7_practica_y_avatar.sql (documentado, NO creado
+// todavía) y la columna profiles.avatar_url (SQL preparado, NO ejecutado).
+// No debe llamarse desde la UI hasta activarlas -- ver
+// AVATAR_STORAGE_DISPONIBLE en src/app.js.
+// ============================================================================
+
+// Sube (o reemplaza) la foto de perfil de la propia usuaria. La ruta se basa
+// en el propio user_id, consistente con las policies de Storage propuestas
+// (cada usuaria solo puede escribir dentro de su propia carpeta). Devuelve
+// la URL pública del archivo recién subido.
+// Sube (o reemplaza, con upsert:true) la foto de perfil de la propia
+// usuaria. Devuelve la RUTA dentro del bucket -- NUNCA una URL pública, ya
+// que el bucket recomendado es privado. La ruta es lo que se persiste en
+// profiles.avatar_url; la URL para mostrarla se resuelve aparte y bajo
+// demanda con getAvatarSignedUrl(), porque una URL firmada expira y no
+// debe guardarse como si fuera permanente.
+export async function uploadAvatar(userId, file) {
+  const extension = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const ruta = `${userId}/avatar.${extension}`;
+  const { error: errorSubida } = await supabase.storage
+    .from('avatars')
+    .upload(ruta, file, { upsert: true, contentType: file.type });
+  if (errorSubida) throw errorSubida;
+  return ruta;
+}
+
+// Resuelve una URL firmada temporal para mostrar el avatar (bucket
+// privado). expiresInSeconds por defecto: 1 hora -- suficiente para una
+// sesión de trabajo típica; si la sesión dura más, la imagen puede dejar
+// de cargar hasta la próxima vez que se resuelva (ver nota de
+// limitaciones entregada junto con esta corrección).
+export async function getAvatarSignedUrl(ruta, expiresInSeconds = 3600) {
+  const { data, error } = await supabase.storage
+    .from('avatars')
+    .createSignedUrl(ruta, expiresInSeconds);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// Guarda la RUTA del avatar (no una URL) en profiles.avatar_url -- el
+// nombre de la función coincide con el de la columna que escribe.
+export async function updateProfileAvatarUrl(userId, avatarPath) {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ avatar_url: avatarPath })
+    .eq('id', userId);
+  if (error) throw error;
+}
+
+// ============================================================================
+// Cierre de cuenta con retención de 30 días.
+// La lectura del estado usa el cliente normal -- RLS
+// (account_deletion_requests_select_own) ya limita esto a la propia
+// usuaria, sin necesitar pasar por el backend. La solicitud y la
+// reactivación sí pasan por api/security.js (reutilizando el mismo
+// securityApiFetch ya usado para PIN/credenciales) porque requieren
+// service_role: fijar scheduled_deletion_at de forma confiable e invalidar
+// sesiones no puede resolverlo el cliente por sí solo.
+// ============================================================================
+export async function fetchAccountDeletionStatus(userId) {
+  const { data, error } = await supabase
+    .from('account_deletion_requests')
+    .select('requested_at, scheduled_deletion_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function requestAccountClosure(currentPassword) {
+  return securityApiFetch('account.requestClosure', { currentPassword });
+}
+
+export async function reactivateAccount() {
+  return securityApiFetch('account.reactivate');
+}
+

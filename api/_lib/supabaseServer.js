@@ -72,3 +72,38 @@ export function requerirMetodo(req, res, metodos) {
   }
   return true;
 }
+
+// Verifica la contraseña actual de una usuaria ya autenticada, del lado
+// del SERVIDOR. Deliberadamente NO importa nada de src/auth.js -- ese
+// archivo es frontend (usa import.meta.env de Vite, que no existe en el
+// entorno de ejecución de Vercel Functions) y no debe mezclarse con
+// código de backend.
+//
+// Mismo mecanismo que la versión frontend (cliente Supabase temporal y
+// aislado, persistSession:false, autoRefreshToken:false), reimplementado
+// nativo para Node con las variables de entorno ya usadas por el resto de
+// este backend (SUPABASE_URL/SUPABASE_ANON_KEY, sin prefijo VITE_).
+export async function verificarContrasenaActualServidor(email, currentPassword) {
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error('Faltan las variables de entorno SUPABASE_URL o SUPABASE_ANON_KEY en el backend.');
+  }
+  const clienteTemporal = createClient(url, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+  try {
+    const { error } = await clienteTemporal.auth.signInWithPassword({ email, password: currentPassword });
+    if (error) throw error;
+  } finally {
+    // scope:'local' -- revoca ÚNICAMENTE la sesión de este cliente
+    // temporal. Si este cleanup falla, nunca debe reemplazar ni ocultar
+    // el error de autenticación real que ya se haya lanzado arriba --
+    // solo se registra como advertencia.
+    try {
+      await clienteTemporal.auth.signOut({ scope: 'local' });
+    } catch (cleanupError) {
+      console.warn('No se pudo cerrar la sesión temporal de verificación (backend).');
+    }
+  }
+}
