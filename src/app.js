@@ -1026,8 +1026,8 @@ function mostrarSeccionCuenta(seccion) {
 
   if (seccion === 'seguridad') {
     cont.innerHTML = `
-      <div class="subhead" style="margin-top:0;">Contraseña de CAJ-Civil</div>
-      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Esta es la contraseña con la que inicias sesión en CAJ-Civil — distinta del PIN de 4 dígitos de abajo, que solo se usa para revelar credenciales guardadas en Contacto.</div>
+      <div class="subhead" style="margin-top:0;">Contraseña de Práctica Juris</div>
+      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Esta es la contraseña con la que inicias sesión en Práctica Juris — distinta del PIN de 4 dígitos de abajo, que solo se usa para revelar credenciales guardadas en Contacto.</div>
       <div id="cuenta-password-section"></div>
 
       <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Verificación en 2 pasos</div>
@@ -2902,7 +2902,7 @@ function buildFichaData(c) {
   if (c.driveFolderUrl) sections.push({ title: 'Documentación', kind: 'link', label: 'Carpeta de Google Drive', url: c.driveFolderUrl });
 
   return {
-    brand: 'Panel de Causas — CAJ Lo Prado',
+    brand: 'Práctica Juris · Gestión de Causas',
     titulo: c.titulo || 'Ficha de causa',
     meta: `Generado el ${fmtFechaHora(now.toISOString())} por ${usuario}`,
     sections
@@ -8080,7 +8080,7 @@ function generarInformeFinalPdf(causas, campos) {
 
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11); pdf.setTextColor(80);
   pdf.text('Área Civil', pageWidth / 2, 140, { align: 'center' });
-  pdf.text('CAJ Lo Prado', pageWidth / 2, 148, { align: 'center' });
+  pdf.text('Práctica Juris', pageWidth / 2, 148, { align: 'center' });
 
   pdf.setFontSize(9.5); pdf.setTextColor(120);
   pdf.text(`Fecha de generación: ${fmtFechaHora(new Date().toISOString())}`, pageWidth / 2, 165, { align: 'center' });
