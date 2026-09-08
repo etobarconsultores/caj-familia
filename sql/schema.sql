@@ -1,5 +1,5 @@
 -- ============================================================================
--- Panel de Causas — CAJ Lo Prado
+-- Práctica Juris · Gestión de Causas
 -- Esquema de base de datos para Supabase (PostgreSQL)
 -- Ejecutar completo en el SQL Editor de tu proyecto Supabase.
 -- ============================================================================

@@ -1,7 +1,7 @@
 {
   "name": "panel-causas-caj-lo-prado",
   "version": "1.12.2",
-  "description": "Panel digital de causas — CAJ Lo Prado. App web privada con autenticación y sincronización en la nube (Supabase).",
+  "description": "Práctica Juris · Gestión de Causas. App web privada con autenticación y sincronización en la nube (Supabase).",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -1474,7 +1474,7 @@ async function onSessionReady(session) {
 
   actualizarAvatar();
 
-  // CAJ-Civil independiente: sin arquitectura modular. Se entra directo al
+  // Práctica Juris · módulo Civil independiente: sin arquitectura modular. Se entra directo al
   // flujo Civil, sin consultar user_modules/organizations/modules. Todo lo
   // que sigue debajo (fetchMisAccesos y el flujo de selector de
   // organización/módulo) queda dormido, nunca se ejecuta — se conserva para

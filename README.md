@@ -1,4 +1,4 @@
-# Panel de Causas — CAJ Lo Prado
+# Práctica Juris · Gestión de Causas
 
 Gestor de Trabajo Jurídico privado: cada abogada/o autenticada administra sus
 propias causas, con datos sincronizados en la nube (Supabase), documentos
@@ -63,7 +63,7 @@ propias causas y datos (esto lo garantizan las políticas RLS de `schema.sql`).
 ```bash
 git init
 git add .
-git commit -m "Panel de Causas - Gestor de Trabajo Jurídico v1.2"
+git commit -m "Práctica Juris - Gestor de Trabajo Jurídico v1.2"
 git branch -M main
 git remote add origin https://github.com/TU-USUARIO/TU-REPO.git
 git push -u origin main
@@ -769,7 +769,7 @@ podrá ejecutarse.
 3. Ve a **APIs & Services → OAuth consent screen**.
    - Tipo de usuario: **External** (a menos que tengas Google Workspace y
      prefieras Internal).
-   - Completa nombre de la app (ej. "Panel de Causas CAJ Lo Prado"), correo
+   - Completa nombre de la app (ej. "Práctica Juris"), correo
      de soporte y correo de contacto del desarrollador.
    - En **Scopes**, no es necesario agregar nada aquí manualmente (los
      scopes se piden en tiempo de ejecución desde el backend); si Google te
@@ -798,7 +798,7 @@ podrá ejecutarse.
 4. Ve a **APIs & Services → Credentials → Create Credentials → OAuth
    client ID**.
    - Application type: **Web application**.
-   - Nombre: el que prefieras (ej. "Panel de Causas — Web").
+   - Nombre: el que prefieras (ej. "Práctica Juris Web").
 5. **Authorized JavaScript origins**: agrega la URL de tu app, por ejemplo
    `https://caj-lo-prado-civil.vercel.app` (sin barra final). Agrega también
    `http://localhost:5173` si vas a probar con `vercel dev` en local.

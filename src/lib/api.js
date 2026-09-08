@@ -5,7 +5,7 @@ import { supabase } from '../supabaseClient.js';
 // crea este módulo, y se usan también para filtrar la lectura: no se
 // depende de ningún valor por defecto de Supabase, para que un evento de
 // Civil nunca pueda quedar mal clasificado ni mezclarse con otro módulo.
-const CIVIL_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001'; // CAJ Lo Prado
+const CIVIL_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001'; // CAJ · Área Civil
 const CIVIL_MODULE_ID = 'civil';
 
 // ============================================================================
