@@ -9302,7 +9302,7 @@ function recordFormHtml(rec, isNew) {
     <h2 style="font-size:18px;">${isNew ? 'Agregar registro' : 'Editar registro'} · Encargo receptor</h2>
     <button class="close-x" id="detail-close">&times;</button>
   </div>
-  <div style="padding:20px 26px 26px;">
+  <div style="padding:20px 26px 26px; flex:1 1 auto; min-height:0; overflow-y:auto;">
     <div class="modal-form">
       ${fieldsHtml}
       <button class="btn primary" id="save-record">Guardar registro</button>

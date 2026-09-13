@@ -275,7 +275,7 @@ create trigger trg_revisiones_sala_updated_at
 create table if not exists public.encargos_receptor (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  causa_id uuid references public.causas(id) on delete set null,
+  causa_id uuid references public.causas(id) on delete cascade,
 
   folio text,
   depto text,
