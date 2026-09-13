@@ -484,6 +484,19 @@ function actualizarAvatar() {
   }
 }
 
+// El control real de acceso es la RLS de receptores_judiciales/
+// turnos_receptores (solo is_admin() puede escribir) -- esto únicamente
+// oculta la entrada de navegación para quien no es admin, no es la
+// protección en sí.
+function esAdmin() {
+  return !!(CURRENT_USER && CURRENT_USER.role === 'admin');
+}
+
+function actualizarVisibilidadTabReceptores() {
+  const tab = document.getElementById('tab-receptores');
+  if (tab) tab.hidden = !esAdmin();
+}
+
 async function cerrarSesionApp() {
   // Mismo flujo de logout de siempre -- no se duplica ninguna lógica.
   const { signOut } = await import('./auth.js');
@@ -1487,7 +1500,7 @@ function cerrarPantallaLegalGate() {
 }
 
 async function onSessionReady(session) {
-  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, recoveryEmail: null, recoveryPhone: null, avatarUrl: null };
+  CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, recoveryEmail: null, recoveryPhone: null, avatarUrl: null, role: session.user.app_metadata?.role || null };
   try {
     const { data: profile } = await supabase.from('profiles').select('nombre_completo, telefono, recovery_email, recovery_phone').eq('id', CURRENT_USER.id).single();
     if (profile?.nombre_completo) CURRENT_USER.nombre = profile.nombre_completo;
@@ -1515,6 +1528,7 @@ async function onSessionReady(session) {
   }
 
   actualizarAvatar();
+  actualizarVisibilidadTabReceptores();
 
   // Práctica Juris · módulo Civil independiente: sin arquitectura modular. Se entra directo al
   // flujo Civil, sin consultar user_modules/organizations/modules. Todo lo
@@ -1957,6 +1971,17 @@ function render() {
   }
 
   if (currentCat === 'receptores') {
+    if (!esAdmin()) {
+      // Defensa adicional: el tab ya está oculto para no-admin, pero si
+      // igual se llega acá (estado manipulado directamente), se redirige
+      // a la sección por defecto en vez de mostrar el formulario -- el
+      // control real sigue siendo la RLS (is_admin()), esto es solo para
+      // no exponer una pantalla que de todas formas fallaría al guardar.
+      currentCat = 'centro-trabajo';
+      currentSubcat = null;
+      render();
+      return;
+    }
     document.getElementById('stats-row').style.display = 'none';
     document.getElementById('dash-row').style.display = 'none';
     renderReceptoresAdmin();
@@ -9760,7 +9785,9 @@ export async function initApp() {
         CURRENT_USER.id = session.user.id;
         CURRENT_USER.email = session.user.email;
         CURRENT_USER.nombre = session.user.user_metadata?.nombre_completo || CURRENT_USER.nombre;
+        CURRENT_USER.role = session.user.app_metadata?.role || null;
         actualizarAvatar();
+        actualizarVisibilidadTabReceptores();
         return;
       }
       if (event === 'MFA_CHALLENGE_VERIFIED') {

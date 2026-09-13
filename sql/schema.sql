@@ -319,7 +319,7 @@ create index if not exists idx_encargos_user_id on public.encargos_receptor(user
 -- ----------------------------------------------------------------------------
 create table if not exists public.receptores_judiciales (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null, -- metadato de quién lo creó, no autorización -- ver migration_v1_11_roles_receptores.sql
   nombre_completo text not null,
   telefono text,
   correo text,
@@ -347,7 +347,7 @@ create trigger trg_receptores_updated_at
 -- ----------------------------------------------------------------------------
 create table if not exists public.turnos_receptores (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete set null, -- metadato de quién lo creó, no autorización -- ver migration_v1_11_roles_receptores.sql
   receptor_id uuid not null references public.receptores_judiciales(id) on delete cascade,
   fecha_inicio date not null,
   fecha_fin date not null,
@@ -449,6 +449,17 @@ begin
 end;
 $$;
 
+-- Rol admin: auth.users.app_metadata.role = 'admin' -- ver
+-- migration_v1_11_roles_receptores.sql. Sin SECURITY DEFINER (no hace
+-- falta: auth.jwt() ya es accesible para el rol authenticated).
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+as $$
+  select coalesce((auth.jwt() -> 'app_metadata' ->> 'role') = 'admin', false);
+$$;
+
 drop trigger if exists trg_causas_updated_at on public.causas;
 create trigger trg_causas_updated_at
   before update on public.causas
@@ -547,16 +558,16 @@ create policy "encargos_update_own" on public.encargos_receptor for update using
 create policy "encargos_delete_own" on public.encargos_receptor for delete using (auth.uid() = user_id);
 
 -- receptores_judiciales
-create policy "receptores_select_own" on public.receptores_judiciales for select using (auth.uid() = user_id);
-create policy "receptores_insert_own" on public.receptores_judiciales for insert with check (auth.uid() = user_id);
-create policy "receptores_update_own" on public.receptores_judiciales for update using (auth.uid() = user_id);
-create policy "receptores_delete_own" on public.receptores_judiciales for delete using (auth.uid() = user_id);
+create policy "receptores_select_authenticated" on public.receptores_judiciales for select to authenticated using (true);
+create policy "receptores_insert_admin" on public.receptores_judiciales for insert to authenticated with check (public.is_admin());
+create policy "receptores_update_admin" on public.receptores_judiciales for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "receptores_delete_admin" on public.receptores_judiciales for delete to authenticated using (public.is_admin());
 
 -- turnos_receptores
-create policy "turnos_select_own" on public.turnos_receptores for select using (auth.uid() = user_id);
-create policy "turnos_insert_own" on public.turnos_receptores for insert with check (auth.uid() = user_id);
-create policy "turnos_update_own" on public.turnos_receptores for update using (auth.uid() = user_id);
-create policy "turnos_delete_own" on public.turnos_receptores for delete using (auth.uid() = user_id);
+create policy "turnos_select_authenticated" on public.turnos_receptores for select to authenticated using (true);
+create policy "turnos_insert_admin" on public.turnos_receptores for insert to authenticated with check (public.is_admin());
+create policy "turnos_update_admin" on public.turnos_receptores for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "turnos_delete_admin" on public.turnos_receptores for delete to authenticated using (public.is_admin());
 
 -- google_calendar_conexiones: SIN políticas para "authenticated"/"anon" a
 -- propósito. Solo el backend con la Service Role Key puede leer o escribir
