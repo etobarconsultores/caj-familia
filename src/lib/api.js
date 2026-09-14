@@ -116,7 +116,7 @@ function causaFromDb(row) {
     intervinientes: (row.intervinientes || [])
       .slice()
       .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
-      .map(i => ({ id: i.id, tipoParte: i.tipo_parte, nombre: i.nombre, orden: i.orden })),
+      .map(i => ({ id: i.id, tipoParte: i.tipo_parte, rut: i.rut, nombre: i.nombre, orden: i.orden })),
     notificacionPersonas: (row.notificacion_personas || [])
       .slice()
       .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
@@ -358,7 +358,7 @@ export async function deleteGestionPendiente(id) {
 }
 
 function intervinientePatchToDb(patch) {
-  const map = { tipoParte: 'tipo_parte', nombre: 'nombre', orden: 'orden' };
+  const map = { tipoParte: 'tipo_parte', rut: 'rut', nombre: 'nombre', orden: 'orden' };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
   return out;
@@ -1151,6 +1151,73 @@ export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, dir
     fechaInicio: data.fecha_inicio,
     fechaTermino: data.fecha_termino
   };
+}
+
+
+// ============================================================================
+// Tutores de práctica -- catálogo personal por usuaria.
+// Cada cuenta solo puede leer/escribir sus propios tutores mediante RLS.
+// ============================================================================
+
+function tutorPracticaFromDb(row) {
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    orden: row.orden ?? 0,
+    activo: row.activo !== false,
+    createdAt: row.created_at
+  };
+}
+
+export async function fetchTutoresPractica(userId, { incluirInactivos = false } = {}) {
+  let query = supabase
+    .from('tutores_practica')
+    .select('id, nombre, orden, activo, created_at')
+    .eq('user_id', userId)
+    .order('orden', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (!incluirInactivos) query = query.eq('activo', true);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(tutorPracticaFromDb);
+}
+
+export async function createTutorPractica(userId, { nombre, orden = 0, activo = true }) {
+  const { data, error } = await supabase
+    .from('tutores_practica')
+    .insert({ user_id: userId, nombre, orden, activo })
+    .select('id, nombre, orden, activo, created_at')
+    .single();
+  if (error) throw error;
+  return tutorPracticaFromDb(data);
+}
+
+export async function updateTutorPractica(id, { nombre, orden, activo } = {}) {
+  const patch = {};
+  if (nombre !== undefined) patch.nombre = nombre;
+  if (orden !== undefined) patch.orden = orden;
+  if (activo !== undefined) patch.activo = activo;
+
+  if (Object.keys(patch).length === 0) return null;
+
+  const { data, error } = await supabase
+    .from('tutores_practica')
+    .update(patch)
+    .eq('id', id)
+    .select('id, nombre, orden, activo, created_at')
+    .single();
+  if (error) throw error;
+  return tutorPracticaFromDb(data);
+}
+
+export async function deleteTutorPractica(id) {
+  const { error } = await supabase
+    .from('tutores_practica')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
 }
 
 // ============================================================================

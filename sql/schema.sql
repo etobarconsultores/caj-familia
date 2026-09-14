@@ -427,6 +427,26 @@ create table if not exists public.calendar_sync_log (
 create index if not exists idx_calendar_sync_log_user_id on public.calendar_sync_log(user_id);
 create index if not exists idx_calendar_sync_log_evento_id on public.calendar_sync_log(agenda_evento_id);
 
+
+-- ----------------------------------------------------------------------------
+-- 9A. TUTORES DE PRÁCTICA (catálogo personal por usuario)
+-- ----------------------------------------------------------------------------
+create table if not exists public.tutores_practica (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  nombre text not null,
+  orden integer not null default 0,
+  activo boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_tutores_practica_user_id
+  on public.tutores_practica(user_id);
+
+grant select, insert, update, delete
+  on table public.tutores_practica
+  to authenticated;
+
 -- ----------------------------------------------------------------------------
 -- 9. CONFIGURACIÓN (preferencias por usuario)
 -- ----------------------------------------------------------------------------
@@ -498,6 +518,7 @@ alter table public.turnos_receptores enable row level security;
 alter table public.google_calendar_conexiones enable row level security;
 alter table public.calendar_sync_log enable row level security;
 alter table public.configuracion enable row level security;
+alter table public.tutores_practica enable row level security;
 
 -- profiles: cada quien ve y edita solo su propio perfil
 create policy "profiles_select_own" on public.profiles for select using (auth.uid() = id);
@@ -576,6 +597,25 @@ create policy "turnos_delete_admin" on public.turnos_receptores for delete to au
 -- calendar_sync_log: la usuaria puede leer su propio historial de
 -- sincronización; solo el backend puede escribirlo.
 create policy "calendar_sync_log_select_own" on public.calendar_sync_log for select using (auth.uid() = user_id);
+
+
+-- tutores_practica: cada usuaria administra únicamente sus propios tutores
+create policy "tutores_practica_select_own" on public.tutores_practica
+  for select to authenticated
+  using (auth.uid() = user_id);
+
+create policy "tutores_practica_insert_own" on public.tutores_practica
+  for insert to authenticated
+  with check (auth.uid() = user_id);
+
+create policy "tutores_practica_update_own" on public.tutores_practica
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "tutores_practica_delete_own" on public.tutores_practica
+  for delete to authenticated
+  using (auth.uid() = user_id);
 
 -- configuracion
 create policy "config_select_own" on public.configuracion for select using (auth.uid() = user_id);

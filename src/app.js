@@ -24,6 +24,7 @@ let ENCARGOS = [];
 let RECEPTORES = [];
 let TURNOS = [];
 let REVISIONES_SALA = [];
+let TUTORES_PRACTICA = [];
 let GOOGLE_STATUS = { conectado: false };
 let MODULE_ACCESOS = [];
 let CURRENT_ORG_MODULE = null;
@@ -699,13 +700,24 @@ async function renderPracticaSeccion(cont) {
   sec.innerHTML = `<div style="color:var(--ink-faint); font-size:12.5px;">Cargando…</div>`;
 
   try {
-    const practica = await api.fetchPracticaUsuaria(CURRENT_USER.id);
+    const [practica, tutores] = await Promise.all([
+      api.fetchPracticaUsuaria(CURRENT_USER.id),
+      api.fetchTutoresPractica(CURRENT_USER.id)
+    ]);
+    TUTORES_PRACTICA = tutores || [];
 
     sec.innerHTML = `
       <div><label>CAJ asignado</label><input type="text" class="ct-input" id="practica-caj" value="${escapeHtml(practica?.cajAsignado || '')}" placeholder="Ej.: Lo Prado"></div>
       <div><label>Dirección de CAJ</label><input type="text" class="ct-input" id="practica-direccion" value="${escapeHtml(practica?.direccionCaj || '')}"></div>
       <div><label>Inicio de práctica</label><input type="text" class="ct-input" id="practica-inicio" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaInicio || ''))}"></div>
       <div><label>Término de práctica</label><input type="text" class="ct-input" id="practica-termino" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaTermino || ''))}"></div>
+
+      <div style="border-top:1px solid var(--line); padding-top:14px; margin-top:14px;">
+        <div class="subhead" style="margin:0 0 10px;">Tutores</div>
+        <div><label>Cantidad de tutores</label><input type="number" class="ct-input" id="practica-tutores-cantidad" min="0" step="1" value="${TUTORES_PRACTICA.length}"></div>
+        <div id="practica-tutores-campos" style="margin-top:10px;"></div>
+      </div>
+
       <div style="margin-top:10px;"><button class="btn small primary" id="practica-guardar" type="button">Guardar datos de práctica</button></div>
     `;
 
@@ -713,19 +725,41 @@ async function renderPracticaSeccion(cont) {
     const inputDireccion = sec.querySelector('#practica-direccion');
     const inputInicio = sec.querySelector('#practica-inicio');
     const inputTermino = sec.querySelector('#practica-termino');
+    const inputCantidadTutores = sec.querySelector('#practica-tutores-cantidad');
+    const tutoresCampos = sec.querySelector('#practica-tutores-campos');
     const btnGuardar = sec.querySelector('#practica-guardar');
+
+    function renderCamposTutores() {
+      const cantidad = Math.max(0, parseInt(inputCantidadTutores.value, 10) || 0);
+      const valoresActuales = Array.from(tutoresCampos.querySelectorAll('.practica-tutor-nombre')).map(i => i.value);
+      tutoresCampos.innerHTML = '';
+      for (let i = 0; i < cantidad; i++) {
+        const valor = valoresActuales[i] !== undefined ? valoresActuales[i] : (TUTORES_PRACTICA[i]?.nombre || '');
+        tutoresCampos.insertAdjacentHTML('beforeend', `
+          <div style="margin-top:${i === 0 ? '0' : '8px'};">
+            <label>Tutor ${i + 1}</label>
+            <input type="text" class="ct-input practica-tutor-nombre" data-idx="${i}" value="${escapeHtml(valor)}" placeholder="Nombre completo del tutor">
+          </div>
+        `);
+      }
+    }
+
+    renderCamposTutores();
+    inputCantidadTutores.addEventListener('input', renderCamposTutores);
 
     btnGuardar.addEventListener('click', async () => {
       const cajAsignado = inputCaj.value.trim();
       const direccionCaj = inputDireccion.value.trim();
       const fechaInicio = fechaDdMmYyyyAIso(inputInicio.value);
       const fechaTermino = fechaDdMmYyyyAIso(inputTermino.value);
+      const nombresTutores = Array.from(tutoresCampos.querySelectorAll('.practica-tutor-nombre')).map(i => i.value.trim());
 
       if (!cajAsignado) { toast('Ingresa tu CAJ asignado.'); return; }
       if (!direccionCaj) { toast('Ingresa la dirección de tu CAJ.'); return; }
       if (!fechaInicio) { toast('La fecha de inicio debe tener formato DD-MM-AAAA.'); return; }
       if (!fechaTermino) { toast('La fecha de término debe tener formato DD-MM-AAAA.'); return; }
       if (fechaTermino < fechaInicio) { toast('La fecha de término no puede ser anterior al inicio.'); return; }
+      if (nombresTutores.some(n => !n)) { toast('Completa el nombre de todos los tutores indicados.'); return; }
 
       btnGuardar.disabled = true;
       try {
@@ -736,10 +770,26 @@ async function renderPracticaSeccion(cont) {
           fechaInicio,
           fechaTermino
         });
+
+        for (let i = 0; i < nombresTutores.length; i++) {
+          const existente = TUTORES_PRACTICA[i];
+          if (existente) {
+            await api.updateTutorPractica(existente.id, { nombre: nombresTutores[i], orden: i, activo: true });
+          } else {
+            await api.createTutorPractica(CURRENT_USER.id, { nombre: nombresTutores[i], orden: i, activo: true });
+          }
+        }
+        for (let i = nombresTutores.length; i < TUTORES_PRACTICA.length; i++) {
+          await api.updateTutorPractica(TUTORES_PRACTICA[i].id, { activo: false });
+        }
+
+        TUTORES_PRACTICA = await api.fetchTutoresPractica(CURRENT_USER.id);
         inputCaj.value = guardada.cajAsignado || cajAsignado;
         inputInicio.value = fechaIsoADdMmYyyy(guardada.fechaInicio);
         inputTermino.value = fechaIsoADdMmYyyy(guardada.fechaTermino);
         inputDireccion.value = guardada.direccionCaj || direccionCaj;
+        inputCantidadTutores.value = String(TUTORES_PRACTICA.length);
+        renderCamposTutores();
         toast('Datos de práctica actualizados correctamente');
       } catch (e) {
         console.error('Error guardando práctica:', e);
@@ -1689,10 +1739,10 @@ async function loadAll() {
   document.getElementById('list-container').innerHTML = '<div class="loading-note">Cargando causas…</div>';
 
   const resultados = await Promise.allSettled([
-    api.fetchCausas(), api.fetchEncargos(), api.fetchReceptores(), api.fetchTurnos(), api.fetchRevisionesSala(), api.googleGetStatus()
+    api.fetchCausas(), api.fetchEncargos(), api.fetchReceptores(), api.fetchTurnos(), api.fetchRevisionesSala(), api.fetchTutoresPractica(CURRENT_USER.id), api.googleGetStatus()
   ]);
-  const [rCausas, rEncargos, rReceptores, rTurnos, rRevisionesSala, rGoogleStatus] = resultados;
-  const nombres = ['causas', 'encargos', 'receptores', 'turnos', 'revisiones de sala', 'estado de Google Calendar'];
+  const [rCausas, rEncargos, rReceptores, rTurnos, rRevisionesSala, rTutoresPractica, rGoogleStatus] = resultados;
+  const nombres = ['causas', 'encargos', 'receptores', 'turnos', 'revisiones de sala', 'tutores de práctica', 'estado de Google Calendar'];
 
   resultados.forEach((r, i) => {
     if (r.status === 'rejected') console.error(`No se pudo cargar "${nombres[i]}":`, r.reason);
@@ -1703,13 +1753,14 @@ async function loadAll() {
   RECEPTORES = rReceptores.status === 'fulfilled' ? rReceptores.value : [];
   TURNOS = rTurnos.status === 'fulfilled' ? rTurnos.value : [];
   REVISIONES_SALA = rRevisionesSala.status === 'fulfilled' ? rRevisionesSala.value : [];
+  TUTORES_PRACTICA = rTutoresPractica.status === 'fulfilled' ? rTutoresPractica.value : [];
   GOOGLE_STATUS = rGoogleStatus.status === 'fulfilled' && rGoogleStatus.value ? rGoogleStatus.value : { conectado: false };
 
   if (rCausas.status === 'rejected') {
     document.getElementById('list-container').innerHTML = `<div class="empty-msg">No se pudieron cargar tus causas: ${escapeHtml(rCausas.reason?.message || 'error desconocido')}</div>`;
     return;
   }
-  if (resultados.slice(0, 5).some(r => r.status === 'rejected')) {
+  if (resultados.slice(0, 6).some(r => r.status === 'rejected')) {
     toast('Algunos datos secundarios no se pudieron cargar. Tus causas sí se cargaron correctamente.');
   }
   render();
@@ -2814,7 +2865,7 @@ function instruccionFormHtml(it) {
   <div class="agenda-form">
     <div class="subhead" style="margin-top:0;">${it ? 'Editar instrucción' : 'Nueva instrucción'}</div>
     <div class="form-grid2">
-      <div><label>Tutor</label><select id="if-tutor"><option value="">Sin definir</option>${TUTOR_OPCIONES.map(t => `<option value="${escapeHtml(t)}" ${e.tutor === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}</select></div>
+      <div><label>Tutor</label><select id="if-tutor">${tutorOptionsHtml(e.tutor)}</select></div>
       <div><label>Fecha de instrucción</label><input type="date" id="if-fecha" value="${escapeHtml(e.fecha || todayISO())}"></div>
     </div>
     <div><label>Instrucción</label><textarea id="if-instruccion">${escapeHtml(e.instruccion || '')}</textarea></div>
@@ -3747,12 +3798,13 @@ function emptyCausa() {
 // genera el HTML (idéntico en ambos contextos); wireAntecedentesForm
 // conecta los eventos y decide createCausa/updateCausa según corresponda.
 // ============================================================================
-const TUTOR_OPCIONES = ['Hugo Toledo', 'Cesar Romero'];
 const RECURSO_OPCIONES = ['Apelación', 'Apelación en subsidio casación', 'Casación en la forma', 'Casación en el fondo'];
 
 function tutorOptionsHtml(seleccionado) {
+  const nombres = TUTORES_PRACTICA.map(t => t.nombre).filter(Boolean);
+  if (seleccionado && !nombres.includes(seleccionado)) nombres.push(seleccionado);
   return `<option value="">Sin definir</option>` +
-    TUTOR_OPCIONES.map(t => `<option value="${escapeHtml(t)}" ${seleccionado === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+    nombres.map(t => `<option value="${escapeHtml(t)}" ${seleccionado === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
 }
 
 function procedimientoOptionsHtml(seleccionado) {
@@ -3797,13 +3849,23 @@ function campoDependienteHtml(id, opciones, valorActual) {
 
 function intervinienteRowHtml(item, idx) {
   return `<div class="af-interviniente-row" data-idx="${idx}">
-    <label>Tipo de parte</label>
-    <select class="af-interv-tipo" data-idx="${idx}">
-      <option value="">Sin definir</option>
-      ${TIPOS_PARTE.map(t => `<option value="${t}" ${item.tipoParte === t ? 'selected' : ''}>${t}</option>`).join('')}
-    </select>
-    <label style="margin-top:6px;">Nombre</label>
-    <input type="text" class="af-interv-nombre" data-idx="${idx}" value="${escapeHtml(item.nombre || '')}" placeholder="Nombre completo">
+    <div class="af-interv-top-grid">
+      <div class="af-interv-field">
+        <label>Tipo de parte</label>
+        <select class="af-interv-tipo" data-idx="${idx}">
+          <option value="">Sin definir</option>
+          ${TIPOS_PARTE.map(t => `<option value="${t}" ${item.tipoParte === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="af-interv-field af-interv-rut-field">
+        <label>RUT</label>
+        <input type="text" class="af-interv-rut" data-idx="${idx}" value="${escapeHtml(item.rut || '')}" placeholder="12.345.678-9" autocomplete="off">
+      </div>
+    </div>
+    <div class="af-interv-field af-interv-nombre-field">
+      <label>Nombre</label>
+      <input type="text" class="af-interv-nombre" data-idx="${idx}" value="${escapeHtml(item.nombre || '')}" placeholder="Nombre completo">
+    </div>
     <button class="btn small danger" type="button" data-action="af-quitar-interviniente" data-idx="${idx}" style="margin-top:6px; width:100%;">Quitar</button>
   </div>`;
 }
@@ -3961,7 +4023,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
 
   // Estado en memoria de intervinientes — parte de intervinientesEfectivos(c)
   // (tabla nueva, o el respaldo demandante/demandado si aún no existe).
-  let estadoIntervinientes = intervinientesEfectivos(c).map(i => ({ id: i.id, tipoParte: i.tipoParte, nombre: i.nombre }));
+  let estadoIntervinientes = intervinientesEfectivos(c).map(i => ({ id: i.id, tipoParte: i.tipoParte, rut: i.rut || '', nombre: i.nombre }));
 
   function refreshPreviews() {
     const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
@@ -4011,7 +4073,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   // los datos ya ingresados en las filas que se mantienen.
   form.querySelector('#af-cant-intervinientes').addEventListener('input', (e) => {
     const nueva = Math.max(0, parseInt(e.target.value, 10) || 0);
-    while (estadoIntervinientes.length < nueva) estadoIntervinientes.push({ id: null, tipoParte: '', nombre: '' });
+    while (estadoIntervinientes.length < nueva) estadoIntervinientes.push({ id: null, tipoParte: '', rut: '', nombre: '' });
     while (estadoIntervinientes.length > nueva) estadoIntervinientes.pop();
     renderIntervinientes();
   });
@@ -4024,6 +4086,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     const idx = parseInt(e.target.dataset.idx, 10);
     if (Number.isNaN(idx)) return;
     if (e.target.classList.contains('af-interv-tipo')) estadoIntervinientes[idx].tipoParte = e.target.value;
+    if (e.target.classList.contains('af-interv-rut')) estadoIntervinientes[idx].rut = e.target.value.trim();
     if (e.target.classList.contains('af-interv-nombre')) estadoIntervinientes[idx].nombre = e.target.value.trim();
     refreshPreviews();
   });
@@ -4057,7 +4120,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
         nueva.intervinientes = [];
         for (let idx = 0; idx < intervinientesValidos.length; idx++) {
           const it = intervinientesValidos[idx];
-          const creado = await api.createInterviniente(CURRENT_USER.id, nueva.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+          const creado = await api.createInterviniente(CURRENT_USER.id, nueva.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
           nueva.intervinientes.push(creado);
         }
         CAUSAS.unshift(nueva);
@@ -4072,11 +4135,11 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
         for (let idx = 0; idx < intervinientesValidos.length; idx++) {
           const it = intervinientesValidos[idx];
           if (it.id) {
-            await api.updateInterviniente(it.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
-            nuevaLista.push({ id: it.id, tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+            await api.updateInterviniente(it.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
+            nuevaLista.push({ id: it.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
           } else {
-            const creado = await api.createInterviniente(CURRENT_USER.id, c.id, { tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
-            nuevaLista.push({ id: creado.id, tipoParte: it.tipoParte, nombre: it.nombre, orden: idx });
+            const creado = await api.createInterviniente(CURRENT_USER.id, c.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
+            nuevaLista.push({ id: creado.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
           }
         }
         const idsFinales = new Set(nuevaLista.map(i => i.id));

@@ -1150,3 +1150,30 @@ body{
 .auth-legal-consent a:hover{
   color:var(--brass);
 }
+
+/* ---------- Intervinientes: tipo de parte + RUT en la misma fila ---------- */
+.af-interv-top-grid{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) 150px;
+  gap:10px;
+  align-items:end;
+}
+.af-interv-field{
+  min-width:0;
+}
+.af-interv-field label{
+  display:block;
+}
+.af-interv-field input,
+.af-interv-field select{
+  width:100%;
+  box-sizing:border-box;
+}
+.af-interv-nombre-field{
+  margin-top:6px;
+}
+@media (max-width:640px){
+  .af-interv-top-grid{
+    grid-template-columns:minmax(0, 1fr) 135px;
+  }
+}
