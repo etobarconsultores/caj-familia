@@ -1061,6 +1061,34 @@ export async function fetchMisAccesos(userId) {
   }));
 }
 
+
+// ============================================================================
+// Preferencias de interfaz por usuaria (public.configuracion).
+// Se guardan dentro del jsonb `preferencias` para no crear una columna por
+// cada ajuste visual futuro. RLS limita lectura/escritura a auth.uid().
+// ============================================================================
+export async function fetchPreferenciasUsuario(userId) {
+  const { data, error } = await supabase
+    .from('configuracion')
+    .select('preferencias')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data && data.preferencias) || {};
+}
+
+export async function savePreferenciasUsuario(userId, patch = {}) {
+  const actuales = await fetchPreferenciasUsuario(userId);
+  const preferencias = { ...actuales, ...patch };
+  const { data, error } = await supabase
+    .from('configuracion')
+    .upsert({ user_id: userId, preferencias }, { onConflict: 'user_id' })
+    .select('preferencias')
+    .single();
+  if (error) throw error;
+  return data?.preferencias || preferencias;
+}
+
 // Actualiza nombre y teléfono del propio perfil en una sola operación de
 // update sobre public.profiles. Usa el cliente normal -- RLS ya permite a
 // cada usuaria actualizar su propia fila (policy "profiles_update_own",

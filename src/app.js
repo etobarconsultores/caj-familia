@@ -34,6 +34,54 @@ let CURRENT_ORG_MODULE = null;
 // reales obtenidos de fetchMisAccesos() antes de restaurarlo.
 const ORG_MODULO_STORAGE_KEY = 'panelCausas.orgModuloActivo';
 
+
+// Preferencia visual por usuaria. Se aplica primero desde una copia local para
+// evitar un cambio brusco de color al cargar; tras iniciar sesión, Supabase
+// pasa a ser la fuente de verdad (public.configuracion.preferencias.tema).
+const TEMA_STORAGE_KEY = 'practicajuris.tema';
+const TEMAS_VALIDOS = new Set(['sistema', 'claro', 'oscuro']);
+let TEMA_PREFERENCIA = 'sistema';
+const _temaMediaQuery = (typeof window !== 'undefined' && window.matchMedia)
+  ? window.matchMedia('(prefers-color-scheme: dark)')
+  : null;
+
+function normalizarTema(tema) {
+  return TEMAS_VALIDOS.has(tema) ? tema : 'sistema';
+}
+
+function temaEfectivo(preferencia) {
+  if (preferencia === 'claro') return 'light';
+  if (preferencia === 'oscuro') return 'dark';
+  return _temaMediaQuery?.matches ? 'dark' : 'light';
+}
+
+function aplicarTemaPreferencia(tema, { persistirLocal = true } = {}) {
+  TEMA_PREFERENCIA = normalizarTema(tema);
+  const efectivo = temaEfectivo(TEMA_PREFERENCIA);
+  document.documentElement.dataset.theme = efectivo;
+  document.documentElement.dataset.themePreference = TEMA_PREFERENCIA;
+  if (persistirLocal) {
+    try { localStorage.setItem(TEMA_STORAGE_KEY, TEMA_PREFERENCIA); } catch (_) { /* no crítico */ }
+  }
+}
+
+function inicializarTemaLocal() {
+  let guardado = 'sistema';
+  try { guardado = localStorage.getItem(TEMA_STORAGE_KEY) || 'sistema'; } catch (_) { /* no crítico */ }
+  aplicarTemaPreferencia(guardado, { persistirLocal: false });
+}
+
+if (_temaMediaQuery) {
+  const onCambioSistema = () => {
+    if (TEMA_PREFERENCIA === 'sistema') aplicarTemaPreferencia('sistema', { persistirLocal: false });
+  };
+  if (_temaMediaQuery.addEventListener) _temaMediaQuery.addEventListener('change', onCambioSistema);
+  else if (_temaMediaQuery.addListener) _temaMediaQuery.addListener(onCambioSistema);
+}
+
+inicializarTemaLocal();
+
+
 function guardarSeleccionModulo(acceso) {
   try {
     localStorage.setItem(ORG_MODULO_STORAGE_KEY, JSON.stringify({
@@ -1161,6 +1209,47 @@ function mostrarSeccionCuenta(seccion) {
     return;
   }
 
+
+  if (seccion === 'apariencia') {
+    const opciones = [
+      { valor: 'sistema', titulo: 'Sistema', descripcion: 'Sigue automáticamente el modo claro u oscuro de tu dispositivo.' },
+      { valor: 'claro', titulo: 'Claro', descripcion: 'Usa siempre la interfaz clara.' },
+      { valor: 'oscuro', titulo: 'Oscuro', descripcion: 'Usa siempre la interfaz oscura.' }
+    ];
+    cont.innerHTML = `
+      <div class="subhead" style="margin-top:0;">Apariencia</div>
+      <div style="color:var(--ink-dim); font-size:12.5px; line-height:1.5; margin-bottom:14px;">Elige cómo quieres ver Práctica Juris. La preferencia se guarda en tu cuenta y se aplicará también cuando ingreses desde otro dispositivo.</div>
+      <div class="appearance-options">
+        ${opciones.map(op => `
+          <button type="button" class="appearance-option ${TEMA_PREFERENCIA === op.valor ? 'active' : ''}" data-tema="${op.valor}">
+            <span class="appearance-option-title">${op.titulo}</span>
+            <span class="appearance-option-desc">${op.descripcion}</span>
+            <span class="appearance-option-check" aria-hidden="true">${TEMA_PREFERENCIA === op.valor ? '✓' : ''}</span>
+          </button>`).join('')}
+      </div>
+    `;
+
+    cont.querySelectorAll('.appearance-option').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const nuevoTema = normalizarTema(btn.dataset.tema);
+        if (nuevoTema === TEMA_PREFERENCIA) return;
+        const anterior = TEMA_PREFERENCIA;
+        aplicarTemaPreferencia(nuevoTema);
+        mostrarSeccionCuenta('apariencia');
+        try {
+          await api.savePreferenciasUsuario(CURRENT_USER.id, { tema: nuevoTema });
+          toast('Apariencia actualizada correctamente');
+        } catch (e) {
+          console.error('No se pudo guardar la apariencia:', e);
+          aplicarTemaPreferencia(anterior);
+          mostrarSeccionCuenta('apariencia');
+          toast('No se pudo guardar la apariencia: ' + e.message);
+        }
+      });
+    });
+    return;
+  }
+
   if (seccion === 'suscripcion') {
     cont.innerHTML = `
       <div class="subhead" style="margin-top:0;">Administrar suscripción</div>
@@ -1188,6 +1277,7 @@ function abrirModalAdministracionCuenta() {
           <nav class="cuenta-nav">
             <button type="button" class="cuenta-nav-item" data-seccion="info">Información personal</button>
             <button type="button" class="cuenta-nav-item" data-seccion="seguridad">Seguridad y acceso</button>
+            <button type="button" class="cuenta-nav-item" data-seccion="apariencia">Apariencia</button>
             <button type="button" class="cuenta-nav-item" data-seccion="suscripcion">Administrar suscripción</button>
           </nav>
           <div class="cuenta-contenido" id="cuenta-contenido"></div>
@@ -1575,6 +1665,16 @@ async function onSessionReady(session) {
         CURRENT_USER.avatarUrl = await api.getAvatarSignedUrl(CURRENT_USER.avatarPath);
       }
     } catch (e) { /* columna aún no existe, perfil no creado, o sin foto -- no crítico */ }
+  }
+
+  // Preferencia de apariencia de la cuenta. Si aún no existe una fila en
+  // configuracion, se usa "Sistema" como valor inicial. Un error de esta
+  // preferencia nunca bloquea la carga de las causas.
+  try {
+    const preferencias = await api.fetchPreferenciasUsuario(CURRENT_USER.id);
+    aplicarTemaPreferencia(preferencias?.tema || 'sistema');
+  } catch (e) {
+    console.error('No se pudo cargar la preferencia de apariencia:', e);
   }
 
   actualizarAvatar();
@@ -9876,6 +9976,8 @@ export async function initApp() {
       MODULE_ACCESOS = [];
       CURRENT_ORG_MODULE = null;
       borrarSeleccionModuloGuardada();
+      try { localStorage.removeItem(TEMA_STORAGE_KEY); } catch (_) { /* no crítico */ }
+      aplicarTemaPreferencia('sistema', { persistirLocal: false });
       document.getElementById('familia-screen').hidden = true;
       document.getElementById('module-select-screen').hidden = true;
       cerrarPantallaMfaGate();
