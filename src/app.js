@@ -190,6 +190,41 @@ async function refreshCausaLocal(id) {
 // ============================================================================
 // AUTENTICACIÓN
 // ============================================================================
+function aplicarBrandingPracticaJuris() {
+  // Integra la marca sin exigir cambios en index.html y sin tocar la lógica
+  // existente. Si por estructura futura alguno de estos contenedores no está,
+  // simplemente no se inyecta esa pieza.
+  const brand = document.querySelector('.brand');
+  if (brand && !brand.querySelector('.pj-brand-sidebar')) {
+    brand.insertAdjacentHTML('afterbegin', `
+      <div class="pj-brand-sidebar" aria-label="Práctica Juris">
+        <img
+          src="/assets/branding/practica-juris-nombre.png"
+          alt="Práctica Juris"
+          class="pj-brand-sidebar-img"
+          draggable="false"
+        >
+      </div>
+    `);
+    brand.classList.add('pj-brand-integrated');
+  }
+
+  const authCard = document.querySelector('.auth-card');
+  if (authCard && !authCard.querySelector('.pj-brand-login')) {
+    authCard.insertAdjacentHTML('afterbegin', `
+      <div class="pj-brand-login" aria-label="Práctica Juris">
+        <img
+          src="/assets/branding/practica-juris-logo-completo.png"
+          alt="Práctica Juris"
+          class="pj-brand-login-img"
+          draggable="false"
+        >
+      </div>
+    `);
+    authCard.classList.add('pj-brand-integrated');
+  }
+}
+
 function showAuthScreen() {
   document.getElementById('loading-screen').hidden = true;
   document.getElementById('app-root').hidden = true;
@@ -320,10 +355,12 @@ function limpiarCamposSeguridad(contenedor) {
 // ---------- Sección "Datos de la cuenta" (solo lectura) ----------
 function datosCuentaHtml() {
   return `
-    <div><label>Nombre</label><input type="text" class="ct-input" id="cuenta-nombre-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.nombre) || '')}"></div>
-    <div><label>Correo electrónico</label><input type="text" class="ct-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.email) || '')}" disabled></div>
-    <div><label>Teléfono</label><input type="text" class="ct-input" id="cuenta-telefono-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.telefono) || '')}"></div>
-    <div style="margin-top:10px;"><button class="btn small primary" id="cuenta-guardar-datos" type="button">Guardar cambios</button></div>
+    <div class="cuenta-form-grid cuenta-form-grid-2">
+      <div class="cuenta-field"><label>Nombre</label><input type="text" class="ct-input" id="cuenta-nombre-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.nombre) || '')}"></div>
+      <div class="cuenta-field"><label>Correo electrónico</label><input type="text" class="ct-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.email) || '')}" disabled></div>
+      <div class="cuenta-field"><label>Teléfono</label><input type="text" class="ct-input" id="cuenta-telefono-input" value="${escapeHtml((CURRENT_USER && CURRENT_USER.telefono) || '')}"></div>
+    </div>
+    <div class="cuenta-actions"><button class="btn small primary" id="cuenta-guardar-datos" type="button">Guardar cambios</button></div>
   `;
 }
 
@@ -576,18 +613,30 @@ function abrirMenuAvatar() {
   const nombre = (CURRENT_USER && CURRENT_USER.nombre) || '';
   const correo = (CURRENT_USER && CURRENT_USER.email) || '';
 
+  const avatarMini = (CURRENT_USER && CURRENT_USER.avatarUrl)
+    ? `<img src="${escapeHtml(CURRENT_USER.avatarUrl)}" alt="">`
+    : `<span>${escapeHtml(inicialAvatar())}</span>`;
+
   document.body.insertAdjacentHTML('beforeend', `
     <div class="avatar-menu" id="avatar-menu" role="menu" style="top:${rect.bottom + 8}px; right:${Math.max(8, window.innerWidth - rect.right)}px;">
       <div class="avatar-menu-header">
-        <div class="avatar-menu-nombre">${escapeHtml(nombre || correo || '')}</div>
-        ${nombre ? `<div class="avatar-menu-correo">${escapeHtml(correo)}</div>` : ''}
+        <div class="avatar-menu-profile">${avatarMini}</div>
+        <div class="avatar-menu-identidad">
+          <div class="avatar-menu-eyebrow">CUENTA PRÁCTICA JURIS</div>
+          <div class="avatar-menu-nombre">${escapeHtml(nombre || correo || '')}</div>
+          ${nombre ? `<div class="avatar-menu-correo">${escapeHtml(correo)}</div>` : ''}
+        </div>
       </div>
-      <button type="button" class="avatar-menu-item" id="avatar-item-cuenta" role="menuitem">Administrar tu cuenta</button>
+      <div class="avatar-menu-group-label">Cuenta</div>
+      <button type="button" class="avatar-menu-item avatar-menu-item-main" id="avatar-item-cuenta" role="menuitem">
+        <span>Administrar tu cuenta</span><span class="avatar-menu-arrow">›</span>
+      </button>
+      <div class="avatar-menu-group-label">Legal y privacidad</div>
       <button type="button" class="avatar-menu-item" id="avatar-item-privacidad" role="menuitem">Política de privacidad</button>
       <button type="button" class="avatar-menu-item" id="avatar-item-seguridad" role="menuitem">Política de seguridad</button>
       <button type="button" class="avatar-menu-item" id="avatar-item-condiciones" role="menuitem">Condiciones de uso</button>
       <div class="avatar-menu-sep"></div>
-      <button type="button" class="avatar-menu-item" id="avatar-item-logout" role="menuitem">Cerrar sesión</button>
+      <button type="button" class="avatar-menu-item avatar-menu-item-logout" id="avatar-item-logout" role="menuitem">Cerrar sesión</button>
     </div>
   `);
 
@@ -1093,13 +1142,21 @@ function mostrarSeccionCuenta(seccion) {
 
   if (seccion === 'info') {
     cont.innerHTML = `
-      <div class="subhead" style="margin-top:0;">Información personal</div>
-      <div id="cuenta-avatar-row"></div>
-      ${datosCuentaHtml()}
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Datos de práctica</div>
-      <div id="cuenta-practica-section">
-        <div style="color:var(--ink-faint); font-size:12.5px;">Más información personal estará disponible en próximas versiones.</div>
+      <div class="cuenta-section-intro">
+        <div class="cuenta-section-kicker">PERFIL</div>
+        <h2>Información personal</h2>
       </div>
+      <section class="cuenta-card cuenta-card-profile">
+        <div class="cuenta-card-title">Perfil de usuario</div>
+        <div id="cuenta-avatar-row"></div>
+        ${datosCuentaHtml()}
+      </section>
+      <section class="cuenta-card">
+        <div class="cuenta-card-title">Datos de práctica</div>
+        <div id="cuenta-practica-section">
+          <div class="cuenta-muted">Más información personal estará disponible en próximas versiones.</div>
+        </div>
+      </section>
     `;
     const btnGuardarDatos = cont.querySelector('#cuenta-guardar-datos');
     if (btnGuardarDatos) {
@@ -1137,34 +1194,79 @@ function mostrarSeccionCuenta(seccion) {
 
   if (seccion === 'seguridad') {
     cont.innerHTML = `
-      <div class="subhead" style="margin-top:0;">Contraseña de Práctica Juris</div>
-      <div style="color:var(--ink-faint); font-size:12px; margin-bottom:8px;">Esta es la contraseña con la que inicias sesión en Práctica Juris — distinta del PIN de 4 dígitos de abajo, que solo se usa para revelar credenciales guardadas en Contacto.</div>
-      <div id="cuenta-password-section"></div>
-
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Verificación en 2 pasos</div>
-      <div id="cuenta-totp-section">
-        <div style="color:var(--ink-faint); font-size:12.5px;">Cargando…</div>
+      <div class="cuenta-section-intro">
+        <div class="cuenta-section-kicker">PROTECCIÓN DE CUENTA</div>
+        <h2>Seguridad y acceso</h2>
       </div>
 
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Teléfono de recuperación</div>
-      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:8px;">Número alternativo para fines de seguridad y asistencia de recuperación.</div>
-      <input id="cuenta-recovery-phone" type="tel" value="${CURRENT_USER.recoveryPhone || ''}" placeholder="Ej. +56 9 1234 5678" />
+      <section class="cuenta-card cuenta-security-card">
+        <div class="cuenta-security-head">
+          <div>
+            <div class="cuenta-card-title">Contraseña</div>
+            <div class="cuenta-muted">Contraseña principal para iniciar sesión en Práctica Juris.</div>
+          </div>
+          <span class="cuenta-security-badge">ACCESO</span>
+        </div>
+        <div id="cuenta-password-section" class="cuenta-card-action"></div>
+      </section>
 
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Correo de recuperación</div>
-      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:8px;">Correo alternativo para avisos de seguridad y asistencia de recuperación.</div>
-      <input id="cuenta-recovery-email" type="email" value="${CURRENT_USER.recoveryEmail || ''}" placeholder="correo@ejemplo.com" />
+      <section class="cuenta-card cuenta-security-card">
+        <div class="cuenta-security-head">
+          <div>
+            <div class="cuenta-card-title">Verificación en 2 pasos</div>
+            <div class="cuenta-muted">Añade un segundo factor mediante una aplicación autenticadora.</div>
+          </div>
+          <span class="cuenta-security-badge">2FA</span>
+        </div>
+        <div id="cuenta-totp-section" class="cuenta-security-body">
+          <div class="cuenta-muted">Cargando…</div>
+        </div>
+      </section>
 
-      <div style="margin-top:12px;">
-        <button type="button" class="btn" id="cuenta-guardar-recovery">Guardar datos de recuperación</button>
-      </div>
+      <section class="cuenta-card cuenta-security-card">
+        <div class="cuenta-security-head">
+          <div>
+            <div class="cuenta-card-title">Datos de recuperación</div>
+            <div class="cuenta-muted">Información alternativa para avisos de seguridad y asistencia de recuperación.</div>
+          </div>
+          <span class="cuenta-security-badge">RECUPERACIÓN</span>
+        </div>
+        <div class="cuenta-form-grid cuenta-form-grid-2 cuenta-security-recovery">
+          <div class="cuenta-field">
+            <label>Teléfono de recuperación</label>
+            <input id="cuenta-recovery-phone" type="tel" value="${CURRENT_USER.recoveryPhone || ''}" placeholder="Ej. +56 9 1234 5678" />
+          </div>
+          <div class="cuenta-field">
+            <label>Correo de recuperación</label>
+            <input id="cuenta-recovery-email" type="email" value="${CURRENT_USER.recoveryEmail || ''}" placeholder="correo@ejemplo.com" />
+          </div>
+        </div>
+        <div class="cuenta-actions"><button type="button" class="btn small primary" id="cuenta-guardar-recovery">Guardar datos de recuperación</button></div>
+      </section>
 
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">PIN de seguridad</div>
-      <div id="cuenta-pin-section">
-        <div style="color:var(--ink-faint); font-size:13px;">Cargando…</div>
-      </div>
+      <section class="cuenta-card cuenta-security-card">
+        <div class="cuenta-security-head">
+          <div>
+            <div class="cuenta-card-title">PIN de seguridad</div>
+            <div class="cuenta-muted">PIN de 4 dígitos utilizado para revelar credenciales protegidas en Contacto.</div>
+          </div>
+          <span class="cuenta-security-badge">PIN</span>
+        </div>
+        <div id="cuenta-pin-section" class="cuenta-security-body">
+          <div class="cuenta-muted">Cargando…</div>
+        </div>
+      </section>
 
-      <div class="subhead" style="border-top:1px solid var(--line); padding-top:16px; margin-top:18px;">Cerrar cuenta</div>
-      <div id="cuenta-cierre-section"></div>
+      <section class="cuenta-card cuenta-security-card cuenta-danger-card">
+        <div class="cuenta-security-head">
+          <div>
+            <div class="cuenta-card-title">Cerrar cuenta</div>
+            <div class="cuenta-muted">Gestiona el cierre y el período previo a la eliminación definitiva de tu cuenta.</div>
+          </div>
+          <span class="cuenta-security-badge cuenta-security-badge-danger">CUENTA</span>
+        </div>
+        <div id="cuenta-cierre-section" class="cuenta-security-body"></div>
+      </section>
     `;
     // Reutilización textual, sin cambios internos, de la lógica ya
     // construida y probada en rondas anteriores.
@@ -1212,21 +1314,40 @@ function mostrarSeccionCuenta(seccion) {
 
   if (seccion === 'apariencia') {
     const opciones = [
-      { valor: 'sistema', titulo: 'Sistema', descripcion: 'Sigue automáticamente el modo claro u oscuro de tu dispositivo.' },
-      { valor: 'claro', titulo: 'Claro', descripcion: 'Usa siempre la interfaz clara.' },
-      { valor: 'oscuro', titulo: 'Oscuro', descripcion: 'Usa siempre la interfaz oscura.' }
+      { valor: 'sistema', titulo: 'Sistema', descripcion: 'Se adapta al modo de tu dispositivo.', icono: '◐' },
+      { valor: 'claro', titulo: 'Claro', descripcion: 'Mantiene siempre la interfaz clara.', icono: '☼' },
+      { valor: 'oscuro', titulo: 'Oscuro', descripcion: 'Mantiene siempre la interfaz oscura.', icono: '☾' }
     ];
     cont.innerHTML = `
-      <div class="subhead" style="margin-top:0;">Apariencia</div>
-      <div style="color:var(--ink-dim); font-size:12.5px; line-height:1.5; margin-bottom:14px;">Elige cómo quieres ver Práctica Juris. La preferencia se guarda en tu cuenta y se aplicará también cuando ingreses desde otro dispositivo.</div>
-      <div class="appearance-options">
-        ${opciones.map(op => `
-          <button type="button" class="appearance-option ${TEMA_PREFERENCIA === op.valor ? 'active' : ''}" data-tema="${op.valor}">
-            <span class="appearance-option-title">${op.titulo}</span>
-            <span class="appearance-option-desc">${op.descripcion}</span>
-            <span class="appearance-option-check" aria-hidden="true">${TEMA_PREFERENCIA === op.valor ? '✓' : ''}</span>
-          </button>`).join('')}
+      <div class="cuenta-section-intro cuenta-section-intro-appearance">
+        <div class="cuenta-section-kicker">PREFERENCIAS</div>
+        <h2>Apariencia</h2>
       </div>
+      <section class="cuenta-card cuenta-appearance-card">
+        <div class="cuenta-card-title">Tema de la interfaz</div>
+        <div class="appearance-options">
+          ${opciones.map(op => `
+            <button type="button" class="appearance-option appearance-option-${op.valor} ${TEMA_PREFERENCIA === op.valor ? 'active' : ''}" data-tema="${op.valor}" aria-pressed="${TEMA_PREFERENCIA === op.valor ? 'true' : 'false'}">
+              <span class="appearance-preview appearance-preview-${op.valor}" aria-hidden="true">
+                <span class="appearance-preview-sidebar"></span>
+                <span class="appearance-preview-main">
+                  <span class="appearance-preview-bar"></span>
+                  <span class="appearance-preview-card"></span>
+                  <span class="appearance-preview-card appearance-preview-card-short"></span>
+                </span>
+              </span>
+              <span class="appearance-option-copy">
+                <span class="appearance-option-icon" aria-hidden="true">${op.icono}</span>
+                <span>
+                  <span class="appearance-option-title">${op.titulo}</span>
+                  <span class="appearance-option-desc">${op.descripcion}</span>
+                </span>
+              </span>
+              <span class="appearance-option-check" aria-hidden="true">${TEMA_PREFERENCIA === op.valor ? '✓' : ''}</span>
+            </button>`).join('')}
+        </div>
+        <div class="appearance-note">La preferencia se guarda en tu cuenta y se aplica automáticamente al iniciar sesión.</div>
+      </section>
     `;
 
     cont.querySelectorAll('.appearance-option').forEach(btn => {
@@ -1252,11 +1373,59 @@ function mostrarSeccionCuenta(seccion) {
 
   if (seccion === 'suscripcion') {
     cont.innerHTML = `
-      <div class="subhead" style="margin-top:0;">Administrar suscripción</div>
-      <div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:14px;">La gestión de planes y pagos estará disponible próximamente.</div>
-      <div><div class="k">Suscripción actual</div><div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:12px;">Disponible próximamente</div></div>
-      <div><div class="k">Cambiar plan</div><div style="color:var(--ink-faint); font-size:12.5px; margin-bottom:12px;">Disponible próximamente</div></div>
-      <div><div class="k">Administrar forma de pago</div><div style="color:var(--ink-faint); font-size:12.5px;">Disponible próximamente</div></div>
+      <div class="cuenta-section-intro">
+        <div class="cuenta-section-kicker">PLAN Y FACTURACIÓN</div>
+        <h2>Administrar suscripción</h2>
+        <p>Este espacio reunirá tu plan, facturación y medios de pago cuando habilitemos las suscripciones.</p>
+      </div>
+
+      <section class="cuenta-card cuenta-subscription-card cuenta-subscription-hero">
+        <div class="cuenta-subscription-hero-copy">
+          <div class="cuenta-coming-soon">PRÓXIMAMENTE</div>
+          <h3>Suscripciones de Práctica Juris</h3>
+          <p>Estamos preparando esta sección para que puedas revisar tu plan y administrar la facturación desde un solo lugar.</p>
+        </div>
+        <div class="cuenta-subscription-orbit" aria-hidden="true">
+          <span class="cuenta-subscription-orbit-ring"></span>
+          <span class="cuenta-subscription-orbit-core">
+            <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="cuenta-subscription-orbit-logo" draggable="false">
+          </span>
+        </div>
+      </section>
+
+      <div class="cuenta-subscription-grid">
+        <section class="cuenta-card cuenta-subscription-feature">
+          <div class="cuenta-subscription-feature-icon">01</div>
+          <div class="cuenta-subscription-feature-copy">
+            <div class="k">Suscripción actual</div>
+            <div class="cuenta-muted">Aquí verás el nombre de tu plan, estado y fecha de renovación.</div>
+          </div>
+          <div class="cuenta-subscription-state">PENDIENTE</div>
+        </section>
+
+        <section class="cuenta-card cuenta-subscription-feature">
+          <div class="cuenta-subscription-feature-icon">02</div>
+          <div class="cuenta-subscription-feature-copy">
+            <div class="k">Cambiar plan</div>
+            <div class="cuenta-muted">Podrás comparar alternativas y cambiar de plan cuando la función esté disponible.</div>
+          </div>
+          <div class="cuenta-subscription-state">PENDIENTE</div>
+        </section>
+
+        <section class="cuenta-card cuenta-subscription-feature">
+          <div class="cuenta-subscription-feature-icon">03</div>
+          <div class="cuenta-subscription-feature-copy">
+            <div class="k">Forma de pago</div>
+            <div class="cuenta-muted">Gestionarás medios de pago y antecedentes de facturación desde esta sección.</div>
+          </div>
+          <div class="cuenta-subscription-state">PENDIENTE</div>
+        </section>
+      </div>
+
+      <div class="cuenta-subscription-note">
+        <span class="cuenta-subscription-note-dot"></span>
+        <span>No necesitas realizar ninguna acción por ahora.</span>
+      </div>
     `;
     return;
   }
@@ -1267,18 +1436,24 @@ function abrirModalAdministracionCuenta() {
   // patrón ya usado en abrirImportadorTurnoMensualPdf.
   document.getElementById('cuenta-overlay')?.remove();
   document.body.insertAdjacentHTML('beforeend', `
-    <div class="tm-overlay show" id="cuenta-overlay">
+    <div class="tm-overlay show cuenta-overlay" id="cuenta-overlay">
       <div class="cuenta-panel" id="cuenta-panel">
-        <div class="tm-panel-head">
-          <h3>Administrar tu cuenta</h3>
-          <button class="close-x" id="cuenta-cerrar" type="button">&times;</button>
+        <div class="cuenta-panel-head">
+          <div>
+            <div class="cuenta-panel-kicker">CONFIGURACIÓN</div>
+            <h3>Administrar tu cuenta</h3>
+            <p>Perfil, seguridad, apariencia y suscripción.</p>
+          </div>
+          <button class="close-x cuenta-close" id="cuenta-cerrar" type="button" aria-label="Cerrar">&times;</button>
         </div>
         <div class="cuenta-panel-body">
-          <nav class="cuenta-nav">
-            <button type="button" class="cuenta-nav-item" data-seccion="info">Información personal</button>
-            <button type="button" class="cuenta-nav-item" data-seccion="seguridad">Seguridad y acceso</button>
-            <button type="button" class="cuenta-nav-item" data-seccion="apariencia">Apariencia</button>
-            <button type="button" class="cuenta-nav-item" data-seccion="suscripcion">Administrar suscripción</button>
+          <nav class="cuenta-nav" aria-label="Secciones de cuenta">
+            <div class="cuenta-nav-label">TU CUENTA</div>
+            <button type="button" class="cuenta-nav-item" data-seccion="info"><span class="cuenta-nav-icon">01</span><span>Información personal</span></button>
+            <button type="button" class="cuenta-nav-item" data-seccion="seguridad"><span class="cuenta-nav-icon">02</span><span>Seguridad y acceso</span></button>
+            <div class="cuenta-nav-label cuenta-nav-label-spaced">PREFERENCIAS</div>
+            <button type="button" class="cuenta-nav-item" data-seccion="apariencia"><span class="cuenta-nav-icon">03</span><span>Apariencia</span></button>
+            <button type="button" class="cuenta-nav-item" data-seccion="suscripcion"><span class="cuenta-nav-icon">04</span><span>Administrar suscripción</span></button>
           </nav>
           <div class="cuenta-contenido" id="cuenta-contenido"></div>
         </div>
@@ -2064,20 +2239,90 @@ function caseCardHtml(c) {
   const scText = c.subcategoria || '';
   const tribunal = tribunalTexto(c);
   const partes = caratuladoTexto(c);
+  const prioridad = prioridadEfectiva(c);
+  const rol = c.rol || c.rolIngreso || '';
+  const categoriaLabel = CAT_META[c.categoria]?.label || (c.categoria === 'terminada' ? 'Terminada' : '');
+  const tutor = c.tutor || '';
+
   return `
-  <div class="case-card ${scClass}" data-id="${c.id}">
+  <div class="case-card case-card-v2 general-case-card ${scClass}" data-id="${c.id}">
     <div class="case-main">
-      <div class="titulo">${escapeHtml(c.titulo)}</div>
+      <div class="case-card-heading">
+        <div>
+          <div class="titulo">${escapeHtml(c.titulo)}</div>
+          <div class="case-card-context">
+            ${categoriaLabel ? `<span class="case-status-chip case-status-${escapeHtml(c.categoria || '')}">${escapeHtml(categoriaLabel)}</span>` : ''}
+            ${tutor ? `<span class="case-tutor-chip">Tutor · ${escapeHtml(tutor)}</span>` : ''}
+          </div>
+        </div>
+        ${prioridad ? `<span class="case-priority case-priority-${priorClass(prioridad)}">${escapeHtml(prioridad)}</span>` : ''}
+      </div>
+
       <div class="meta">
         ${scText ? `<span class="sc-tag ${scClass}">${escapeHtml(scText)}</span>` : ''}
+        ${rol ? `<span class="case-rol">${escapeHtml(rol)}</span>` : ''}
         ${tribunal ? `<span>${escapeHtml(tribunal)}</span>` : ''}
         ${c.etapa ? `<span>${escapeHtml(c.etapa)}</span>` : ''}
       </div>
+
       ${partes ? `<div class="case-partes">${escapeHtml(partes)}</div>` : ''}
-      ${gestion ? `<div class="gestion">→ ${escapeHtml(gestion)}</div>` : ''}
+
+      ${gestion ? `
+        <div class="case-next-action">
+          <span class="case-next-label">Qué sigue</span>
+          <span class="case-next-text">${escapeHtml(gestion)}</span>
+        </div>` : `
+        <div class="case-next-action is-empty">
+          <span class="case-next-label">Qué sigue</span>
+          <span class="case-next-text">Sin gestión pendiente registrada</span>
+        </div>`}
     </div>
-    <div class="case-side">${escapeHtml(plazoTxt)}</div>
+
+    <div class="case-card-aside">
+      <div class="case-review-block">
+        <span class="case-review-label">Próxima revisión</span>
+        ${plazoTxt
+          ? `<div class="case-deadline">${escapeHtml(plazoTxt)}</div>`
+          : `<div class="case-deadline muted">Sin fecha programada</div>`}
+      </div>
+      <span class="case-open-arrow" aria-hidden="true">›</span>
+    </div>
   </div>`;
+}
+
+function actualizarHeroVistaGeneral() {
+  const stats = document.getElementById('stats-row');
+  if (!stats || !stats.parentElement) return;
+
+  let hero = document.getElementById('general-cases-hero');
+  const debeMostrar = currentCat === 'todas' && !statFilter;
+
+  if (!debeMostrar) {
+    if (hero) hero.remove();
+    return;
+  }
+
+  const activas = CAUSAS.filter(c => c.categoria !== 'terminada').length;
+  const nuevas = CAUSAS.filter(c => c.categoria === 'nueva').length;
+
+  if (!hero) {
+    hero = document.createElement('section');
+    hero.id = 'general-cases-hero';
+    hero.className = 'general-cases-hero';
+    stats.parentElement.insertBefore(hero, stats);
+  }
+
+  hero.innerHTML = `
+    <div>
+      <div class="general-cases-kicker">Cartera civil</div>
+      <h2>Gestión de causas</h2>
+    </div>
+    <div class="general-cases-hero-meta">
+      <span><strong>${activas}</strong> activas</span>
+      <span><strong>${nuevas}</strong> en redacción</span>
+      <span><strong>${CAUSAS.length}</strong> total</span>
+    </div>
+  `;
 }
 
 const STAT_LABELS = { activas: 'Causas activas', urgente: 'Urgente', semi: 'Semi urgente', noprior: 'No prioritario' };
@@ -2085,6 +2330,7 @@ const STAT_LABELS = { activas: 'Causas activas', urgente: 'Urgente', semi: 'Semi
 function render() {
   renderSidebarTabs();
   updateRecordTabsUI();
+  actualizarHeroVistaGeneral();
 
   if (currentCat === 'encargo') {
     document.getElementById('stats-row').style.display = 'none';
@@ -2159,6 +2405,7 @@ function render() {
 
   renderStats();
   const container = document.getElementById('list-container');
+  container.classList.toggle('general-cases-list', currentCat === 'todas' && !statFilter);
   const filtered = CAUSAS.filter(matchesFilters);
 
   if (statFilter) {
@@ -2210,7 +2457,7 @@ const NOTIF_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero
 
 function notifDomicilioRowHtml(d, pIdx, dIdx) {
   return `<tr data-p-idx="${pIdx}" data-d-idx="${dIdx}">
-    <td><input type="text" class="np-domicilio" value="${escapeHtml(d.domicilio || '')}"></td>
+    <td><input type="text" class="np-domicilio" value="${escapeHtml(d.domicilio || '')}" placeholder="Domicilio o resultado de búsqueda"></td>
     <td><select class="np-dom-estado">
       <option value="" ${!d.estado ? 'selected' : ''}>—</option>
       <option value="Negativa" ${d.estado === 'Negativa' ? 'selected' : ''}>Negativa</option>
@@ -2218,34 +2465,60 @@ function notifDomicilioRowHtml(d, pIdx, dIdx) {
       <option value="Señalado" ${d.estado === 'Señalado' ? 'selected' : ''}>Señalado</option>
     </select></td>
     <td><input type="date" class="np-dom-fecha" value="${escapeHtml(d.fecha || '')}"></td>
-    <td><input type="text" class="np-dom-folio" value="${escapeHtml(d.folio || '')}"></td>
-    <td><input type="text" class="np-dom-informado" value="${escapeHtml(d.informadoPor || '')}"></td>
-    <td class="col-del"><button class="notif-row-del" data-action="np-quitar-domicilio" data-p-idx="${pIdx}" data-d-idx="${dIdx}">&times;</button></td>
+    <td><input type="text" class="np-dom-folio" value="${escapeHtml(d.folio || '')}" placeholder="Folio"></td>
+    <td><input type="text" class="np-dom-informado" value="${escapeHtml(d.informadoPor || '')}" placeholder="Nombre"></td>
+    <td class="col-del"><button class="notif-row-del" data-action="np-quitar-domicilio" data-p-idx="${pIdx}" data-d-idx="${dIdx}" aria-label="Quitar domicilio">&times;</button></td>
   </tr>`;
 }
 
 function notifPersonaBlockHtml(persona, idx) {
-  return `<div class="agenda-form" data-persona-idx="${idx}" style="margin-bottom:14px;">
-    <div class="form-grid2">
-      <div><label>Parte</label><select class="np-parte" data-idx="${idx}"><option value="">Sin definir</option>${NOTIF_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-      <div><label>Nombre</label><input type="text" class="np-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+  const estado = persona.estadoNotificacion || '';
+  const estadoClass = estado === 'Notificado' ? 'is-done' : (estado === 'Pendiente' ? 'is-pending' : 'is-neutral');
+  const estadoTexto = estado || 'Sin definir';
+  const domiciliosCount = (persona.domicilios || []).length;
+  return `<section class="notif-person-card ${estadoClass}" data-persona-idx="${idx}">
+    <div class="notif-person-head">
+      <div>
+        <div class="notif-kicker">Persona ${idx + 1}</div>
+        <div class="notif-person-title">${escapeHtml(persona.nombre || 'Persona a notificar')}</div>
+      </div>
+      <div class="notif-person-head-meta">
+        <span class="notif-status ${estadoClass}">${escapeHtml(estadoTexto)}</span>
+        <span class="notif-dom-count">${domiciliosCount} ${domiciliosCount === 1 ? 'domicilio' : 'domicilios'}</span>
+      </div>
     </div>
-    <div><label>Estado de notificación</label>
-      <select class="np-estado" data-idx="${idx}">
-        <option value="">Sin definir</option>
-        <option value="Notificado" ${persona.estadoNotificacion === 'Notificado' ? 'selected' : ''}>Notificado</option>
-        <option value="Pendiente" ${persona.estadoNotificacion === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
-      </select>
+
+    <div class="notif-person-body agenda-form">
+      <div class="notif-person-fields">
+        <div><label>Parte</label><select class="np-parte" data-idx="${idx}"><option value="">Sin definir</option>${NOTIF_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+        <div><label>Nombre</label><input type="text" class="np-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}" placeholder="Nombre de la persona"></div>
+        <div><label>Estado de notificación</label>
+          <select class="np-estado" data-idx="${idx}">
+            <option value="">Sin definir</option>
+            <option value="Notificado" ${persona.estadoNotificacion === 'Notificado' ? 'selected' : ''}>Notificado</option>
+            <option value="Pendiente" ${persona.estadoNotificacion === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="notif-dom-section">
+        <div class="notif-dom-head">
+          <div>
+            <div class="notif-kicker">Ubicación</div>
+            <div class="notif-dom-title">Domicilios y búsquedas</div>
+          </div>
+          <button class="btn small" data-action="np-agregar-domicilio" data-idx="${idx}" type="button">+ Agregar domicilio</button>
+        </div>
+        ${(persona.domicilios || []).length ? `
+        <div class="notif-table-wrap">
+          <table class="notif-table">
+            <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th><th class="col-del"></th></tr></thead>
+            <tbody class="np-domicilios-tbody" data-idx="${idx}">${(persona.domicilios || []).map((d, di) => notifDomicilioRowHtml(d, idx, di)).join('')}</tbody>
+          </table>
+        </div>` : `<div class="notif-dom-empty">Sin domicilios registrados</div>`}
+      </div>
     </div>
-    <div class="subhead">Domicilios y búsquedas</div>
-    <div class="notif-table-wrap">
-      <table class="notif-table">
-        <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th><th class="col-del"></th></tr></thead>
-        <tbody class="np-domicilios-tbody" data-idx="${idx}">${(persona.domicilios || []).map((d, di) => notifDomicilioRowHtml(d, idx, di)).join('')}</tbody>
-      </table>
-    </div>
-    <button class="btn small" data-action="np-agregar-domicilio" data-idx="${idx}" type="button">+ Agregar domicilio</button>
-  </div>`;
+  </section>`;
 }
 
 // Notificación múltiple. Fallback histórico: si la causa no tiene personas
@@ -2255,29 +2528,64 @@ function notifPersonaBlockHtml(persona, idx) {
 function notificacionTabHtml(c) {
   const personas = c.notificacionPersonas || [];
   const hayHistorico = !personas.length && ((c.domicilios || []).length || c.notifNombre || c.notifEstado);
+  const notificados = personas.filter(p => p.estadoNotificacion === 'Notificado').length;
+  const pendientes = personas.filter(p => p.estadoNotificacion === 'Pendiente').length;
+
   return `
-    <div class="subhead" style="margin-top:0; display:flex; align-items:center; justify-content:space-between;">
-      <span>Personas a notificar</span>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <label style="margin:0; font-size:12px;">Cantidad de personas a notificar</label>
-        <input type="number" id="notif-cantidad" min="0" value="${personas.length}" style="width:64px;">
+    <div class="notif-shell">
+      <section class="notif-overview-card">
+        <div class="notif-overview-head">
+          <div>
+            <div class="notif-kicker">Notificación</div>
+            <h3>Personas a notificar</h3>
+          </div>
+          <div class="notif-count-control">
+            <label for="notif-cantidad">Cantidad</label>
+            <input type="number" id="notif-cantidad" min="0" value="${personas.length}">
+          </div>
+        </div>
+
+        <div class="notif-stats">
+          <div class="notif-stat"><strong>${personas.length}</strong><span>Personas</span></div>
+          <div class="notif-stat is-pending"><strong>${pendientes}</strong><span>Pendientes</span></div>
+          <div class="notif-stat is-done"><strong>${notificados}</strong><span>Notificadas</span></div>
+        </div>
+      </section>
+
+      <div id="notif-personas-wrap" class="notif-personas-wrap">
+        ${personas.length ? personas.map((p, i) => notifPersonaBlockHtml(p, i)).join('') : `
+          <div class="notif-empty-state">
+            <div class="notif-empty-icon">✓</div>
+            <div>Sin personas registradas</div>
+          </div>`}
       </div>
+
+      <div class="notif-save-row">
+        <button class="btn small primary" id="notif-guardar">Guardar notificación</button>
+      </div>
+
+      ${hayHistorico ? `
+      <section class="notif-history-card">
+        <div class="notif-history-head">
+          <div>
+            <div class="notif-kicker">Histórico</div>
+            <h3>Registro anterior</h3>
+          </div>
+          <span class="notif-history-tag">Solo lectura</span>
+        </div>
+        <div class="field-row">
+          <div class="field"><div class="k">Estado de notificación</div><input type="text" class="ct-input" value="${escapeHtml(c.notifEstado || '')}" disabled></div>
+          <div class="field"><div class="k">Nombre</div><input type="text" class="ct-input" value="${escapeHtml(c.notifNombre || '')}" disabled></div>
+        </div>
+        ${(c.domicilios || []).length ? `
+        <div class="notif-table-wrap">
+          <table class="notif-table">
+            <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th></tr></thead>
+            <tbody>${(c.domicilios || []).map(d => `<tr><td>${escapeHtml(d.domicilio || '')}</td><td>${escapeHtml(d.estado || '')}</td><td>${escapeHtml(fmtFechaSolo(d.fecha) || '')}</td><td>${escapeHtml(d.folio || '')}</td><td>${escapeHtml(d.informadoPor || '')}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>` : ''}
+      </section>` : ''}
     </div>
-    <div id="notif-personas-wrap">${personas.length ? personas.map((p, i) => notifPersonaBlockHtml(p, i)).join('') : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>'}</div>
-    <div style="margin-top:10px;"><button class="btn small primary" id="notif-guardar">Guardar notificación</button></div>
-    ${hayHistorico ? `
-    <div class="subhead" style="margin-top:26px; border-top:1px dashed var(--line); padding-top:16px;">Registro histórico (anterior al modelo de varias personas)</div>
-    <div class="ficha-empty" style="color:var(--ink-faint); margin-bottom:8px;">Se conserva tal cual, sin migrar. Al agregar personas arriba, la información nueva se guarda en el modelo actual.</div>
-    <div class="field-row">
-      <div class="field"><div class="k">Estado de notificación (histórico)</div><input type="text" class="ct-input" value="${escapeHtml(c.notifEstado || '')}" disabled></div>
-      <div class="field"><div class="k">Nombre (histórico)</div><input type="text" class="ct-input" value="${escapeHtml(c.notifNombre || '')}" disabled></div>
-    </div>
-    <div class="notif-table-wrap">
-      <table class="notif-table">
-        <thead><tr><th class="col-domicilio">Domicilio</th><th>Estado</th><th>Fecha</th><th>Folio</th><th>Informado por</th></tr></thead>
-        <tbody>${(c.domicilios || []).map(d => `<tr><td>${escapeHtml(d.domicilio || '')}</td><td>${escapeHtml(d.estado || '')}</td><td>${escapeHtml(fmtFechaSolo(d.fecha) || '')}</td><td>${escapeHtml(d.folio || '')}</td><td>${escapeHtml(d.informadoPor || '')}</td></tr>`).join('')}</tbody>
-      </table>
-    </div>` : ''}
   `;
 }
 
@@ -2290,7 +2598,7 @@ function wireNotificacionTab(c, panel) {
   function refrescar() {
     panel.querySelector('#notif-personas-wrap').innerHTML = estadoPersonas.length
       ? estadoPersonas.map((p, i) => notifPersonaBlockHtml(p, i)).join('')
-      : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>';
+      : '<div class="notif-empty-state"><div class="notif-empty-icon">✓</div><div>Sin personas registradas</div></div>';
     panel.querySelector('#notif-cantidad').value = estadoPersonas.length;
   }
 
@@ -2394,21 +2702,55 @@ function oficioInstitucionRowHtml(inst, pIdx, iIdx) {
   </tr>`;
 }
 
+function oficioPersonaEstadoMeta(persona) {
+  const instituciones = persona.instituciones || [];
+  const total = instituciones.length;
+  const contestadas = instituciones.filter(i => i.respuesta === 'Contestada').length;
+  const pendientes = instituciones.filter(i => i.respuesta !== 'Contestada').length;
+  if (!total) return { clase: 'is-empty', etiqueta: 'Sin instituciones', total, contestadas, pendientes };
+  if (contestadas === total) return { clase: 'is-done', etiqueta: 'Contestados', total, contestadas, pendientes };
+  return { clase: 'is-pending', etiqueta: `${pendientes} pendiente${pendientes === 1 ? '' : 's'}`, total, contestadas, pendientes };
+}
+
 function oficioPersonaBlockHtml(persona, idx) {
-  return `<div class="agenda-form" data-persona-idx="${idx}" style="margin-bottom:14px;">
-    <div class="form-grid2">
-      <div><label>Parte</label><select class="op-parte" data-idx="${idx}"><option value="">Sin definir</option>${OFICIO_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-      <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+  const meta = oficioPersonaEstadoMeta(persona);
+  const titulo = persona.nombre || `Persona ${idx + 1}`;
+  const instituciones = persona.instituciones || [];
+  return `<section class="oficio-person-card ${meta.clase}" data-persona-idx="${idx}">
+    <div class="oficio-person-head">
+      <div>
+        <div class="oficio-kicker">Persona ${idx + 1}</div>
+        <div class="oficio-person-title">${escapeHtml(titulo)}</div>
+      </div>
+      <div class="oficio-person-head-meta">
+        ${persona.parte ? `<span class="oficio-part-tag">${escapeHtml(persona.parte)}</span>` : ''}
+        <span class="oficio-status ${meta.clase}">${escapeHtml(meta.etiqueta)}</span>
+        <span class="oficio-inst-count">${meta.total} instituci${meta.total === 1 ? 'ón' : 'ones'}</span>
+      </div>
     </div>
-    <div class="subhead">Instituciones oficiadas</div>
-    <div class="notif-table-wrap">
-      <table class="notif-table">
-        <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-del"></th></tr></thead>
-        <tbody class="op-instituciones-tbody" data-idx="${idx}">${(persona.instituciones || []).map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii)).join('')}</tbody>
-      </table>
+    <div class="oficio-person-body agenda-form">
+      <div class="oficio-person-fields">
+        <div><label>Parte</label><select class="op-parte" data-idx="${idx}"><option value="">Sin definir</option>${OFICIO_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+        <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+      </div>
+      <div class="oficio-inst-section">
+        <div class="oficio-inst-head">
+          <div>
+            <div class="oficio-kicker">Tramitación</div>
+            <div class="oficio-inst-title">Instituciones oficiadas</div>
+          </div>
+          <span class="oficio-inst-count">${meta.total}</span>
+        </div>
+        ${instituciones.length ? `<div class="notif-table-wrap">
+          <table class="notif-table oficio-table">
+            <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-del"></th></tr></thead>
+            <tbody class="op-instituciones-tbody" data-idx="${idx}">${instituciones.map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii)).join('')}</tbody>
+          </table>
+        </div>` : `<div class="oficio-inst-empty">Sin instituciones registradas</div>`}
+        <div class="oficio-inst-actions"><button class="btn small" data-action="op-agregar-institucion" data-idx="${idx}" type="button">+ Agregar institución</button></div>
+      </div>
     </div>
-    <button class="btn small" data-action="op-agregar-institucion" data-idx="${idx}" type="button">+ Agregar institución</button>
-  </div>`;
+  </section>`;
 }
 
 // Oficios: sección nueva e independiente de Notificación. Mismo modelo
@@ -2416,16 +2758,29 @@ function oficioPersonaBlockHtml(persona, idx) {
 // porque no existe ningún dato anterior de Oficios en la aplicación.
 function oficiosTabHtml(c) {
   const personas = c.oficiosPersonas || [];
+  const instituciones = personas.flatMap(p => p.instituciones || []);
+  const pendientes = instituciones.filter(i => i.respuesta !== 'Contestada').length;
+  const contestadas = instituciones.filter(i => i.respuesta === 'Contestada').length;
   return `
-    <div class="subhead" style="margin-top:0; display:flex; align-items:center; justify-content:space-between;">
-      <span>Personas</span>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <label style="margin:0; font-size:12px;">Cantidad de personas</label>
-        <input type="number" id="oficio-cantidad" min="0" value="${personas.length}" style="width:64px;">
-      </div>
+    <div class="oficio-shell">
+      <section class="oficio-overview-card">
+        <div class="oficio-overview-head">
+          <div><span class="oficio-kicker">Oficios</span><h3>Personas e instituciones</h3></div>
+          <div class="oficio-count-control">
+            <label for="oficio-cantidad">Cantidad</label>
+            <input type="number" id="oficio-cantidad" min="0" value="${personas.length}">
+          </div>
+        </div>
+        <div class="oficio-stats">
+          <div class="oficio-stat"><strong>${personas.length}</strong><span>Personas</span></div>
+          <div class="oficio-stat is-info"><strong>${instituciones.length}</strong><span>Instituciones</span></div>
+          <div class="oficio-stat is-pending"><strong>${pendientes}</strong><span>Pendientes</span></div>
+          <div class="oficio-stat is-done"><strong>${contestadas}</strong><span>Contestadas</span></div>
+        </div>
+      </section>
+      <div id="oficio-personas-wrap" class="oficio-personas-wrap">${personas.length ? personas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('') : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>'}</div>
+      <div class="oficio-save-row"><button class="btn small primary" id="oficio-guardar">Guardar oficios</button></div>
     </div>
-    <div id="oficio-personas-wrap">${personas.length ? personas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('') : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>'}</div>
-    <div style="margin-top:10px;"><button class="btn small primary" id="oficio-guardar">Guardar oficios</button></div>
   `;
 }
 
@@ -2438,7 +2793,7 @@ function wireOficiosTab(c, panel) {
   function refrescar() {
     panel.querySelector('#oficio-personas-wrap').innerHTML = estadoPersonas.length
       ? estadoPersonas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('')
-      : '<div class="ficha-empty" style="color:var(--ink-faint);">Sin personas registradas todavía.</div>';
+      : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>';
     panel.querySelector('#oficio-cantidad').value = estadoPersonas.length;
   }
 
@@ -2837,37 +3192,82 @@ function gestionEstadoClass(estado) {
 
 function gestionCardHtml(c, g) {
   const vencida = g.estado === 'Pendiente' && g.fechaRevision && g.fechaRevision < todayISO();
+  const estadoSlug = (g.estado || 'Pendiente').toLowerCase().replace(/\s+/g, '-');
+  const tipoLabel = g.tipo || 'Sin tipo';
+  const fechaPrincipal = g.fechaRevision ? fmtFechaSolo(g.fechaRevision) : '';
+  const fechaContexto = vencida ? 'Revisión vencida' : (g.estado === 'En espera' ? 'Revisar' : 'Programada');
   return `
-    <div class="gestion-card" data-gestion-id="${g.id}">
-      <div class="gestion-card-top">
-        <div class="gestion-desc" data-view>${escapeHtml(g.descripcion)}</div>
-        <div class="gestion-badges">
-          ${g.prioridad ? `<span class="stamp ${priorClass(g.prioridad)}">${escapeHtml(g.prioridad)}</span>` : ''}
-          <span class="stamp evento-estado-${gestionEstadoClass(g.estado)}">${escapeHtml(g.estado)}</span>
-          ${vencida ? `<span class="stamp evento-estado-noprior" style="border-color:var(--urgent); color:var(--urgent);">Vencida</span>` : ''}
+    <div class="gestion-card gestion-card-v2 gestion-card-${estadoSlug}${vencida ? ' gestion-card-vencida' : ''}" data-gestion-id="${g.id}">
+      <div class="gestion-state-rail" aria-hidden="true"></div>
+      <div class="gestion-card-body">
+        <div class="gestion-card-top">
+          <div class="gestion-copy">
+            <div class="gestion-eyebrow">
+              <span>${escapeHtml(tipoLabel)}</span>
+              ${g.categoria ? `<span class="gestion-dot">·</span><span>${escapeHtml(g.categoria)}</span>` : ''}
+            </div>
+            <div class="gestion-desc" data-view>${escapeHtml(g.descripcion)}</div>
+          </div>
+          <div class="gestion-badges">
+            ${g.prioridad ? `<span class="stamp ${priorClass(g.prioridad)}">${escapeHtml(g.prioridad)}</span>` : ''}
+            <span class="stamp evento-estado-${gestionEstadoClass(g.estado)}">${escapeHtml(g.estado)}</span>
+          </div>
+        </div>
+        <div class="gestion-info-row">
+          ${fechaPrincipal ? `<div class="gestion-date ${vencida ? 'is-overdue' : ''}"><span class="gestion-info-k">${fechaContexto}</span><strong>${escapeHtml(fechaPrincipal)}</strong></div>` : `<div class="gestion-date is-empty"><span class="gestion-info-k">Programación</span><strong>Sin fecha</strong></div>`}
+          ${g.fechaLimite ? `<div class="gestion-date"><span class="gestion-info-k">Fecha límite</span><strong>${escapeHtml(fmtFechaSolo(g.fechaLimite))}</strong></div>` : ''}
+          ${g.driveLink ? `<a class="gestion-link" href="${escapeHtml(g.driveLink)}" target="_blank" rel="noopener">Documento ↗</a>` : ''}
+        </div>
+        ${g.observaciones ? `<div class="gestion-obs">${escapeHtml(g.observaciones)}</div>` : ''}
+        <div class="gestion-actions">
+          <button data-action="edit-gestion" data-id="${g.id}">Editar</button>
+          <button data-action="delete-gestion" data-id="${g.id}" class="gestion-delete">Eliminar</button>
         </div>
       </div>
-      <div class="gestion-meta">
-        ${g.categoria ? `<span>${escapeHtml(g.categoria)}</span>` : ''}
-        ${g.fechaRevision ? `<span>Revisar: ${escapeHtml(fmtFechaSolo(g.fechaRevision))}</span>` : ''}
-        ${g.fechaLimite ? `<span>Plazo: ${escapeHtml(fmtFechaSolo(g.fechaLimite))}</span>` : ''}
-        ${g.driveLink ? `<a href="${escapeHtml(g.driveLink)}" target="_blank" rel="noopener">Ver enlace ↗</a>` : ''}
-      </div>
-      ${g.observaciones ? `<div class="gestion-obs">${escapeHtml(g.observaciones)}</div>` : ''}
-      <div class="gestion-actions">
-        <button data-action="edit-gestion" data-id="${g.id}">Editar</button>
-        <button data-action="delete-gestion" data-id="${g.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
-      </div>
+    </div>`;
+}
+
+function gestionOverviewHtml(c) {
+  const items = c.gestionesPendientes || [];
+  const pendientes = items.filter(g => g.estado === 'Pendiente');
+  const espera = items.filter(g => g.estado === 'En espera');
+  const realizadas = items.filter(g => g.estado === 'Realizada');
+  const vencidas = pendientes.filter(g => g.fechaRevision && g.fechaRevision < todayISO());
+  return `
+    <div class="gt-overview-grid">
+      <div class="gt-metric ${vencidas.length ? 'is-alert' : ''}"><span class="gt-metric-num">${pendientes.length}</span><span class="gt-metric-label">Pendientes</span></div>
+      <div class="gt-metric"><span class="gt-metric-num">${espera.length}</span><span class="gt-metric-label">En espera</span></div>
+      <div class="gt-metric"><span class="gt-metric-num">${realizadas.length}</span><span class="gt-metric-label">Realizadas</span></div>
+      <div class="gt-metric ${vencidas.length ? 'is-overdue' : ''}"><span class="gt-metric-num">${vencidas.length}</span><span class="gt-metric-label">Vencidas</span></div>
     </div>`;
 }
 
 function pendientesHtml(c) {
   const items = (c.gestionesPendientes || []).slice().sort((a, b) => {
     const order = { 'Pendiente': 0, 'En espera': 1, 'Realizada': 2, 'Cancelada': 3 };
-    return (order[a.estado] ?? 9) - (order[b.estado] ?? 9);
+    const stateDiff = (order[a.estado] ?? 9) - (order[b.estado] ?? 9);
+    if (stateDiff !== 0) return stateDiff;
+    return (a.fechaRevision || '9999-99-99').localeCompare(b.fechaRevision || '9999-99-99');
   });
-  if (items.length === 0) return '<div style="color:var(--ink-faint); font-size:13px;">Sin gestiones registradas.</div>';
-  return `<div class="gestion-list">${items.map(g => gestionCardHtml(c, g)).join('')}</div>`;
+  if (items.length === 0) return `
+    <div class="gt-empty-state">
+      <div class="gt-empty-icon">✓</div>
+      <div><strong>Sin gestiones registradas</strong></div>
+    </div>`;
+  const groups = [
+    ['Pendiente', 'Pendientes', 'Trabajo que requiere acción'],
+    ['En espera', 'En espera', 'Seguimiento de asuntos que dependen de terceros'],
+    ['Realizada', 'Realizadas', 'Trabajo completado'],
+    ['Cancelada', 'Canceladas', 'Gestiones cerradas sin ejecución']
+  ];
+  return `<div class="gt-groups">${groups.map(([estado, titulo, nota]) => {
+    const groupItems = items.filter(g => g.estado === estado);
+    if (!groupItems.length) return '';
+    return `<section class="gt-group gt-group-${estado.toLowerCase().replace(/\s+/g, '-')}">
+      <div class="gt-group-head"><div><span class="gt-group-kicker">${escapeHtml(titulo)}</span></div><span class="gt-group-count">${groupItems.length}</span></div>
+      <div class="gestion-list">${groupItems.map(g => gestionCardHtml(c, g)).join('')}</div>
+    </section>`;
+  }).join('')}</div>`;
 }
 
 function gestionFormHtml(g) {
@@ -2876,8 +3276,8 @@ function gestionFormHtml(g) {
   const prioridadOptions = ['', ...GESTION_PRIORIDADES].map(p => `<option value="${p}" ${(e.prioridad || '') === p ? 'selected' : ''}>${p || 'Sin definir'}</option>`).join('');
   const estadoOptions = GESTION_ESTADOS.map(s => `<option value="${s}" ${e.estado === s ? 'selected' : ''}>${s}</option>`).join('');
   return `
-  <div class="agenda-form">
-    <div class="subhead" style="margin-top:0;">${g ? 'Editar gestión' : 'Nueva Gestión/Tarea'}</div>
+  <div class="agenda-form gestion-form-v2">
+    <div class="gestion-form-head"><div><span class="gestion-form-kicker">${g ? 'Actualizar' : 'Nueva'}</span><strong>${g ? 'Editar gestión' : 'Nueva Gestión/Tarea'}</strong></div><span>Define qué debe hacerse, cuándo y con qué prioridad.</span></div>
     <div><label>Descripción</label><textarea id="gf-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
     <div class="form-grid2">
       <div><label>Tipo</label><select id="gf-tipo">${tipoOptions}</select></div>
@@ -3409,34 +3809,63 @@ function allEventosFlat() {
 function agendaEventCardHtml(e) {
   const icono = AGENDA_TIPO_ICONO[e.tipo] || '•';
   const horas = [e.horaInicio, e.horaTermino].filter(Boolean).join(' – ');
-  return `<div class="evento-card" data-evento-id="${e.id}">
-    <div class="evento-icono">${icono}</div>
-    <div class="evento-main">
-      <div class="evento-titulo">${escapeHtml(eventoTituloEfectivo(e))}</div>
-      <div class="evento-meta">
-        <span class="evento-tipo-tag">${escapeHtml(e.tipo)}</span>
-        <span>${escapeHtml(fmtFechaSolo(e.fecha))}</span>
-        ${horas ? `<span>${escapeHtml(horas)}</span>` : ''}
-        ${e.modalidad ? `<span>${escapeHtml(e.modalidad)}</span>` : ''}
-      </div>
+  const fechaObj = e.fecha ? new Date(e.fecha + 'T00:00:00') : null;
+  const dia = fechaObj && !isNaN(fechaObj) ? String(fechaObj.getDate()).padStart(2, '0') : '—';
+  const mes = fechaObj && !isNaN(fechaObj) ? fechaObj.toLocaleDateString('es-CL', { month: 'short' }).replace('.', '') : '';
+  const ubicacion = e.modalidad || e.ubicacion || '';
+  return `<div class="evento-card ca-event-card" data-evento-id="${e.id}">
+    <div class="ca-event-date">
+      <span class="ca-event-day">${escapeHtml(dia)}</span>
+      <span class="ca-event-month">${escapeHtml(mes)}</span>
     </div>
-    <div class="evento-badges">
+    <div class="evento-main ca-event-main">
+      <div class="ca-event-heading">
+        <span class="ca-event-icon">${icono}</span>
+        <div class="evento-titulo">${escapeHtml(eventoTituloEfectivo(e))}</div>
+      </div>
+      <div class="evento-meta ca-event-meta">
+        <span class="evento-tipo-tag">${escapeHtml(e.tipo)}</span>
+        ${horas ? `<span class="ca-event-time">${escapeHtml(horas)}</span>` : ''}
+        ${ubicacion ? `<span>${escapeHtml(ubicacion)}</span>` : ''}
+      </div>
+      ${e.observaciones ? `<div class="ca-event-note">${escapeHtml(e.observaciones)}</div>` : ''}
+    </div>
+    <div class="evento-badges ca-event-badges">
       <span class="stamp evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
       ${e.prioridad ? `<span class="stamp ${priorClass(e.prioridad)}">${escapeHtml(e.prioridad)}</span>` : ''}
       ${googleSyncBadgeHtml(e)}
     </div>
-    <div class="evento-actions">
+    <div class="evento-actions ca-event-actions">
       <button class="btn small" data-action="edit-evento" data-id="${e.id}">Editar</button>
-      ${e.googleSyncStatus === 'error' ? `<button class="btn small" data-action="reintentar-sync-evento" data-id="${e.id}">Reintentar sincronización</button>` : ''}
-      <button class="btn small" data-action="delete-evento" data-id="${e.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
+      ${e.googleSyncStatus === 'error' ? `<button class="btn small" data-action="reintentar-sync-evento" data-id="${e.id}">Reintentar</button>` : ''}
+      <button class="btn small ca-event-delete" data-action="delete-evento" data-id="${e.id}">Eliminar</button>
     </div>
+  </div>`;
+}
+
+function agendaCausaResumenHtml(c) {
+  const eventos = c.agendaEventos || [];
+  const hoy = todayISO();
+  const limite = new Date(); limite.setHours(0,0,0,0); limite.setDate(limite.getDate() + 7);
+  const limiteISO = limite.toISOString().slice(0,10);
+  const activos = eventos.filter(e => !['Realizado', 'Cancelado'].includes(e.estado));
+  const proximos = activos.filter(e => e.fecha && e.fecha >= hoy);
+  const hoyCount = activos.filter(e => e.fecha === hoy).length;
+  const semanaCount = activos.filter(e => e.fecha && e.fecha >= hoy && e.fecha <= limiteISO).length;
+  const audiencias = proximos.filter(e => e.tipo === 'Audiencia').length;
+  return `<div class="ca-agenda-stats">
+    <div class="ca-agenda-stat"><b>${proximos.length}</b><span>Próximos</span></div>
+    <div class="ca-agenda-stat"><b>${hoyCount}</b><span>Hoy</span></div>
+    <div class="ca-agenda-stat"><b>${semanaCount}</b><span>7 días</span></div>
+    <div class="ca-agenda-stat"><b>${audiencias}</b><span>Audiencias</span></div>
   </div>`;
 }
 
 function agendaListHtml(c) {
   const eventos = (c.agendaEventos || []);
+  const resumen = agendaCausaResumenHtml(c);
   if (eventos.length === 0) {
-    return `<div class="empty-msg" style="margin-top:10px;">Aún no hay eventos registrados para esta causa.</div>`;
+    return `${resumen}<div class="ca-agenda-empty"><span class="ca-agenda-empty-icon">✓</span><span>Sin eventos registrados</span></div>`;
   }
   const hoy = todayISO();
   const proximos = eventos.filter(e => !(['Realizado', 'Cancelado'].includes(e.estado)) && e.fecha >= hoy)
@@ -3444,12 +3873,12 @@ function agendaListHtml(c) {
   const pasados = eventos.filter(e => (['Realizado', 'Cancelado'].includes(e.estado)) || e.fecha < hoy)
     .sort((a, b) => `${b.fecha}${b.horaInicio || ''}`.localeCompare(`${a.fecha}${a.horaInicio || ''}`));
 
-  let html = '';
+  let html = resumen;
   if (proximos.length) {
-    html += `<div class="subhead" style="margin-top:16px;">Próximos</div><div class="evento-list">${proximos.map(agendaEventCardHtml).join('')}</div>`;
+    html += `<section class="ca-agenda-section"><div class="ca-agenda-section-head"><span>Próximos</span><b>${proximos.length}</b></div><div class="evento-list">${proximos.map(agendaEventCardHtml).join('')}</div></section>`;
   }
   if (pasados.length) {
-    html += `<div class="subhead" style="margin-top:20px;">Realizados / pasados</div><div class="evento-list">${pasados.map(agendaEventCardHtml).join('')}</div>`;
+    html += `<section class="ca-agenda-section ca-agenda-past"><div class="ca-agenda-section-head"><span>Historial</span><b>${pasados.length}</b></div><div class="evento-list">${pasados.map(agendaEventCardHtml).join('')}</div></section>`;
   }
   return html;
 }
@@ -3948,7 +4377,7 @@ function campoDependienteHtml(id, opciones, valorActual) {
 }
 
 function intervinienteRowHtml(item, idx) {
-  return `<div class="af-interviniente-row" data-idx="${idx}">
+  return `<div class="af-interviniente-row" data-idx="${idx}" data-number="${idx + 1}">
     <div class="af-interv-top-grid">
       <div class="af-interv-field">
         <label>Tipo de parte</label>
@@ -3971,7 +4400,7 @@ function intervinienteRowHtml(item, idx) {
 }
 function intervinientesRowsHtml(lista) {
   if (!lista.length) return `<div class="ficha-empty" style="color:var(--ink-faint);">Sin intervinientes registrados.</div>`;
-  return `<div style="display:grid; grid-template-columns:repeat(${lista.length}, minmax(150px, 1fr)); gap:10px; overflow-x:auto;">
+  return `<div class="af-intervinientes-grid" style="--af-count:${lista.length};">
     ${lista.map((item, idx) => intervinienteRowHtml(item, idx)).join('')}
   </div>`;
 }
@@ -4015,65 +4444,117 @@ function antecedentesFormHtml(c) {
   const lista = intervinientesEfectivos(c);
 
   return `
-  <div class="modal-form" id="af-form">
-    <div class="form-grid4">
-      <div><label>Código SAJ</label><input type="text" inputmode="numeric" id="af-saj" class="saj-input" value="${escapeHtml(c.folio || '')}" placeholder="Solo números"></div>
-      <div>
-        <label>Carpeta</label>
-        <select id="af-categoria">
-          <option value="tramitacion" ${c.categoria === 'tramitacion' ? 'selected' : ''}>En tramitación</option>
-          <option value="nueva" ${c.categoria === 'nueva' ? 'selected' : ''}>Nueva (redacción)</option>
-          <option value="terminada" ${c.categoria === 'terminada' ? 'selected' : ''}>Terminada</option>
-        </select>
+  <div class="modal-form af-structured-form" id="af-form">
+    <section class="af-section-card af-section-card-general">
+      <div class="af-section-heading">
+        <div>
+          <div class="af-section-kicker">Identificación</div>
+          <div class="af-section-title">Datos generales</div>
+        </div>
+
       </div>
-      <div><label>Fecha ingreso causa</label><input type="date" id="af-fechaingreso" value="${escapeHtml(c.fechaIngreso || '')}"></div>
-      <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
-    </div>
+      <div class="af-section-body">
+        <div class="form-grid4">
+          <div><label>Código SAJ</label><input type="text" inputmode="numeric" id="af-saj" class="saj-input" value="${escapeHtml(c.folio || '')}" placeholder="Solo números"></div>
+          <div>
+            <label>Carpeta</label>
+            <select id="af-categoria">
+              <option value="tramitacion" ${c.categoria === 'tramitacion' ? 'selected' : ''}>En tramitación</option>
+              <option value="nueva" ${c.categoria === 'nueva' ? 'selected' : ''}>Nueva (redacción)</option>
+              <option value="terminada" ${c.categoria === 'terminada' ? 'selected' : ''}>Terminada</option>
+            </select>
+          </div>
+          <div><label>Fecha ingreso causa</label><input type="date" id="af-fechaingreso" value="${escapeHtml(c.fechaIngreso || '')}"></div>
+          <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
+        </div>
 
-    <div class="form-grid4">
-      <div><label>Procedimiento</label><select id="af-procedimiento">${procedimientoOptionsHtml(procedimientoCanon)}</select></div>
-      <div id="af-tipojuicio-wrap"><label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
-      <div id="af-materia-wrap"><label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
-      <div><label>BAJ</label><select id="af-baj"><option value="">Sin definir</option>${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    </div>
-
-    <div class="subhead" style="margin-top:10px;">Tribunal</div>
-    <div class="form-grid4">
-      <div><label>RIT</label><select id="af-rit"><option value="">Sin definir</option>${RIT_PREFIJOS_VALIDOS.map(p => `<option value="${p}" ${rit === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
-      <div><label>ROL</label><input type="text" id="af-rol" value="${escapeHtml(rol || '')}" placeholder="Ej: 15250-2026"></div>
-      <div><label>Tribunal</label><select id="af-tribunal-civil">${opcionesTribunalCivilHtml(numeroTribunalCivilPrecargado(c))}</select></div>
-      <div id="af-etapa-wrap"><label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapa, c.etapa)}</div>
-    </div>
-    <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="af-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
-
-    <div class="subhead" style="margin-top:10px; display:flex; align-items:center; justify-content:space-between;">
-      <span>Intervinientes</span>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <label style="margin:0; font-size:12px;">Cantidad</label>
-        <input type="number" id="af-cant-intervinientes" min="0" value="${lista.length}" style="width:64px;">
+        <div class="form-grid4">
+          <div><label>Procedimiento</label><select id="af-procedimiento">${procedimientoOptionsHtml(procedimientoCanon)}</select></div>
+          <div id="af-tipojuicio-wrap"><label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
+          <div id="af-materia-wrap"><label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
+          <div><label>BAJ</label><select id="af-baj"><option value="">Sin definir</option>${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        </div>
       </div>
-    </div>
-    <div id="af-intervinientes-wrap">${intervinientesRowsHtml(lista)}</div>
+    </section>
 
-    <div class="subhead" style="margin-top:10px;">Patrocinado</div>
-    <div class="form-grid2">
-      <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-      <div><label>Nombre (derivado de Intervinientes)</label><div id="af-patrocinado-nombre-preview" style="padding:8px 0; color:var(--ink-dim);">${escapeHtml(nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoEfectivo(c), lista) || 'Sin definir')}</div></div>
-    </div>
-    <div style="font-size:11px; color:var(--ink-faint); margin-top:-4px;" id="af-caratulado-preview">Caratulado: <strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
-    <div style="font-size:11px; color:var(--ink-faint);" id="af-titulo-preview">Título generado: <strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
+    <section class="af-section-card">
+      <div class="af-section-heading">
+        <div>
+          <div class="af-section-kicker">Competencia</div>
+          <div class="af-section-title">Tribunal y tramitación</div>
+        </div>
+        <div class="af-section-note" id="af-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
+      </div>
+      <div class="af-section-body">
+        <div class="form-grid4">
+          <div><label>RIT</label><select id="af-rit"><option value="">Sin definir</option>${RIT_PREFIJOS_VALIDOS.map(p => `<option value="${p}" ${rit === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+          <div><label>ROL</label><input type="text" id="af-rol" value="${escapeHtml(rol || '')}" placeholder="Ej: 15250-2026"></div>
+          <div><label>Tribunal</label><select id="af-tribunal-civil">${opcionesTribunalCivilHtml(numeroTribunalCivilPrecargado(c))}</select></div>
+          <div id="af-etapa-wrap"><label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapa, c.etapa)}</div>
+        </div>
+      </div>
+    </section>
 
-    <div class="subhead" style="margin-top:10px;">Recurso</div>
-    <div class="form-grid4">
-      <div><label>Recurso</label><select id="af-recurso"><option value="">Sin definir</option>${RECURSO_OPCIONES.map(r => `<option value="${r}" ${c.recurso === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
-      <div><label>ROL ingreso Corte</label><input type="text" id="af-rolingreso" value="${escapeHtml(c.rolIngreso || '')}" placeholder="Ej: 9315-2025"></div>
-      <div><label>Competencia</label><select id="af-competencia"><option value="">Sin definir</option><option value="Corte de Apelaciones" ${c.competencia === 'Corte de Apelaciones' ? 'selected' : ''}>Corte de Apelaciones</option><option value="Corte Suprema" ${c.competencia === 'Corte Suprema' ? 'selected' : ''}>Corte Suprema</option></select></div>
-      <div></div>
-    </div>
+    <section class="af-section-card">
+      <div class="af-section-heading af-section-heading-count">
+        <div>
+          <div class="af-section-kicker">Partes</div>
+          <div class="af-section-title">Intervinientes</div>
+        </div>
+        <div class="af-count-control">
+          <label for="af-cant-intervinientes">Cantidad</label>
+          <input type="number" id="af-cant-intervinientes" min="0" value="${lista.length}">
+        </div>
+      </div>
+      <div class="af-section-body">
+        <div id="af-intervinientes-wrap">${intervinientesRowsHtml(lista)}</div>
+      </div>
+    </section>
 
-    <div style="display:flex; gap:8px; margin-top:16px;">
+    <section class="af-section-card af-section-card-split">
+      <div class="af-section-heading">
+        <div>
+          <div class="af-section-kicker">Representación</div>
+          <div class="af-section-title">Patrocinado</div>
+        </div>
+
+      </div>
+      <div class="af-section-body">
+        <div class="form-grid2">
+          <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+          <div>
+            <label>Nombre</label>
+            <div class="af-derived-value" id="af-patrocinado-nombre-preview">${escapeHtml(nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoEfectivo(c), lista) || 'Sin definir')}</div>
+          </div>
+        </div>
+        <div class="af-preview-strip">
+          <div id="af-caratulado-preview"><span>Caratulado</span><strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
+          <div id="af-titulo-preview"><span>Título generado</span><strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="af-section-card">
+      <div class="af-section-heading">
+        <div>
+          <div class="af-section-kicker">Segunda instancia</div>
+          <div class="af-section-title">Recurso</div>
+        </div>
+
+      </div>
+      <div class="af-section-body">
+        <div class="form-grid4">
+          <div><label>Recurso</label><select id="af-recurso"><option value="">Sin definir</option>${RECURSO_OPCIONES.map(r => `<option value="${r}" ${c.recurso === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
+          <div><label>ROL ingreso Corte</label><input type="text" id="af-rolingreso" value="${escapeHtml(c.rolIngreso || '')}" placeholder="Ej: 9315-2025"></div>
+          <div><label>Competencia</label><select id="af-competencia"><option value="">Sin definir</option><option value="Corte de Apelaciones" ${c.competencia === 'Corte de Apelaciones' ? 'selected' : ''}>Corte de Apelaciones</option><option value="Corte Suprema" ${c.competencia === 'Corte Suprema' ? 'selected' : ''}>Corte Suprema</option></select></div>
+          <div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="af-form-actions">
       <button class="btn primary" id="af-save" type="button">Guardar</button>
-      ${c.id ? `<button class="btn danger" id="af-delete" type="button" style="margin-left:auto;">Eliminar esta causa del panel</button>` : ''}
+      ${c.id ? `<button class="btn danger" id="af-delete" type="button">Eliminar esta causa del panel</button>` : ''}
     </div>
   </div>`;
 }
@@ -4330,15 +4811,30 @@ function causasUnicasPorCategoria(vista, categoria) {
   return causas;
 }
 
+const CT_CATEGORIA_ICONOS = {
+  'Revisión de causa': '⌕',
+  'Consulta a tutor': '?',
+  'Contactar a usuario': '@',
+  'Contactar a testigos': '◌',
+  'Preparar escrito': '✎',
+  'Enviar a tutor para revisión': '↗',
+  'Otra tarea': '+'
+};
+
 function categoriaCardsHtml(vista) {
   const categorias = CATEGORIA_POR_TIPO_GESTION[vista] || [];
-  return `<div class="work-grid" style="margin-bottom:18px;">
+  return `<div class="work-grid ct-category-grid">
     ${categorias.map(cat => {
       const causas = causasUnicasPorCategoria(vista, cat);
       const activa = centroTrabajoCategoriaFiltro === cat;
-      return `<div class="work-card" data-ct-categoria="${escapeHtml(cat)}" style="cursor:pointer; ${activa ? 'border-color:var(--brass);' : ''}">
-        <div class="work-desc">${escapeHtml(cat)}</div>
-        <div class="work-meta">${causas.length} causa${causas.length === 1 ? '' : 's'}</div>
+      const icono = CT_CATEGORIA_ICONOS[cat] || '•';
+      return `<div class="work-card ct-category-card ${activa ? 'active' : ''}" data-ct-categoria="${escapeHtml(cat)}">
+        <div class="ct-category-icon" aria-hidden="true">${escapeHtml(icono)}</div>
+        <div class="ct-category-copy">
+          <div class="work-desc">${escapeHtml(cat)}</div>
+          <div class="work-meta">${causas.length} causa${causas.length === 1 ? '' : 's'}</div>
+        </div>
+        <div class="ct-category-arrow" aria-hidden="true">›</div>
       </div>`;
     }).join('')}
   </div>`;
@@ -4389,21 +4885,145 @@ function workCardHtml(g) {
 }
 
 function workBucketHtml(title, items, emptyMsg) {
+  const slug = String(title || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const toneMap = {
+    'hoy': { icon: '●', label: 'Para revisar hoy' },
+    'proximos-7-dias': { icon: '→', label: 'Seguimiento cercano' },
+    'en-espera': { icon: '◷', label: 'Pendientes sin respuesta' },
+    'vencidas': { icon: '!', label: 'Requieren atención' },
+    'sin-fecha': { icon: '○', label: 'Sin programación' }
+  };
+  const tone = toneMap[slug] || { icon: '•', label: 'Estado de seguimiento' };
   return `
-  <div class="work-bucket">
-    <div class="work-bucket-h">${title} <span class="n">${items.length}</span></div>
-    ${items.length ? `<div class="work-grid">${items.map(workCardHtml).join('')}</div>` : `<div class="dash-empty">${emptyMsg}</div>`}
-  </div>`;
+  <section class="work-bucket work-bucket--${slug} ${items.length ? 'has-items' : 'is-empty'}">
+    <div class="work-bucket-head">
+      <div class="work-bucket-ident">
+        <span class="work-bucket-icon" aria-hidden="true">${tone.icon}</span>
+        <div class="work-bucket-copy">
+          <div class="work-bucket-title">${title}</div>
+          <div class="work-bucket-caption">${tone.label}</div>
+        </div>
+      </div>
+      <span class="work-bucket-count">${items.length}</span>
+    </div>
+    <div class="work-bucket-body">
+      ${items.length ? `<div class="work-grid">${items.map(workCardHtml).join('')}</div>` : `<div class="work-bucket-empty">${emptyMsg}</div>`}
+    </div>
+  </section>`;
+}
+
+function saludoCentroTrabajo() {
+  const hora = new Date().getHours();
+  if (hora < 12) return 'Buenos días';
+  if (hora < 20) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+function nombreCentroTrabajo() {
+  const nombre = (CURRENT_USER && CURRENT_USER.nombre) ? CURRENT_USER.nombre.trim() : '';
+  return nombre ? nombre.split(/\s+/)[0] : '';
+}
+
+function fechaCentroTrabajo() {
+  try {
+    return new Intl.DateTimeFormat('es-CL', { weekday:'long', day:'numeric', month:'long' }).format(new Date());
+  } catch (_) { return ''; }
+}
+
+function prioridadesCentroTrabajo(resumen) {
+  const prioridadPeso = g => g.prioridad === 'Urgente' ? 0 : g.prioridad === 'Semi urgente' ? 1 : 2;
+  const candidatos = [
+    ...resumen.vencidas.map(g => ({ ...g, _pjGrupo: 'Vencida', _pjPeso: 0 })),
+    ...resumen.hoy.map(g => ({ ...g, _pjGrupo: 'Hoy', _pjPeso: 1 })),
+    ...resumen.proximos7.map(g => ({ ...g, _pjGrupo: 'Próxima', _pjPeso: 2 }))
+  ];
+  return candidatos
+    .sort((a, b) => a._pjPeso - b._pjPeso || prioridadPeso(a) - prioridadPeso(b) || (a.fechaRevision || '').localeCompare(b.fechaRevision || ''))
+    .slice(0, 5);
+}
+
+function prioridadesCentroTrabajoHtml(resumen) {
+  const items = prioridadesCentroTrabajo(resumen);
+  if (!items.length) {
+    return `<section class="pj-priority-panel is-clear">
+      <div class="pj-priority-head"><div><div class="pj-priority-kicker">Prioridades de hoy</div><h3>Sin pendientes inmediatos</h3></div><span class="pj-priority-clear">✓ Al día</span></div>
+      <div class="pj-priority-empty">No tienes vencimientos ni revisiones próximas que requieran atención inmediata.</div>
+    </section>`;
+  }
+  return `<section class="pj-priority-panel">
+    <div class="pj-priority-head">
+      <div><div class="pj-priority-kicker">Prioridades de hoy</div><h3>Empieza por aquí</h3></div>
+      <span class="pj-priority-count">${items.length} destacada${items.length === 1 ? '' : 's'}</span>
+    </div>
+    <div class="pj-priority-list">
+      ${items.map((g, i) => `<button type="button" class="pj-priority-item" data-causa-id="${g.causaId || g.causa.id}">
+        <span class="pj-priority-index">${String(i + 1).padStart(2, '0')}</span>
+        <span class="pj-priority-main">
+          <span class="pj-priority-title">${escapeHtml(g.descripcion || 'Gestión pendiente')}</span>
+          <span class="pj-priority-meta">${escapeHtml(causaShortLabel(g.causa))}${g.fechaRevision ? ` · ${escapeHtml(fmtFechaSolo(g.fechaRevision))}` : ''}</span>
+        </span>
+        <span class="pj-priority-tag tone-${g._pjPeso}">${escapeHtml(g._pjGrupo)}</span>
+      </button>`).join('')}
+    </div>
+  </section>`;
 }
 
 function renderCentroTrabajo() {
   const b = centroTrabajoBuckets(centroTrabajoVista);
+  const resumen = centroTrabajoBuckets(undefined);
   const sinTipo = allGestionesActivasFlat().filter(g => !g.tipo);
   const causasFiltradas = centroTrabajoCategoriaFiltro ? causasUnicasPorCategoria(centroTrabajoVista, centroTrabajoCategoriaFiltro) : [];
   const container = document.getElementById('list-container');
+  const nombre = nombreCentroTrabajo();
+  const saludo = `${saludoCentroTrabajo()}${nombre ? `, ${nombre}` : ''}`;
+  const totalActivas = allGestionesActivasFlat().length;
   container.innerHTML = `
-    <div class="section-title">Centro de Trabajo</div>
-    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 14px;">¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.</div>
+    <section class="pj-welcome" aria-label="Resumen de trabajo">
+      <div class="pj-welcome-copy">
+        <div class="pj-welcome-kicker">Centro de trabajo · ${escapeHtml(fechaCentroTrabajo())}</div>
+        <h2>${escapeHtml(saludo)}</h2>
+        <p>Este es tu panorama de hoy. Prioriza lo urgente y continúa desde donde quedaste.</p>
+      </div>
+      <div class="pj-welcome-status ${resumen.vencidas.length ? 'has-alert' : ''}">
+        <span class="pj-status-dot"></span>
+        ${resumen.vencidas.length ? `${resumen.vencidas.length} pendiente${resumen.vencidas.length === 1 ? '' : 's'} vencido${resumen.vencidas.length === 1 ? '' : 's'}` : 'Todo al día'}
+      </div>
+    </section>
+
+    <div class="pj-overview-grid" aria-label="Indicadores de trabajo">
+      <div class="pj-overview-card accent-brass">
+        <div class="pj-overview-icon">✓</div>
+        <div><div class="pj-overview-value">${totalActivas}</div><div class="pj-overview-label">Pendientes activos</div></div>
+      </div>
+      <div class="pj-overview-card accent-today">
+        <div class="pj-overview-icon">●</div>
+        <div><div class="pj-overview-value">${resumen.hoy.length}</div><div class="pj-overview-label">Para hoy</div></div>
+      </div>
+      <div class="pj-overview-card accent-next">
+        <div class="pj-overview-icon">→</div>
+        <div><div class="pj-overview-value">${resumen.proximos7.length}</div><div class="pj-overview-label">Próximos 7 días</div></div>
+      </div>
+      <div class="pj-overview-card accent-wait">
+        <div class="pj-overview-icon">◷</div>
+        <div><div class="pj-overview-value">${resumen.enEspera.length}</div><div class="pj-overview-label">En espera</div></div>
+      </div>
+      <div class="pj-overview-card accent-overdue">
+        <div class="pj-overview-icon">!</div>
+        <div><div class="pj-overview-value">${resumen.vencidas.length}</div><div class="pj-overview-label">Vencidas</div></div>
+      </div>
+    </div>
+
+    ${prioridadesCentroTrabajoHtml(resumen)}
+
+    <div class="pj-work-heading">
+      <div>
+        <div class="section-title">Centro de Trabajo</div>
+        <div class="pj-work-subtitle">¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.</div>
+      </div>
+      <div class="pj-live-pill"><span></span> Actualizado</div>
+    </div>
     <div style="display:flex; gap:8px; margin-bottom:16px;">
       <button class="btn small ${centroTrabajoVista === 'Tarea' ? 'primary' : 'ghost'}" data-ct-vista="Tarea" type="button">Tareas pendientes</button>
       <button class="btn small ${centroTrabajoVista === 'Gestión' ? 'primary' : 'ghost'}" data-ct-vista="Gestión" type="button">Gestiones pendientes</button>
@@ -4434,6 +5054,13 @@ function renderCentroTrabajo() {
       <div class="work-grid">${sinTipo.map(workCardHtml).join('')}</div>
     </div>` : ''}
   `;
+  container.querySelectorAll('.pj-priority-item[data-causa-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      currentCat = 'todas';
+      render();
+      openDetail(el.dataset.causaId, 'gestiones');
+    });
+  });
   container.querySelectorAll('[data-ct-vista]').forEach(btn => {
     btn.addEventListener('click', () => { centroTrabajoVista = btn.dataset.ctVista; centroTrabajoCategoriaFiltro = null; renderCentroTrabajo(); });
   });
@@ -4524,39 +5151,55 @@ function salaCardHtml(c) {
   const caratulado = caratuladoTexto(c);
   const historialAbierto = programacionSalasHistorialAbierto === c.id;
 
-  return `<div class="sala-card" data-causa-id="${c.id}">
-    <div class="sala-card-top">
-      <div>
-        <div class="sala-rol">${escapeHtml(c.rol || causaShortLabel(c))}${c.rolIngreso ? ` · Corte: ${escapeHtml(c.rolIngreso)}` : ''}</div>
-        <div class="sala-caratulado">${escapeHtml(caratulado || c.titulo)}</div>
-        <div class="ficha-empty" style="color:var(--ink-faint);">${tribunal ? escapeHtml(tribunal) + ' · ' : ''}${escapeHtml(c.recurso || '')}</div>
+  const ultimaRevision = ultima
+    ? `${fmtFechaSolo(ultima.fecha)}${ultima.hora ? ' ' + ultima.hora : ''}`
+    : 'Sin revisión';
+
+  const detalleTabla = ultima && ultima.resultado === 'En tabla'
+    ? [ultima.fechaAlegato ? `Alegato ${fmtFechaSolo(ultima.fechaAlegato)}` : '', ultima.sala ? `Sala ${ultima.sala}` : '', ultima.numeroTabla ? `Tabla N° ${ultima.numeroTabla}` : ''].filter(Boolean)
+    : [];
+
+  return `<article class="ps-card ps-card-${escapeHtml(estado)}" data-causa-id="${c.id}">
+    <div class="ps-card-main">
+      <div class="ps-card-top">
+        <div class="ps-id-row">
+          <span class="ps-rol">${escapeHtml(c.rol || causaShortLabel(c))}</span>
+          ${c.rolIngreso ? `<span class="ps-corte-rol">Corte · ${escapeHtml(c.rolIngreso)}</span>` : ''}
+        </div>
+        <span class="ps-status ps-status-${escapeHtml(estado)}">${escapeHtml(SALA_ESTADO_LABEL[estado])}</span>
       </div>
-      <span class="stamp evento-estado-${SALA_ESTADO_CLASE[estado]}" style="${estado === 'pendiente' ? 'border-color:var(--semi); color:var(--semi);' : ''}">${SALA_ESTADO_LABEL[estado]}</span>
+
+      <h3>${escapeHtml(caratulado || c.titulo)}</h3>
+      <div class="ps-meta-line">${escapeHtml(tribunal || 'Tribunal sin definir')}</div>
+      <div class="ps-meta-line ps-recurso">${escapeHtml(c.recurso || '')}</div>
+
+      ${detalleTabla.length ? `<div class="ps-table-detail">${detalleTabla.map(escapeHtml).join(' · ')}</div>` : ''}
+      ${ultima?.observacion ? `<div class="ps-note">${escapeHtml(ultima.observacion)}</div>` : ''}
     </div>
 
-    <div class="sala-meta">
-      Última revisión: ${ultima ? `${escapeHtml(fmtFechaSolo(ultima.fecha))}${ultima.hora ? ' ' + escapeHtml(ultima.hora) : ''} — ${escapeHtml(ultima.resultado)}` : 'Sin revisiones registradas'}
-      ${ultima && ultima.observacion ? `<div class="ficha-empty" style="color:var(--ink-faint); margin-top:2px;">${escapeHtml(ultima.observacion)}</div>` : ''}
-      ${ultima && ultima.resultado === 'En tabla' && (ultima.fechaAlegato || ultima.sala || ultima.numeroTabla) ? `<div class="ficha-empty" style="color:var(--ink-faint); margin-top:2px;">${[ultima.fechaAlegato ? 'Alegato: ' + fmtFechaSolo(ultima.fechaAlegato) : '', ultima.sala ? 'Sala ' + ultima.sala : '', ultima.numeroTabla ? 'Tabla N° ' + ultima.numeroTabla : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}
+    <div class="ps-review-block">
+      <span class="ps-review-label">Última revisión</span>
+      <strong>${escapeHtml(ultimaRevision)}</strong>
+      <span class="ps-review-result">${escapeHtml(ultima?.resultado || 'Pendiente')}</span>
     </div>
 
-    <div class="gestion-actions">
-      <button data-action="marcar-revisado-sala" data-id="${c.id}">Marcar revisado</button>
-      ${historial.length ? `<button data-action="toggle-historial-sala" data-id="${c.id}">${historialAbierto ? 'Ocultar historial' : `Ver historial (${historial.length})`}</button>` : ''}
-      ${ultima && ultima.resultado === 'En tabla' && ultima.fechaAlegato ? `<button data-action="agregar-alegato-agenda" data-id="${c.id}" data-revision-id="${ultima.id}">Agregar alegato a Agenda</button>` : ''}
+    <div class="ps-card-actions">
+      <button class="btn small primary" data-action="marcar-revisado-sala" data-id="${c.id}" type="button">Marcar revisada</button>
+      ${historial.length ? `<button class="btn small ghost" data-action="toggle-historial-sala" data-id="${c.id}" type="button">${historialAbierto ? 'Ocultar historial' : `Historial (${historial.length})`}</button>` : ''}
+      ${ultima && ultima.resultado === 'En tabla' && ultima.fechaAlegato ? `<button class="btn small ghost" data-action="agregar-alegato-agenda" data-id="${c.id}" data-revision-id="${ultima.id}" type="button">Agregar a Agenda</button>` : ''}
     </div>
 
-    <div id="sala-form-${c.id}" class="agenda-form-wrap" hidden></div>
+    <div id="sala-form-${c.id}" class="agenda-form-wrap ps-form-wrap" hidden></div>
 
-    ${historialAbierto ? `<div class="sala-historial">
-      ${historial.map(r => `<div class="sala-historial-item">
-        <strong>${escapeHtml(fmtFechaSolo(r.fecha))}${r.hora ? ' ' + escapeHtml(r.hora) : ''}</strong> — ${escapeHtml(r.resultado)}
-        ${r.observacion ? `<div class="ficha-empty" style="color:var(--ink-faint);">${escapeHtml(r.observacion)}</div>` : ''}
+    ${historialAbierto ? `<div class="sala-historial ps-history">
+      ${historial.map(r => `<div class="sala-historial-item ps-history-item">
+        <strong>${escapeHtml(fmtFechaSolo(r.fecha))}${r.hora ? ' ' + escapeHtml(r.hora) : ''}</strong>
+        <span>${escapeHtml(r.resultado)}</span>
+        ${r.observacion ? `<div class="ps-history-note">${escapeHtml(r.observacion)}</div>` : ''}
       </div>`).join('')}
     </div>` : ''}
-  </div>`;
+  </article>`;
 }
-
 function salaFormHtml(c) {
   const { ultima } = estadoRevisionSala(c);
   return `<div class="agenda-form">
@@ -4615,39 +5258,84 @@ function renderProgramacionSalas() {
   }
 
   const filtrosOpciones = [
-    ['todas', 'Todas'], ['pendientes', 'Pendientes de revisión'], ['revisadas', 'Revisadas'],
-    ['entabla', 'En tabla'], ['vistas', 'Vistas']
+    ['todas', 'Todas'],
+    ['pendientes', 'Pendientes'],
+    ['revisadas', 'Revisadas'],
+    ['entabla', 'En tabla'],
+    ['vistas', 'Vistas']
   ];
 
+  const tituloResultado = {
+    todas: 'Todas las apelaciones',
+    pendientes: 'Pendientes de revisión',
+    revisadas: 'Causas revisadas',
+    entabla: 'Causas en tabla',
+    vistas: 'Causas vistas'
+  }[programacionSalasFiltro] || 'Todas las apelaciones';
+
   container.innerHTML = `
-    <div class="section-title">Programación de salas</div>
-    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">
-      Causas con recurso de apelación que deben revisarse periódicamente (viernes y sábado, después de las 17:00) para determinar si aparecen en tabla de alegatos. Se alimenta automáticamente de Antecedentes → Recurso; no modifica la tramitación, la Agenda ni el Centro de Trabajo.
-    </div>
+    <div class="ps-shell">
+      <section class="ps-hero">
+        <div>
+          <div class="ps-kicker">Seguimiento de apelaciones</div>
+          <h2>Programación de salas</h2>
+        </div>
+        <div class="ps-hero-count">${apelacionesActivas}<span>apelaciones</span></div>
+      </section>
 
-    <div class="stats-row sala-stats-row">
-      <div class="stat-card"><div class="num">${apelacionesActivas}</div><div class="lbl">Apelaciones activas</div></div>
-      <div class="stat-card semi"><div class="num">${pendientes}</div><div class="lbl">Pendientes de revisión</div></div>
-      <div class="stat-card urgent"><div class="num">${enTabla}</div><div class="lbl">En tabla</div></div>
-      <div class="stat-card calm"><div class="num">${vistas}</div><div class="lbl">Vistas</div></div>
-    </div>
+      <div class="ps-stats">
+        <button class="ps-stat ${programacionSalasFiltro === 'todas' ? 'active' : ''}" data-sala-filtro="todas" type="button">
+          <span class="ps-stat-num">${apelacionesActivas}</span>
+          <span class="ps-stat-label">Apelaciones activas</span>
+        </button>
+        <button class="ps-stat ps-stat-pending ${programacionSalasFiltro === 'pendientes' ? 'active' : ''}" data-sala-filtro="pendientes" type="button">
+          <span class="ps-stat-num">${pendientes}</span>
+          <span class="ps-stat-label">Pendientes de revisión</span>
+        </button>
+        <button class="ps-stat ps-stat-table ${programacionSalasFiltro === 'entabla' ? 'active' : ''}" data-sala-filtro="entabla" type="button">
+          <span class="ps-stat-num">${enTabla}</span>
+          <span class="ps-stat-label">En tabla</span>
+        </button>
+        <button class="ps-stat ps-stat-done ${programacionSalasFiltro === 'vistas' ? 'active' : ''}" data-sala-filtro="vistas" type="button">
+          <span class="ps-stat-num">${vistas}</span>
+          <span class="ps-stat-label">Vistas</span>
+        </button>
+      </div>
 
-    <div class="agenda-toolbar" style="flex-wrap:wrap; gap:8px;">
-      ${filtrosOpciones.map(([v, l]) => `<button class="btn small ${programacionSalasFiltro === v ? 'primary' : ''}" data-sala-filtro="${v}">${l}</button>`).join('')}
-      <input type="text" id="sala-buscador" placeholder="Buscar por ROL, ROL Corte, caratulado o tribunal…" value="${escapeHtml(programacionSalasBusqueda)}" style="flex:1; min-width:220px; margin-left:auto;">
-    </div>
+      <section class="ps-controls">
+        <div class="ps-control-block">
+          <span class="ps-control-label">Estado</span>
+          <div class="ps-filter-tabs">
+            ${filtrosOpciones.map(([v, l]) => `<button class="ps-filter ${programacionSalasFiltro === v ? 'active' : ''}" data-sala-filtro="${v}" type="button">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div class="ps-search">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m16 16 4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <input type="text" id="sala-buscador" placeholder="Buscar por ROL, ROL Corte, caratulado o tribunal…" value="${escapeHtml(programacionSalasBusqueda)}">
+        </div>
+      </section>
 
-    ${todas.length === 0
-      ? `<div class="empty-msg">No hay causas con recurso de apelación registrado. Se agregan automáticamente cuando el campo "Recurso" en Antecedentes indica una apelación.</div>`
-      : filtradas.length === 0
-        ? `<div class="empty-msg">Ninguna causa coincide con este filtro o búsqueda.</div>`
-        : `<div class="gestion-list" style="margin-top:14px;">${filtradas.map(x => salaCardHtml(x.c)).join('')}</div>`
-    }
+      <section class="ps-results">
+        <div class="ps-results-head">
+          <div>
+            <div class="ps-kicker">Causas</div>
+            <h3>${escapeHtml(tituloResultado)}</h3>
+          </div>
+          <span class="ps-results-count">${filtradas.length}</span>
+        </div>
+
+        ${todas.length === 0
+          ? `<div class="ps-empty"><span class="ps-empty-check">✓</span><span>Sin apelaciones registradas</span></div>`
+          : filtradas.length === 0
+            ? `<div class="ps-empty"><span class="ps-empty-check">✓</span><span>Sin causas para este filtro</span></div>`
+            : `<div class="ps-list">${filtradas.map(x => salaCardHtml(x.c)).join('')}</div>`
+        }
+      </section>
+    </div>
   `;
 
   wireProgramacionSalas(container);
 }
-
 function wireProgramacionSalas(container) {
   container.querySelectorAll('[data-sala-filtro]').forEach(btn => {
     btn.addEventListener('click', () => { programacionSalasFiltro = btn.dataset.salaFiltro; renderProgramacionSalas(); });
@@ -7745,71 +8433,124 @@ function renderIntegraciones() {
   const container = document.getElementById('list-container');
   const g = GOOGLE_STATUS || { conectado: false };
 
+  const recordatoriosActivos = (g.recordatoriosDefault || []).length;
+
   container.innerHTML = `
-    <div class="section-title">Integraciones</div>
-    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">
-      Sincroniza tu Agenda con Google Calendar para recibir avisos y recordatorios. La Agenda de la aplicación sigue siendo la fuente principal: si Google falla, tu información nunca se pierde de aquí.
-    </div>
+    <div class="ig-shell">
+      <section class="ig-hero">
+        <div>
+          <div class="ig-kicker">Configuración</div>
+          <h2>Google Calendar</h2>
+        </div>
+        <span class="ig-global-status ${g.conectado ? 'is-connected' : 'is-disconnected'}">
+          <span class="ig-status-dot"></span>
+          ${g.conectado ? '1 conectada' : 'Sin conexiones'}
+        </span>
+      </section>
 
-    <div class="integ-card">
-      <div class="integ-card-top">
-        <div class="integ-icon">G</div>
-        <div style="flex:1;">
-          <div class="subhead" style="margin-top:0;">Google Calendar</div>
-          <div class="ficha-empty" style="color:${g.conectado ? 'var(--calm)' : 'var(--ink-faint)'};">
-            Estado: <strong>${g.conectado ? 'Conectado' : 'No conectado'}</strong>
+      <section class="ig-provider-card">
+        <div class="ig-provider-head">
+          <div class="ig-provider-brand">
+            <div class="ig-provider-icon">G</div>
+            <div>
+              <div class="ig-kicker">Agenda externa</div>
+              <h3>Google Calendar</h3>
+            </div>
           </div>
-        </div>
-      </div>
-
-      ${g.conectado ? `
-        <div class="gestion-meta" style="margin-top:10px;">
-          <span>Cuenta: ${escapeHtml(g.cuenta || '—')}</span>
-          <span>Calendario: ${escapeHtml(g.calendarNombre || 'Sin seleccionar')}</span>
-          <span>Última sincronización: ${g.ultimaSincronizacion ? escapeHtml(fmtFechaHora(g.ultimaSincronizacion)) : 'Nunca'}</span>
+          <span class="ig-provider-status ${g.conectado ? 'is-connected' : 'is-disconnected'}">
+            <span class="ig-status-dot"></span>
+            ${g.conectado ? 'Conectado' : 'No conectado'}
+          </span>
         </div>
 
-        <div style="margin-top:14px; display:flex; align-items:center; gap:8px;">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-            <input type="checkbox" id="integ-sync-auto" ${g.syncAutomatica ? 'checked' : ''}>
-            Sincronización automática
-          </label>
-        </div>
+        ${g.conectado ? `
+          <div class="ig-summary-grid">
+            <div class="ig-summary-item">
+              <span class="ig-summary-label">Cuenta</span>
+              <strong>${escapeHtml(g.cuenta || '—')}</strong>
+            </div>
+            <div class="ig-summary-item">
+              <span class="ig-summary-label">Calendario</span>
+              <strong>${escapeHtml(g.calendarNombre || 'Sin seleccionar')}</strong>
+            </div>
+            <div class="ig-summary-item">
+              <span class="ig-summary-label">Última sincronización</span>
+              <strong>${g.ultimaSincronizacion ? escapeHtml(fmtFechaHora(g.ultimaSincronizacion)) : 'Nunca'}</strong>
+            </div>
+          </div>
 
-        <div class="subhead" style="margin-top:16px;">Calendario a usar</div>
-        <div id="integ-calendarios-wrap"><button class="btn small" id="integ-cargar-calendarios" type="button">Elegir / cambiar calendario</button></div>
+          <div class="ig-content-grid">
+            <section class="ig-subcard">
+              <div class="ig-subcard-head">
+                <div>
+                  <div class="ig-kicker">Sincronización</div>
+                  <h4>Preferencias</h4>
+                </div>
+                <label class="ig-switch-row">
+                  <input type="checkbox" id="integ-sync-auto" ${g.syncAutomatica ? 'checked' : ''}>
+                  <span>Automática</span>
+                </label>
+              </div>
 
-        <div class="agenda-toolbar" style="margin-top:16px;">
-          <button class="btn small" id="integ-probar-conexion" type="button">Probar conexión</button>
-          <button class="btn small" id="integ-reintentar-pendientes" type="button">Reintentar pendientes</button>
-          <button class="btn small" id="integ-sincronizar-existentes" type="button">Sincronizar eventos existentes</button>
-          <button class="btn small" id="integ-desconectar" type="button" style="border-color:var(--urgent); color:var(--urgent); margin-left:auto;">Desconectar Google Calendar</button>
-        </div>
-        <div id="integ-mensaje" style="margin-top:10px;"></div>
+              <div class="ig-calendar-block">
+                <span class="ig-summary-label">Calendario a usar</span>
+                <div id="integ-calendarios-wrap" class="ig-calendar-control">
+                  <button class="btn small" id="integ-cargar-calendarios" type="button">Elegir / cambiar calendario</button>
+                </div>
+              </div>
 
-        <div class="subhead" style="margin-top:20px;">Recordatorios predeterminados</div>
-        <div class="ficha-empty" style="color:var(--ink-faint); margin-bottom:8px;">Se usan cuando un evento o su tipo no tienen recordatorios propios configurados.</div>
-        <div class="integ-recordatorios-grid" id="integ-recordatorios-default">
-          ${RECORDATORIO_OPCIONES.map(([min, label]) => `
-            <label><input type="checkbox" class="integ-rec-default" value="${min}" ${(g.recordatoriosDefault || []).some(r => r.minutos === min) ? 'checked' : ''}> ${label}</label>`).join('')}
-        </div>
-        <button class="btn small" id="integ-guardar-recordatorios" type="button" style="margin-top:10px;">Guardar recordatorios predeterminados</button>
+              <div class="ig-operations">
+                <button class="btn small" id="integ-probar-conexion" type="button">Probar conexión</button>
+                <button class="btn small" id="integ-reintentar-pendientes" type="button">Reintentar pendientes</button>
+                <button class="btn small" id="integ-sincronizar-existentes" type="button">Sincronizar existentes</button>
+              </div>
 
-      ` : `
-        <div style="margin-top:14px;">
-          <button class="btn primary" id="integ-conectar" type="button">Conectar con Google Calendar</button>
-        </div>
-        <div class="ficha-empty" style="color:var(--ink-faint); margin-top:10px;">
-          Se te pedirá iniciar sesión en Google y autorizar acceso únicamente al calendario que elijas (crear, modificar y eliminar eventos). No se solicita acceso a Gmail, Drive ni Contactos. Tu inicio de sesión en esta aplicación no cambia.
-        </div>
-        <div id="integ-mensaje" style="margin-top:10px;"></div>
-      `}
+              <div id="integ-mensaje" class="ig-message"></div>
+            </section>
+
+            <section class="ig-subcard">
+              <div class="ig-subcard-head">
+                <div>
+                  <div class="ig-kicker">Avisos</div>
+                  <h4>Recordatorios predeterminados</h4>
+                </div>
+                <span class="ig-mini-count">${recordatoriosActivos} activos</span>
+              </div>
+
+              <div class="integ-recordatorios-grid ig-reminders-grid" id="integ-recordatorios-default">
+                ${RECORDATORIO_OPCIONES.map(([min, label]) => `
+                  <label class="ig-reminder-option">
+                    <input type="checkbox" class="integ-rec-default" value="${min}" ${(g.recordatoriosDefault || []).some(r => r.minutos === min) ? 'checked' : ''}>
+                    <span>${label}</span>
+                  </label>`).join('')}
+              </div>
+
+              <div class="ig-subcard-actions">
+                <button class="btn small" id="integ-guardar-recordatorios" type="button">Guardar recordatorios</button>
+              </div>
+            </section>
+          </div>
+
+          <div class="ig-danger-row">
+            <button class="btn small" id="integ-desconectar" type="button">Desconectar Google Calendar</button>
+          </div>
+        ` : `
+          <div class="ig-disconnected">
+            <div class="ig-disconnected-copy">
+              <div class="ig-kicker">Disponible</div>
+              <h4>Conecta tu Agenda</h4>
+              <p>Autoriza solo el acceso necesario a Google Calendar. No se solicita acceso a Gmail, Drive ni Contactos.</p>
+            </div>
+            <button class="btn primary" id="integ-conectar" type="button">Conectar con Google Calendar</button>
+          </div>
+          <div id="integ-mensaje" class="ig-message"></div>
+        `}
+      </section>
     </div>
   `;
 
   wireIntegraciones(container);
 }
-
 function wireIntegraciones(container) {
   const msgEl = () => container.querySelector('#integ-mensaje');
   const mostrarMensaje = (texto, esError) => {
@@ -8035,86 +8776,146 @@ function informeFinalConfiguradorHtml() {
     ['nueva', 'Solo nuevas / redacción'], ['terminada', 'Solo terminadas'], ['manual', 'Selección manual']
   ];
 
+  const totalCampos = INFORME_CAMPOS_GRUPOS.reduce((acc, [, campos]) => acc + campos.length, 0);
+  const camposSeleccionados = Object.values(informeFinalCampos).filter(Boolean).length;
+  const audiencias = resumenAudienciasAsistidas(CAUSAS);
+
   let manualHtml = '';
   if (informeFinalFiltro === 'manual') {
     manualHtml = `
-    <div class="bulk-bar" style="margin-top:10px;">
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer;"><input type="checkbox" id="informe-select-all"> Seleccionar todas</label>
-      <button class="btn small ghost" id="informe-deselect-all" type="button">Deseleccionar todas</button>
-      <span class="bulk-counter">${informeFinalSeleccion.size} causa(s) seleccionada(s)</span>
-    </div>
-    <div class="gestion-list" style="max-height:340px; overflow-y:auto;">
-      ${CAUSAS.map(c => `
-        <label class="receptor-card" style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-          <input type="checkbox" class="informe-causa-check" data-id="${c.id}" ${informeFinalSeleccion.has(c.id) ? 'checked' : ''}>
-          <div>
-            <strong>${escapeHtml(c.titulo)}</strong>
-            <div class="ficha-empty" style="color:var(--ink-faint);">${escapeHtml(CATEGORIA_LABEL[c.categoria] || c.categoria)}${c.rol ? ' · ' + escapeHtml(c.rol) : ''}</div>
-          </div>
-        </label>`).join('')}
-    </div>`;
+      <div class="if-manual-wrap">
+        <div class="if-manual-toolbar">
+          <label class="if-check-inline">
+            <input type="checkbox" id="informe-select-all">
+            <span>Seleccionar todas</span>
+          </label>
+          <button class="btn small ghost" id="informe-deselect-all" type="button">Deseleccionar todas</button>
+          <span class="if-manual-count">${informeFinalSeleccion.size} seleccionada${informeFinalSeleccion.size === 1 ? '' : 's'}</span>
+        </div>
+        <div class="if-cause-list">
+          ${CAUSAS.map(c => `
+            <label class="if-cause-item">
+              <input type="checkbox" class="informe-causa-check" data-id="${c.id}" ${informeFinalSeleccion.has(c.id) ? 'checked' : ''}>
+              <span class="if-cause-copy">
+                <strong>${escapeHtml(c.titulo)}</strong>
+                <span>${escapeHtml(CATEGORIA_LABEL[c.categoria] || c.categoria)}${c.rol ? ' · ' + escapeHtml(c.rol) : ''}</span>
+              </span>
+            </label>`).join('')}
+        </div>
+      </div>`;
   }
 
   const camposHtml = INFORME_CAMPOS_GRUPOS.map(([grupo, campos]) => `
-    <div class="subhead" style="margin-top:14px;">${grupo}</div>
-    <div class="informe-campos-grid">
-      ${campos.map(([key, label]) => `
-        <label style="display:flex; align-items:center; gap:7px; font-size:12.5px; cursor:pointer;">
-          <input type="checkbox" class="informe-campo-check" data-campo="${key}" ${informeFinalCampos[key] ? 'checked' : ''}> ${label}
-        </label>`).join('')}
-    </div>`).join('');
+    <section class="if-fields-card">
+      <div class="if-fields-head">
+        <div>
+          <div class="if-kicker">${escapeHtml(grupo === 'Datos básicos' ? 'Contenido' : grupo === 'Gestión' ? 'Seguimiento' : 'Agenda')}</div>
+          <h4>${escapeHtml(grupo)}</h4>
+        </div>
+        <span class="if-fields-count">${campos.filter(([key]) => informeFinalCampos[key]).length}/${campos.length}</span>
+      </div>
+      <div class="if-fields-grid">
+        ${campos.map(([key, label]) => `
+          <label class="if-field-option">
+            <input type="checkbox" class="informe-campo-check" data-campo="${key}" ${informeFinalCampos[key] ? 'checked' : ''}>
+            <span>${escapeHtml(label)}</span>
+          </label>`).join('')}
+      </div>
+    </section>`).join('');
 
   return `
-  <div class="section-title">Informe Final</div>
-  <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">
-    Genera el informe de cierre de práctica con las causas tramitadas, para traspasarlas correctamente al siguiente postulante. Es una operación de solo lectura: no modifica ninguna causa, gestión, estado ni la Agenda.
-  </div>
+    <div class="if-shell">
+      <section class="if-hero">
+        <div>
+          <div class="if-kicker">Cierre de práctica</div>
+          <h2>Informe Final</h2>
+        </div>
+        <div class="if-hero-meta">
+          <span class="if-hero-number">${causas.length}</span>
+          <span>causas</span>
+        </div>
+      </section>
 
-  <div class="subhead" style="margin-top:0;">Causas a incluir</div>
-  <select id="informe-filtro">
-    ${opcionesFiltro.map(([v, l]) => `<option value="${v}" ${informeFinalFiltro === v ? 'selected' : ''}>${l}</option>`).join('')}
-  </select>
-  <div class="ficha-empty" style="color:var(--ink-faint); margin-top:4px;">${causas.length} causa(s) coinciden con este filtro.</div>
-  ${manualHtml}
+      <section class="if-config-card">
+        <div class="if-config-head">
+          <div>
+            <div class="if-kicker">Configuración</div>
+            <h3>Preparar informe</h3>
+          </div>
+          <span class="if-readonly-badge">Solo lectura</span>
+        </div>
 
-  <div class="subhead" style="margin-top:18px;">Orden del informe</div>
-  <select id="informe-orden">
-    ${INFORME_ORDEN_OPCIONES.map(([v, l]) => `<option value="${v}" ${informeFinalOrden === v ? 'selected' : ''}>${l}</option>`).join('')}
-  </select>
+        <div class="if-config-grid">
+          <div class="if-control">
+            <label for="informe-filtro">Causas a incluir</label>
+            <select id="informe-filtro">
+              ${opcionesFiltro.map(([v, l]) => `<option value="${v}" ${informeFinalFiltro === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <span class="if-control-meta">${causas.length} causa${causas.length === 1 ? '' : 's'} coincide${causas.length === 1 ? '' : 'n'} con este filtro</span>
+          </div>
 
-  <div class="subhead" style="margin-top:18px;">Campos a incluir</div>
-  ${camposHtml}
+          <div class="if-control">
+            <label for="informe-orden">Orden del informe</label>
+            <select id="informe-orden">
+              ${INFORME_ORDEN_OPCIONES.map(([v, l]) => `<option value="${v}" ${informeFinalOrden === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <span class="if-control-meta">Define cómo se agrupan las causas en el documento</span>
+          </div>
+        </div>
 
-  <div class="agenda-toolbar" style="margin-top:20px;">
-    <button class="btn small primary" id="informe-ver-preview">Vista previa</button>
-  </div>
+        ${manualHtml}
+      </section>
 
-  <div class="subhead" style="margin-top:30px; border-top:1px solid var(--line); padding-top:20px;">Resumen de audiencias asistidas</div>
-  <div class="ficha-empty" style="color:var(--ink-faint); margin-top:-4px;">Para el formulario de práctica. Independiente del filtro, el orden y los campos configurados arriba — siempre incluye todas las audiencias realizadas, de todas las causas.</div>
-  ${(() => {
-    const audiencias = resumenAudienciasAsistidas(CAUSAS);
-    return `
-    <div style="margin:10px 0; font-size:13px;"><strong>${audiencias.length}</strong> audiencia${audiencias.length === 1 ? '' : 's'} realizada${audiencias.length === 1 ? '' : 's'} registrada${audiencias.length === 1 ? '' : 's'}.</div>
-    ${!audiencias.length ? `<div class="ficha-empty" style="color:var(--ink-faint);">No hay audiencias realizadas registradas todavía.</div>` : `
-    <table class="ficha-table" style="width:100%;">
-      <thead><tr><th>TIPO AUDIENCIA</th><th>FECHA</th><th>RIT</th><th>MATERIA</th><th>TRIBUNAL</th></tr></thead>
-      <tbody>
-        ${audiencias.map(a => `<tr>
-          <td>${escapeHtml(a.tipoAudiencia)}</td>
-          <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
-          <td>${escapeHtml(a.rit)}</td>
-          <td>${escapeHtml(a.materia)}</td>
-          <td>${escapeHtml(a.tribunal)}</td>
-        </tr>`).join('')}
-      </tbody>
-    </table>
-    <div style="margin-top:10px;">
-      <button class="btn small" id="informe-audiencias-excel" type="button">Descargar Excel</button>
-    </div>`}
-    `;
-  })()}`;
+      <section class="if-content-section">
+        <div class="if-section-heading">
+          <div>
+            <div class="if-kicker">Contenido del informe</div>
+            <h3>Campos a incluir</h3>
+          </div>
+          <span class="if-selection-summary">${camposSeleccionados}/${totalCampos} seleccionados</span>
+        </div>
+        <div class="if-fields-layout">
+          ${camposHtml}
+        </div>
+      </section>
+
+      <div class="if-primary-action">
+        <button class="btn primary" id="informe-ver-preview" type="button">Vista previa</button>
+      </div>
+
+      <section class="if-audiencias-card">
+        <div class="if-audiencias-head">
+          <div>
+            <div class="if-kicker">Registro de práctica</div>
+            <h3>Resumen de audiencias asistidas</h3>
+          </div>
+          <div class="if-audiencias-count"><strong>${audiencias.length}</strong><span>realizadas</span></div>
+        </div>
+
+        ${!audiencias.length
+          ? `<div class="if-empty"><span class="if-empty-check">✓</span><span>Sin audiencias realizadas registradas</span></div>`
+          : `
+            <div class="if-table-wrap">
+              <table class="ficha-table if-audiencias-table">
+                <thead><tr><th>Tipo audiencia</th><th>Fecha</th><th>RIT</th><th>Materia</th><th>Tribunal</th></tr></thead>
+                <tbody>
+                  ${audiencias.map(a => `<tr>
+                    <td>${escapeHtml(a.tipoAudiencia)}</td>
+                    <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
+                    <td>${escapeHtml(a.rit)}</td>
+                    <td>${escapeHtml(a.materia)}</td>
+                    <td>${escapeHtml(a.tribunal)}</td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div class="if-audiencias-actions">
+              <button class="btn small" id="informe-audiencias-excel" type="button">Descargar Excel</button>
+            </div>`
+        }
+      </section>
+    </div>`;
 }
-
 function wireInformeFinalConfigurador(container) {
   const filtroSel = container.querySelector('#informe-filtro');
   filtroSel.addEventListener('change', () => { informeFinalFiltro = filtroSel.value; renderInformeFinal(); });
@@ -8188,23 +8989,60 @@ function informeFinalPreviewHtml() {
   const camposLabels = INFORME_CAMPOS_GRUPOS.flatMap(([, c]) => c).filter(([k]) => campos.includes(k)).map(([, l]) => l);
 
   return `
-  <div class="section-title">Informe Final — Vista previa</div>
-  <div class="stats-row" style="grid-template-columns:repeat(4,1fr); margin-bottom:18px;">
-    <div class="stat-card"><div class="num">${causas.length}</div><div class="lbl">Causas totales</div></div>
-    <div class="stat-card info"><div class="num">${causas.filter(c => c.categoria === 'tramitacion').length}</div><div class="lbl">En tramitación</div></div>
-    <div class="stat-card semi"><div class="num">${causas.filter(c => c.categoria === 'nueva').length}</div><div class="lbl">Nuevas / redacción</div></div>
-    <div class="stat-card calm"><div class="num">${causas.filter(c => c.categoria === 'terminada').length}</div><div class="lbl">Terminadas</div></div>
-  </div>
-  <div class="subhead">Campos seleccionados</div>
-  <div class="ficha-empty" style="color:var(--ink-dim); margin-bottom:16px;">${camposLabels.length ? escapeHtml(camposLabels.join(' · ')) : 'Ningún campo adicional seleccionado (solo datos básicos del bloque).'}</div>
-  ${causas.length === 0 ? '<div class="empty-msg">No hay causas que coincidan con el filtro elegido.</div>' : ''}
+    <div class="if-shell">
+      <section class="if-hero">
+        <div>
+          <div class="if-kicker">Vista previa</div>
+          <h2>Informe Final</h2>
+        </div>
+        <div class="if-hero-meta">
+          <span class="if-hero-number">${causas.length}</span>
+          <span>causas</span>
+        </div>
+      </section>
 
-  <div class="agenda-toolbar" style="margin-top:20px;">
-    <button class="btn small primary" id="informe-generar-pdf" ${causas.length === 0 ? 'disabled' : ''}>Generar PDF</button>
-    <button class="btn small" id="informe-volver">Volver a configurar</button>
-  </div>`;
+      <div class="if-preview-stats">
+        <div class="if-preview-stat">
+          <strong>${causas.length}</strong>
+          <span>Causas totales</span>
+        </div>
+        <div class="if-preview-stat if-preview-stat-info">
+          <strong>${causas.filter(c => c.categoria === 'tramitacion').length}</strong>
+          <span>En tramitación</span>
+        </div>
+        <div class="if-preview-stat if-preview-stat-semi">
+          <strong>${causas.filter(c => c.categoria === 'nueva').length}</strong>
+          <span>Nuevas / redacción</span>
+        </div>
+        <div class="if-preview-stat if-preview-stat-calm">
+          <strong>${causas.filter(c => c.categoria === 'terminada').length}</strong>
+          <span>Terminadas</span>
+        </div>
+      </div>
+
+      <section class="if-preview-card">
+        <div class="if-preview-head">
+          <div>
+            <div class="if-kicker">Contenido</div>
+            <h3>Campos seleccionados</h3>
+          </div>
+          <span class="if-selection-summary">${camposLabels.length}</span>
+        </div>
+        <div class="if-preview-fields">
+          ${camposLabels.length
+            ? camposLabels.map(l => `<span class="if-preview-chip">${escapeHtml(l)}</span>`).join('')
+            : '<span class="if-preview-empty">No se seleccionaron campos adicionales.</span>'}
+        </div>
+      </section>
+
+      ${causas.length === 0 ? '<div class="if-empty"><span class="if-empty-check">✓</span><span>No hay causas que coincidan con el filtro elegido</span></div>' : ''}
+
+      <div class="if-preview-actions">
+        <button class="btn primary" id="informe-generar-pdf" ${causas.length === 0 ? 'disabled' : ''}>Generar PDF</button>
+        <button class="btn ghost" id="informe-volver">Volver a configurar</button>
+      </div>
+    </div>`;
 }
-
 function wireInformeFinalPreview(container) {
   container.querySelector('#informe-volver').addEventListener('click', () => {
     informeFinalEtapa = 'configurar';
@@ -8342,7 +9180,7 @@ function generarInformeFinalPdf(causas, campos) {
 
 
 function renderRevisionPjud() {
-  const causas = CAUSAS.filter(c => c.categoria === 'tramitacion')
+  const causas = CAUSAS.filter(c => c.categoria === 'tramitacion' || c.categoria === 'nueva')
     .slice()
     .sort((a, b) => {
       const fa = a.ultimaRevisionAt || '';
@@ -8350,27 +9188,101 @@ function renderRevisionPjud() {
       return fa.localeCompare(fb); // sin revisar / más antiguas primero
     });
 
-  const container = document.getElementById('list-container');
-  let html = `<div class="section-title">Revisión PJUD <span class="n">${causas.length}</span></div>
-  <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">Control interno: recuerda cuándo revisaste por última vez cada causa en el Poder Judicial. No genera gestiones ni eventos.</div>`;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
 
-  if (causas.length === 0) {
-    html += `<div class="empty-msg">No hay causas en tramitación.</div>`;
-  } else {
-    html += `<div class="pjud-table">
-      <div class="pjud-row pjud-head"><div>ROL</div><div>Partes</div><div>Tribunal</div><div>Última revisión</div><div></div></div>
-      ${causas.map(c => `
-        <div class="pjud-row" data-causa-id="${c.id}">
-          <div>${escapeHtml(c.rol || causaShortLabel(c))}</div>
-          <div>${escapeHtml(caratuladoTexto(c) || '—')}</div>
-          <div>${escapeHtml(tribunalTexto(c) || '—')}</div>
-          <div>${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : '<span class="ficha-empty" style="color:var(--ink-faint); font-style:italic;">Nunca</span>'}</div>
-          <div><button class="btn small primary" data-action="revisar-pjud" data-id="${c.id}">Revisado</button></div>
-        </div>`).join('')}
-    </div>`;
+  function diasDesdeRevision(c) {
+    if (!c.ultimaRevisionAt) return null;
+    const d = new Date(c.ultimaRevisionAt);
+    if (isNaN(d)) return null;
+    d.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((hoy - d) / 86400000));
   }
 
-  container.innerHTML = html;
+  function revisionEstado(c) {
+    const dias = diasDesdeRevision(c);
+    if (dias === null) return { cls: 'never', label: 'Nunca revisada', age: 'Sin revisión registrada' };
+    if (dias === 0) return { cls: 'today', label: 'Revisada hoy', age: 'Hoy' };
+    if (dias >= 7) return { cls: 'stale', label: '7+ días', age: `Hace ${dias} días` };
+    return { cls: 'recent', label: 'Reciente', age: dias === 1 ? 'Hace 1 día' : `Hace ${dias} días` };
+  }
+
+  const nunca = causas.filter(c => !c.ultimaRevisionAt).length;
+  const hoyCount = causas.filter(c => diasDesdeRevision(c) === 0).length;
+  const sieteOMas = causas.filter(c => {
+    const dias = diasDesdeRevision(c);
+    return dias !== null && dias >= 7;
+  }).length;
+
+  const container = document.getElementById('list-container');
+
+  const cards = causas.map(c => {
+    const estado = revisionEstado(c);
+    return `
+      <article class="rp-card rp-card-${estado.cls}" data-causa-id="${c.id}">
+        <div class="rp-card-main">
+          <div class="rp-card-top">
+            <span class="rp-rol">${escapeHtml(c.rol || causaShortLabel(c))}</span>
+            <span class="rp-status rp-status-${estado.cls}">${escapeHtml(estado.label)}</span>
+          </div>
+          <h3>${escapeHtml(caratuladoTexto(c) || c.titulo || 'Causa sin caratulado')}</h3>
+          <div class="rp-meta">
+            <span>${escapeHtml(tribunalTexto(c) || 'Tribunal sin definir')}</span>
+          </div>
+        </div>
+        <div class="rp-review">
+          <span class="rp-review-label">Última revisión</span>
+          <strong>${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : 'Nunca'}</strong>
+          <span class="rp-review-age">${escapeHtml(estado.age)}</span>
+        </div>
+        <div class="rp-card-action">
+          <button class="btn small primary" data-action="revisar-pjud" data-id="${c.id}" type="button">Marcar revisada</button>
+        </div>
+      </article>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="rp-shell">
+      <section class="rp-hero">
+        <div>
+          <div class="rp-kicker">Control interno</div>
+          <h2>Revisión PJUD</h2>
+        </div>
+        <div class="rp-hero-count">${causas.length}<span>causas</span></div>
+      </section>
+
+      <div class="rp-stats">
+        <div class="rp-stat">
+          <span class="rp-stat-num">${causas.length}</span>
+          <span class="rp-stat-label">En tramitación</span>
+        </div>
+        <div class="rp-stat rp-stat-warning">
+          <span class="rp-stat-num">${nunca}</span>
+          <span class="rp-stat-label">Nunca revisadas</span>
+        </div>
+        <div class="rp-stat rp-stat-calm">
+          <span class="rp-stat-num">${hoyCount}</span>
+          <span class="rp-stat-label">Revisadas hoy</span>
+        </div>
+        <div class="rp-stat rp-stat-info">
+          <span class="rp-stat-num">${sieteOMas}</span>
+          <span class="rp-stat-label">7+ días sin revisar</span>
+        </div>
+      </div>
+
+      <section class="rp-results">
+        <div class="rp-results-head">
+          <div>
+            <div class="rp-kicker">Causas</div>
+            <h3>Control de revisión</h3>
+          </div>
+          <span class="rp-results-count">${causas.length}</span>
+        </div>
+        ${causas.length
+          ? `<div class="rp-list">${cards}</div>`
+          : `<div class="rp-empty"><span class="rp-empty-check">✓</span><span>No hay causas en tramitación</span></div>`}
+      </section>
+    </div>`;
 
   container.querySelectorAll('[data-action="revisar-pjud"]').forEach(btn => {
     btn.addEventListener('click', async (ev) => {
@@ -8387,15 +9299,14 @@ function renderRevisionPjud() {
     });
   });
 
-  container.querySelectorAll('.pjud-row[data-causa-id]').forEach(row => {
-    row.addEventListener('click', () => {
+  container.querySelectorAll('.rp-card[data-causa-id]').forEach(card => {
+    card.addEventListener('click', () => {
       currentCat = 'todas';
       render();
-      openDetail(row.dataset.causaId, 'resumen');
+      openDetail(card.dataset.causaId, 'resumen');
     });
   });
 }
-
 
 function renderDashBlocks() {
   const hoy = todayISO();
@@ -8483,45 +9394,89 @@ function agendaFilterBarHtml() {
   const prioridadOptions = ['Urgente', 'Semi urgente', 'No prioritario'].map(p => `<option value="${p}" ${agendaFilters.prioridad === p ? 'selected' : ''}>${p}</option>`).join('');
 
   return `
-  <div class="agenda-filterbar">
-    <select id="ag-f-causa"><option value="">Todas las causas</option>${causaOptions}</select>
-    <select id="ag-f-tipo"><option value="">Todos los tipos</option>${tipoOptions}</select>
-    <select id="ag-f-estado"><option value="">Todos los estados</option>${estadoOptions}</select>
-    <select id="ag-f-prioridad"><option value="">Toda prioridad</option>${prioridadOptions}</select>
-    <input type="date" id="ag-f-desde" value="${escapeHtml(agendaFilters.desde)}" title="Desde">
-    <button class="btn small ghost" id="ag-f-clear">Limpiar filtros</button>
-  </div>
-  <div class="agenda-viewtabs">
-    ${['lista', 'mes', 'semana', 'dia'].map(v => `<button class="btn small ${agendaViewMode === v ? 'primary' : ''}" data-view="${v}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('')}
+  <div class="pj-agenda-controls">
+    <div class="pj-agenda-filter-grid">
+      <label class="pj-agenda-filter">
+        <span>Causa</span>
+        <select id="ag-f-causa"><option value="">Todas las causas</option>${causaOptions}</select>
+      </label>
+      <label class="pj-agenda-filter">
+        <span>Tipo</span>
+        <select id="ag-f-tipo"><option value="">Todos los tipos</option>${tipoOptions}</select>
+      </label>
+      <label class="pj-agenda-filter">
+        <span>Estado</span>
+        <select id="ag-f-estado"><option value="">Todos los estados</option>${estadoOptions}</select>
+      </label>
+      <label class="pj-agenda-filter">
+        <span>Prioridad</span>
+        <select id="ag-f-prioridad"><option value="">Toda prioridad</option>${prioridadOptions}</select>
+      </label>
+      <label class="pj-agenda-filter pj-agenda-filter-date">
+        <span>Desde</span>
+        <input type="date" id="ag-f-desde" value="${escapeHtml(agendaFilters.desde)}">
+      </label>
+      <button class="btn small ghost pj-agenda-clear" id="ag-f-clear">Limpiar</button>
+    </div>
+    <div class="pj-agenda-viewtabs" aria-label="Vista de agenda">
+      ${['lista', 'mes', 'semana', 'dia'].map(v => `<button class="pj-agenda-viewbtn ${agendaViewMode === v ? 'active' : ''}" data-view="${v}">${v.charAt(0).toUpperCase() + v.slice(1)}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function agendaEventDateBadgeHtml(e) {
+  if (!e.fecha) return `<div class="pj-event-date pj-event-date-empty"><span>—</span></div>`;
+  const d = new Date(e.fecha + 'T00:00:00');
+  if (isNaN(d)) return `<div class="pj-event-date pj-event-date-empty"><span>—</span></div>`;
+  return `<div class="pj-event-date">
+    <span class="pj-event-day">${String(d.getDate()).padStart(2, '0')}</span>
+    <span class="pj-event-month">${d.toLocaleDateString('es-CL', { month: 'short' }).replace('.', '')}</span>
   </div>`;
 }
 
 function agendaEventRowHtml(e) {
-  return `<div class="case-card evento-row" data-causa-id="${e.causaId}">
-    <div class="case-main">
-      <div class="titulo">${AGENDA_TIPO_ICONO[e.tipo] || '•'} ${escapeHtml(eventoTituloEfectivo(e))}</div>
-      <div class="meta">
-        <span class="rol">${escapeHtml(causaShortLabel(e.causa))}</span>
+  const caratulado = caratuladoTexto(e.causa);
+  return `<div class="pj-agenda-event evento-row evento-estado-${eventoEstadoClass(e.estado)}" data-causa-id="${e.causaId}">
+    ${agendaEventDateBadgeHtml(e)}
+    <div class="pj-event-main">
+      <div class="pj-event-title-row">
+        <span class="pj-event-icon">${AGENDA_TIPO_ICONO[e.tipo] || '•'}</span>
+        <div class="pj-event-title">${escapeHtml(eventoTituloEfectivo(e))}</div>
+      </div>
+      <div class="pj-event-meta">
+        ${e.horaInicio ? `<span class="pj-event-time">${escapeHtml(e.horaInicio)}${e.horaTermino ? `–${escapeHtml(e.horaTermino)}` : ''}</span>` : ''}
         <span>${escapeHtml(e.tipo)}</span>
-        ${caratuladoTexto(e.causa) ? `<span>${escapeHtml(caratuladoTexto(e.causa))}</span>` : ''}
-        ${e.horaInicio ? `<span>${escapeHtml(e.horaInicio)}</span>` : ''}
+        <span class="pj-event-cause">${escapeHtml(causaShortLabel(e.causa))}</span>
+        ${caratulado ? `<span>${escapeHtml(caratulado)}</span>` : ''}
       </div>
     </div>
-    <div class="case-side" style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-      <span class="stamp evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
-      ${e.prioridad ? `<span class="stamp ${priorClass(e.prioridad)}">${escapeHtml(e.prioridad)}</span>` : ''}
+    <div class="pj-event-status">
+      <span class="pj-status-pill evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
+      ${e.prioridad ? `<span class="pj-priority-pill pj-priority-${priorClass(e.prioridad)}">${escapeHtml(e.prioridad)}</span>` : ''}
       ${googleSyncBadgeHtml(e)}
     </div>
+    <div class="pj-event-arrow" aria-hidden="true">›</div>
   </div>`;
 }
 
 function agendaListViewHtml(events) {
-  if (events.length === 0) return `<div class="empty-msg">No hay eventos que coincidan con los filtros actuales.</div>`;
+  if (events.length === 0) return `<div class="pj-agenda-empty"><div class="pj-agenda-empty-icon">✓</div><div>Sin eventos para mostrar</div></div>`;
   const grupos = {};
   events.forEach(e => { const k = e.fecha || 'Sin fecha'; (grupos[k] = grupos[k] || []).push(e); });
-  return Object.keys(grupos).sort().map(fecha => `
-    <div class="section-title" style="font-size:14px; margin-top:16px;">${escapeHtml(fmtFechaSolo(fecha) || fecha)}</div>
-    <div class="case-grid">${grupos[fecha].map(agendaEventRowHtml).join('')}</div>`).join('');
+  return `<div class="pj-agenda-list">${Object.keys(grupos).sort().map(fecha => {
+    const count = grupos[fecha].length;
+    const esHoy = fecha === todayISO();
+    return `<section class="pj-agenda-daygroup">
+      <div class="pj-agenda-dayhead">
+        <div>
+          <span class="pj-agenda-daylabel">${escapeHtml(fmtFechaSolo(fecha) || fecha)}</span>
+          ${esHoy ? `<span class="pj-agenda-today-pill">Hoy</span>` : ''}
+        </div>
+        <span class="pj-agenda-daycount">${count}</span>
+      </div>
+      <div class="pj-agenda-event-list">${grupos[fecha].map(agendaEventRowHtml).join('')}</div>
+    </section>`;
+  }).join('')}</div>`;
 }
 
 function startOfWeek(date) {
@@ -8546,24 +9501,29 @@ function agendaMonthViewHtml(events) {
     const d = new Date(startGrid); d.setDate(startGrid.getDate() + i);
     const iso = toISO(d);
     const inMonth = d.getMonth() === month;
-    const dayEvents = byDate[iso] || [];
-    cells += `<div class="cal-cell ${inMonth ? '' : 'cal-cell-out'} ${iso === hoy ? 'cal-cell-today' : ''}" data-day="${iso}">
-      <div class="cal-daynum">${d.getDate()}</div>
-      ${dayEvents.slice(0, 3).map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(eventoTituloEfectivo(e))}</div>`).join('')}
-      ${dayEvents.length > 3 ? `<div class="cal-more">+${dayEvents.length - 3} más</div>` : ''}
+    const dayEvents = (byDate[iso] || []).sort((a, b) => (a.horaInicio || '').localeCompare(b.horaInicio || ''));
+    cells += `<div class="cal-cell pj-cal-cell ${inMonth ? '' : 'cal-cell-out'} ${iso === hoy ? 'cal-cell-today' : ''}" data-day="${iso}">
+      <div class="cal-daynum pj-cal-daynum">${d.getDate()}${iso === hoy ? `<span>Hoy</span>` : ''}</div>
+      <div class="pj-cal-events">
+        ${dayEvents.slice(0, 3).map(e => `<div class="cal-chip pj-cal-chip evento-estado-${eventoEstadoClass(e.estado)}">${e.horaInicio ? `<b>${escapeHtml(e.horaInicio)}</b> ` : ''}${escapeHtml(eventoTituloEfectivo(e))}</div>`).join('')}
+        ${dayEvents.length > 3 ? `<div class="cal-more pj-cal-more">+${dayEvents.length - 3} más</div>` : ''}
+      </div>
     </div>`;
   }
 
   return `
-  <div class="cal-nav">
-    <button class="btn small" id="cal-prev">‹</button>
-    <div class="cal-label">${monthLabel}</div>
-    <button class="btn small" id="cal-next">›</button>
-    <button class="btn small ghost" id="cal-today">Hoy</button>
-  </div>
-  <div class="cal-grid cal-grid-head">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<div>${d}</div>`).join('')}</div>
-  <div class="cal-grid">${cells}</div>
-  <div id="cal-day-detail"></div>`;
+  <div class="pj-calendar-card">
+    <div class="cal-nav pj-cal-nav">
+      <div class="pj-cal-step">
+        <button class="btn small" id="cal-prev" aria-label="Mes anterior">‹</button>
+        <button class="btn small" id="cal-next" aria-label="Mes siguiente">›</button>
+      </div>
+      <div class="cal-label pj-cal-label">${monthLabel}</div>
+      <button class="btn small ghost" id="cal-today">Hoy</button>
+    </div>
+    <div class="cal-grid cal-grid-head pj-cal-grid-head">${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(d => `<div>${d}</div>`).join('')}</div>
+    <div class="cal-grid pj-cal-grid">${cells}</div>
+  </div>`;
 }
 
 function agendaWeekViewHtml(events) {
@@ -8576,33 +9536,62 @@ function agendaWeekViewHtml(events) {
     const d = new Date(start); d.setDate(start.getDate() + i);
     const iso = toISO(d);
     const dayEvents = (byDate[iso] || []).sort((a, b) => (a.horaInicio || '').localeCompare(b.horaInicio || ''));
-    cols += `<div class="week-col ${iso === hoy ? 'week-col-today' : ''}">
-      <div class="week-col-head">${d.toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-      ${dayEvents.length ? dayEvents.map(e => `<div class="cal-chip evento-estado-${eventoEstadoClass(e.estado)}" data-causa-id="${e.causaId}">${e.horaInicio ? escapeHtml(e.horaInicio) + ' · ' : ''}${escapeHtml(eventoTituloEfectivo(e))}</div>`).join('') : `<div class="week-empty">—</div>`}
+    cols += `<div class="week-col pj-week-col ${iso === hoy ? 'week-col-today' : ''}">
+      <div class="week-col-head pj-week-col-head">
+        <span>${d.toLocaleDateString('es-CL', { weekday: 'short' })}</span>
+        <b>${d.getDate()}</b>
+      </div>
+      <div class="pj-week-events">
+        ${dayEvents.length ? dayEvents.map(e => `<div class="cal-chip pj-week-chip evento-estado-${eventoEstadoClass(e.estado)}" data-causa-id="${e.causaId}">${e.horaInicio ? `<b>${escapeHtml(e.horaInicio)}</b>` : ''}<span>${escapeHtml(eventoTituloEfectivo(e))}</span></div>`).join('') : `<div class="week-empty">—</div>`}
+      </div>
     </div>`;
   }
   const end = new Date(start); end.setDate(start.getDate() + 6);
   return `
-  <div class="cal-nav">
-    <button class="btn small" id="cal-prev">‹</button>
-    <div class="cal-label">${start.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
-    <button class="btn small" id="cal-next">›</button>
-    <button class="btn small ghost" id="cal-today">Hoy</button>
-  </div>
-  <div class="week-grid">${cols}</div>`;
+  <div class="pj-calendar-card">
+    <div class="cal-nav pj-cal-nav">
+      <div class="pj-cal-step">
+        <button class="btn small" id="cal-prev" aria-label="Semana anterior">‹</button>
+        <button class="btn small" id="cal-next" aria-label="Semana siguiente">›</button>
+      </div>
+      <div class="cal-label pj-cal-label">${start.toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+      <button class="btn small ghost" id="cal-today">Hoy</button>
+    </div>
+    <div class="week-grid pj-week-grid">${cols}</div>
+  </div>`;
 }
 
 function agendaDayViewHtml(events) {
   const iso = toISO(agendaCursor);
   const dayEvents = events.filter(e => e.fecha === iso).sort((a, b) => (a.horaInicio || '').localeCompare(b.horaInicio || ''));
   return `
-  <div class="cal-nav">
-    <button class="btn small" id="cal-prev">‹</button>
-    <div class="cal-label">${agendaCursor.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-    <button class="btn small" id="cal-next">›</button>
-    <button class="btn small ghost" id="cal-today">Hoy</button>
-  </div>
-  ${dayEvents.length ? `<div class="case-grid">${dayEvents.map(agendaEventRowHtml).join('')}</div>` : `<div class="empty-msg">Sin eventos este día.</div>`}`;
+  <div class="pj-calendar-card">
+    <div class="cal-nav pj-cal-nav">
+      <div class="pj-cal-step">
+        <button class="btn small" id="cal-prev" aria-label="Día anterior">‹</button>
+        <button class="btn small" id="cal-next" aria-label="Día siguiente">›</button>
+      </div>
+      <div class="cal-label pj-cal-label">${agendaCursor.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+      <button class="btn small ghost" id="cal-today">Hoy</button>
+    </div>
+    ${dayEvents.length ? `<div class="pj-agenda-event-list">${dayEvents.map(agendaEventRowHtml).join('')}</div>` : `<div class="pj-agenda-empty"><div class="pj-agenda-empty-icon">✓</div><div>Sin eventos este día</div></div>`}
+  </div>`;
+}
+
+function agendaStatsHtml(events) {
+  const hoy = todayISO();
+  const limite = new Date(); limite.setHours(0, 0, 0, 0); limite.setDate(limite.getDate() + 7);
+  const limiteISO = toISO(limite);
+  const pendientes = events.filter(e => e.estado === 'Pendiente').length;
+  const hoyCount = events.filter(e => e.fecha === hoy && e.estado !== 'Cancelado').length;
+  const proximos = events.filter(e => e.fecha && e.fecha > hoy && e.fecha <= limiteISO && e.estado !== 'Cancelado').length;
+  const audiencias = events.filter(e => e.tipo === 'Audiencia' && e.estado !== 'Cancelado').length;
+  return `<div class="pj-agenda-stats">
+    <div class="pj-agenda-stat"><span class="pj-agenda-stat-icon">○</span><b>${pendientes}</b><small>Pendientes</small></div>
+    <div class="pj-agenda-stat pj-agenda-stat-today"><span class="pj-agenda-stat-icon">•</span><b>${hoyCount}</b><small>Hoy</small></div>
+    <div class="pj-agenda-stat pj-agenda-stat-next"><span class="pj-agenda-stat-icon">→</span><b>${proximos}</b><small>Próximos 7 días</small></div>
+    <div class="pj-agenda-stat pj-agenda-stat-hearing"><span class="pj-agenda-stat-icon">§</span><b>${audiencias}</b><small>Audiencias</small></div>
+  </div>`;
 }
 
 function renderAgendaGlobal() {
@@ -8616,9 +9605,18 @@ function renderAgendaGlobal() {
   else if (agendaViewMode === 'dia') bodyHtml = agendaDayViewHtml(events);
 
   container.innerHTML = `
-    <div class="section-title">Agenda <span class="n">${events.length}</span></div>
-    ${agendaFilterBarHtml()}
-    <div class="agenda-view-body">${bodyHtml}</div>
+    <div class="pj-agenda-page">
+      <div class="pj-agenda-hero">
+        <div>
+          <div class="pj-agenda-kicker">Planificación</div>
+          <h2>Agenda</h2>
+        </div>
+        <div class="pj-agenda-total"><b>${events.length}</b><span>${events.length === 1 ? 'evento' : 'eventos'}</span></div>
+      </div>
+      ${agendaStatsHtml(events)}
+      ${agendaFilterBarHtml()}
+      <div class="agenda-view-body pj-agenda-view-body">${bodyHtml}</div>
+    </div>
   `;
 
   container.querySelector('#ag-f-causa').addEventListener('change', e => { agendaFilters.causaId = e.target.value; renderAgendaGlobal(); });
@@ -8661,17 +9659,44 @@ function renderAgendaGlobal() {
   });
 }
 
-
 function detailHtml(c) {
+  const prioridad = prioridadEfectiva(c);
+  const gestionActiva = pickActiveGestion(c);
+  const proximaGestion = gestionActiva ? gestionActiva.descripcion : '';
+  const proximaRevision = gestionSideText(gestionActiva);
+  const tribunal = tribunalTexto(c);
+  const tutor = c.tutor || '';
+  const scClass = subcatClass(c);
+
   return `
-  <div class="detail-head">
-    <div>
-      <h2>${escapeHtml(c.titulo)}</h2>
-      <div class="rolmono">${headerSubline(c)}</div>
+  <div class="detail-head detail-head-v2 detail-head-compact ${scClass}">
+    <div class="detail-identity">
+      <div class="detail-title-row">
+        <div>
+          <div class="detail-eyebrow">Expediente jurídico</div>
+          <h2>${escapeHtml(c.titulo)}</h2>
+        </div>
+        <button class="close-x" id="detail-close" aria-label="Cerrar">&times;</button>
+      </div>
+
+      <div class="detail-meta-compact">
+        ${c.folio ? `<span class="detail-meta-item detail-meta-saj">SAJ ${escapeHtml(c.folio)}</span>` : ''}
+        ${prioridad ? `<span class="detail-status-pill status-${priorClass(prioridad)}">${escapeHtml(prioridad)}</span>` : '<span class="detail-status-pill status-neutral">Sin prioridad activa</span>'}
+        ${c.etapa ? `<span class="detail-status-pill status-neutral">${escapeHtml(c.etapa)}</span>` : ''}
+        ${tutor ? `<span class="detail-status-pill status-neutral">Tutor · ${escapeHtml(tutor)}</span>` : ''}
+        ${tribunal ? `<span class="detail-meta-item detail-meta-tribunal">${escapeHtml(tribunal)}</span>` : ''}
+      </div>
+
+      <div class="detail-compact-bottom">
+        <div class="detail-next-inline ${proximaGestion ? '' : 'is-empty'}">
+          <span class="detail-next-kicker">Qué sigue</span>
+          <span class="detail-next-copy">${escapeHtml(proximaGestion || 'Sin gestión pendiente registrada')}</span>
+          ${proximaRevision ? `<span class="detail-next-date">${escapeHtml(proximaRevision)}</span>` : ''}
+        </div>
+        ${quickActionsHtml(c)}
+      </div>
     </div>
-    <button class="close-x" id="detail-close">&times;</button>
   </div>
-  ${quickActionsHtml(c)}
   <div class="detail-tabs">
     <div class="dtab" data-tab="editar">Antecedentes</div>
     <div class="dtab active" data-tab="resumen">Resumen</div>
@@ -8685,76 +9710,145 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content" data-tab="resumen">
-    ${c.objetivoApelacion ? `<div class="subhead" style="margin-top:0;">Objetivo de la apelación</div><p class="para">${escapeHtml(c.objetivoApelacion)}</p>` : ''}
-    <div class="form-grid2">
-      <div>
-        <div class="subhead" style="margin-top:0;">Clave para recordar</div>
-        <input type="text" class="ct-input" id="rf-clave" value="${escapeHtml(c.clave || '')}">
-      </div>
-      <div>
-        <div class="subhead" style="margin-top:0;">Estado actual</div>
-        <textarea id="rf-estado" style="width:100%; min-height:80px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.estado || '')}</textarea>
-      </div>
-    </div>
-    <div class="subhead">Resumen de la causa</div>
-    <textarea id="rf-resumen" style="width:100%; min-height:140px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.resumen || '')}</textarea>
+    <div class="rf-summary-layout">
+      ${c.objetivoApelacion ? `
+      <section class="rf-summary-card rf-summary-card-accent">
+        <div class="rf-summary-head">
+          <div>
+            <div class="rf-summary-kicker">Estrategia</div>
+            <div class="rf-summary-title">Objetivo de la apelación</div>
+          </div>
+        </div>
+        <div class="rf-summary-body"><p class="para rf-objective-copy">${escapeHtml(c.objetivoApelacion)}</p></div>
+      </section>` : ''}
 
-    <div class="subhead">Carpeta de Google Drive</div>
-    <div class="drive-box">
-      <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Esta causa aún no tiene una carpeta de Google Drive vinculada.'}</div>
-      ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir carpeta en Google Drive</button>` : ''}
-      <div class="drive-edit-row">
-        <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de la carpeta de Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+      <section class="rf-summary-card">
+        <div class="rf-summary-head">
+          <div>
+            <div class="rf-summary-kicker">Panorama</div>
+            <div class="rf-summary-title">Estado y síntesis</div>
+          </div>
+
+        </div>
+        <div class="rf-summary-body">
+          <div class="rf-summary-grid rf-summary-grid-top">
+            <div class="rf-field-block rf-field-key">
+              <label for="rf-clave">Clave para recordar</label>
+              <input type="text" class="ct-input" id="rf-clave" value="${escapeHtml(c.clave || '')}" placeholder="Idea breve o dato crítico…">
+            </div>
+            <div class="rf-field-block rf-field-state">
+              <label for="rf-estado">Estado actual</label>
+              <textarea id="rf-estado" class="rf-textarea rf-textarea-state" placeholder="¿En qué punto está la causa?">${escapeHtml(c.estado || '')}</textarea>
+            </div>
+          </div>
+          <div class="rf-field-block rf-field-summary">
+            <label for="rf-resumen">Resumen de la causa</label>
+            <textarea id="rf-resumen" class="rf-textarea rf-textarea-main" placeholder="Síntesis jurídica y antecedentes esenciales…">${escapeHtml(c.resumen || '')}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <div class="rf-summary-columns">
+        <section class="rf-summary-card">
+          <div class="rf-summary-head">
+            <div>
+              <div class="rf-summary-kicker">Documentos</div>
+              <div class="rf-summary-title">Carpeta de Google Drive</div>
+            </div>
+          </div>
+          <div class="rf-summary-body">
+            <div class="drive-box rf-drive-box">
+              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Esta causa aún no tiene una carpeta de Google Drive vinculada.'}</div>
+              ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir carpeta</button>` : ''}
+              <div class="drive-edit-row">
+                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de la carpeta de Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+              </div>
+
+            </div>
+          </div>
+        </section>
+
+        <section class="rf-summary-card">
+          <div class="rf-summary-head">
+            <div>
+              <div class="rf-summary-kicker">Continuidad</div>
+              <div class="rf-summary-title">Observaciones de traspaso</div>
+            </div>
+          </div>
+          <div class="rf-summary-body">
+            <textarea id="rf-traspaso" class="rf-textarea rf-textarea-transfer" placeholder="Información útil para el traspaso de la causa…">${escapeHtml(c.observacionesTraspaso || '')}</textarea>
+          </div>
+        </section>
       </div>
-      <div style="font-size:11.5px; color:var(--ink-faint); margin-top:10px;">Este enlace se guarda al presionar "Guardar resumen", junto con el resto de los datos de esta pestaña.</div>
-    </div>
 
-    <div class="subhead">Observaciones de traspaso</div>
-    <textarea id="rf-traspaso" placeholder="Información útil para quien reciba la causa después (no genera gestiones ni eventos)…" style="width:100%; min-height:70px; background:var(--bg-card); border:1px solid var(--line); color:var(--ink); padding:10px 12px; border-radius:5px; font-size:13.5px; font-family:var(--font-body); line-height:1.6;">${escapeHtml(c.observacionesTraspaso || '')}</textarea>
-    <div style="margin-top:10px;">
-      <button class="btn small primary" id="save-resumen">Guardar resumen</button>
-    </div>
+      <section class="rf-summary-card">
+        <div class="rf-summary-head">
+          <div>
+            <div class="rf-summary-kicker">Flujo esperado</div>
+            <div class="rf-summary-title">Próximos hitos</div>
+          </div>
 
-    <div class="subhead" style="margin-top:22px;">Próximos hitos</div>
-    <div id="hitos-container">${hitosHtml(c)}</div>
-    <div class="add-row">
-      <input type="text" id="new-hito" placeholder="Agregar hito del flujo esperado…">
-      <button class="btn small" id="add-hito">Agregar</button>
+        </div>
+        <div class="rf-summary-body">
+          <div id="hitos-container">${hitosHtml(c)}</div>
+          <div class="add-row rf-hito-add">
+            <input type="text" id="new-hito" placeholder="Agregar hito del flujo esperado…">
+            <button class="btn small" id="add-hito">Agregar</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="rf-summary-actions">
+
+        <button class="btn small primary" id="save-resumen">Guardar resumen</button>
+      </div>
     </div>
   </div>
 
   <div class="dtab-content" data-tab="gestiones">
-    <div class="agenda-toolbar">
-      <button class="btn small primary" id="add-gestion">+ Nueva Gestión/Tarea</button>
-    </div>
-    <div id="gestion-form-wrap" class="agenda-form-wrap" hidden></div>
-    <div id="gestion-list-wrap">${pendientesHtml(c)}</div>
+    <div class="gt-layout">
+      <section class="gt-card gt-work-card">
+        <div class="gt-card-head">
+          <div><span class="gt-kicker">Trabajo activo</span><h3>Gestiones y tareas</h3></div>
+          <button class="btn small primary" id="add-gestion">+ Nueva Gestión/Tarea</button>
+        </div>
+        ${gestionOverviewHtml(c)}
+        <div id="gestion-form-wrap" class="agenda-form-wrap gt-form-wrap" hidden></div>
+        <div id="gestion-list-wrap">${pendientesHtml(c)}</div>
+      </section>
 
-    <div class="subhead" style="margin-top:26px; display:flex; align-items:center; justify-content:space-between;">
-      <span>Instrucciones del tutor <span style="color:var(--ink-faint); font-weight:400; text-transform:none; font-family:var(--font-body);">(antecedente histórico)</span></span>
-    </div>
-    <div class="agenda-toolbar">
-      <button class="btn small" id="add-instr">+ Nueva instrucción</button>
-    </div>
-    <div id="instr-form-wrap" class="agenda-form-wrap" hidden></div>
-    <div id="instr-list-wrap">${instruccionesListHtml(c)}</div>
+      <div class="gt-side-grid">
+        <section class="gt-card">
+          <div class="gt-card-head gt-card-head-compact">
+            <div><span class="gt-kicker">Antecedente histórico</span><h3>Instrucciones del tutor</h3></div>
+            <button class="btn small" id="add-instr">+ Nueva instrucción</button>
+          </div>
+          <div id="instr-form-wrap" class="agenda-form-wrap gt-form-wrap" hidden></div>
+          <div id="instr-list-wrap">${instruccionesListHtml(c)}</div>
+        </section>
 
-    <div class="subhead" style="margin-top:26px; display:flex; align-items:center; justify-content:space-between;">
-      <span>Última revisión PJUD</span>
-      <button class="btn small" id="btn-actualizar-revision" type="button">Actualizar revisión</button>
-    </div>
-    <div style="font-size:12.5px; color:var(--ink-dim);" id="ultima-revision-display">${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : 'Aún no registrada.'}</div>
-
-    <div class="subhead" style="margin-top:26px;">Cronología jurídica</div>
-    <div id="tl-cronologia">${cronologiaHtml(c)}</div>
-    <div class="drive-box" style="margin-top:12px;">
-      <div style="display:grid; grid-template-columns:170px 1fr; gap:12px; align-items:end;">
-        <div><label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); display:block; margin-bottom:4px;">Fecha de actuación</label><input type="date" id="new-cron-fecha" value="${escapeHtml(todayISO())}"></div>
-        <div><label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); display:block; margin-bottom:4px;">Actuación</label><input type="text" id="new-cron" placeholder="Texto de la gestión realizada…" style="width:100%;"></div>
+        <section class="gt-card gt-pjud-card">
+          <div class="gt-card-head gt-card-head-compact">
+            <div><span class="gt-kicker">Control interno</span><h3>Última revisión PJUD</h3></div>
+            <button class="btn small" id="btn-actualizar-revision" type="button">Actualizar revisión</button>
+          </div>
+          <div class="gt-pjud-value" id="ultima-revision-display">${c.ultimaRevisionAt ? escapeHtml(fmtFechaHora(c.ultimaRevisionAt)) : 'Aún no registrada.'}</div>
+        </section>
       </div>
-      <div style="margin-top:12px; display:flex; justify-content:flex-end;">
-        <button class="btn small primary" id="add-cron">Registrar</button>
-      </div>
+
+      <section class="gt-card gt-history-card">
+        <div class="gt-card-head gt-card-head-compact">
+          <div><span class="gt-kicker">Historial</span><h3>Cronología jurídica</h3></div>
+        </div>
+        <div id="tl-cronologia">${cronologiaHtml(c)}</div>
+        <div class="gt-cron-add">
+          <div class="gt-cron-grid">
+            <div><label>Fecha de actuación</label><input type="date" id="new-cron-fecha" value="${escapeHtml(todayISO())}"></div>
+            <div><label>Actuación</label><input type="text" id="new-cron" placeholder="Texto de la gestión realizada…"></div>
+          </div>
+          <div class="gt-cron-actions"><button class="btn small primary" id="add-cron">Registrar actuación</button></div>
+        </div>
+      </section>
     </div>
   </div>
 
@@ -8767,28 +9861,85 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content" data-tab="contacto">
-    <div class="contact-grid">
-      <div class="field"><div class="k">Nombre <span style="font-weight:400; font-size:11px; color:var(--ink-faint);">(se edita desde Antecedentes)</span></div><input type="text" class="ct-input" value="${escapeHtml(patrocinadoEfectivo(c) || '')}" disabled></div>
-      <div class="field"><div class="k">RUT</div><input type="text" class="ct-input" id="ct-rut" value="${escapeHtml(c.rut || '')}"></div>
-      <div class="field"><div class="k">Correo</div><input type="text" class="ct-input" id="ct-correo" value="${escapeHtml(c.correo || '')}"></div>
-      <div class="field"><div class="k">Correo alternativo</div><input type="text" class="ct-input" id="ct-correoAlt" value="${escapeHtml(c.correoAlt || '')}"></div>
-      ${campoCredencialHtml('claveWeb', 'Clave portal PJUD')}
-      ${campoCredencialHtml('claveUnica', 'Clave única')}
-      <div class="field"><div class="k">Teléfono</div><input type="text" class="ct-input" id="ct-telefono" value="${escapeHtml(c.telefono || '')}"></div>
-      <div class="field"><div class="k">Teléfono alternativo</div><input type="text" class="ct-input" id="ct-telefonoAlt" value="${escapeHtml(c.telefonoAlt || '')}"></div>
-      <div class="field"><div class="k">Nota</div><input type="text" class="ct-input" id="ct-nota" value="${escapeHtml(c.nota || '')}"></div>
-    </div>
-    <div style="margin-top:14px;">
-      <button class="btn small primary" id="save-contacto">Guardar contacto</button>
+    <div class="ct-contact-shell">
+      <section class="ct-contact-card ct-contact-card-main">
+        <div class="ct-contact-head">
+          <div>
+            <div class="ct-contact-kicker">Persona patrocinada</div>
+            <h3>Contacto y acceso</h3>
+          </div>
+        </div>
+
+        <div class="ct-contact-section">
+          <div class="ct-contact-section-head">
+            <span class="ct-contact-section-kicker">Identificación</span>
+            <span class="ct-contact-section-title">Datos personales</span>
+          </div>
+          <div class="ct-contact-grid ct-contact-grid-2">
+            <div class="field ct-contact-field">
+              <div class="k">Nombre</div>
+              <input type="text" class="ct-input" value="${escapeHtml(patrocinadoEfectivo(c) || '')}" disabled>
+            </div>
+            <div class="field ct-contact-field">
+              <div class="k">RUT</div>
+              <input type="text" class="ct-input" id="ct-rut" value="${escapeHtml(c.rut || '')}">
+            </div>
+          </div>
+        </div>
+
+        <div class="ct-contact-section">
+          <div class="ct-contact-section-head">
+            <span class="ct-contact-section-kicker">Comunicación</span>
+            <span class="ct-contact-section-title">Correos y teléfonos</span>
+          </div>
+          <div class="ct-contact-grid ct-contact-grid-2">
+            <div class="field ct-contact-field"><div class="k">Correo</div><input type="text" class="ct-input" id="ct-correo" value="${escapeHtml(c.correo || '')}"></div>
+            <div class="field ct-contact-field"><div class="k">Correo alternativo</div><input type="text" class="ct-input" id="ct-correoAlt" value="${escapeHtml(c.correoAlt || '')}"></div>
+            <div class="field ct-contact-field"><div class="k">Teléfono</div><input type="text" class="ct-input" id="ct-telefono" value="${escapeHtml(c.telefono || '')}"></div>
+            <div class="field ct-contact-field"><div class="k">Teléfono alternativo</div><input type="text" class="ct-input" id="ct-telefonoAlt" value="${escapeHtml(c.telefonoAlt || '')}"></div>
+          </div>
+        </div>
+
+        <div class="ct-contact-section ct-contact-section-secure">
+          <div class="ct-contact-section-head">
+            <span class="ct-contact-section-kicker">Acceso seguro</span>
+            <span class="ct-contact-section-title">Credenciales</span>
+          </div>
+          <div class="ct-contact-grid ct-contact-grid-2 ct-credential-grid">
+            ${campoCredencialHtml('claveWeb', 'Clave portal PJUD')}
+            ${campoCredencialHtml('claveUnica', 'Clave única')}
+          </div>
+        </div>
+
+        <div class="ct-contact-section">
+          <div class="ct-contact-section-head">
+            <span class="ct-contact-section-kicker">Registro</span>
+            <span class="ct-contact-section-title">Nota</span>
+          </div>
+          <div class="field ct-contact-field ct-contact-note">
+            <input type="text" class="ct-input" id="ct-nota" value="${escapeHtml(c.nota || '')}" placeholder="Nota breve sobre el contacto…">
+          </div>
+        </div>
+
+        <div class="ct-contact-actions">
+          <button class="btn small primary" id="save-contacto">Guardar contacto</button>
+        </div>
+      </section>
     </div>
   </div>
 
   <div class="dtab-content" data-tab="agenda">
-    <div class="agenda-toolbar">
-      <button class="btn small primary" id="add-evento">+ Nuevo evento</button>
+    <div class="ca-agenda-shell">
+      <div class="ca-agenda-header">
+        <div>
+          <div class="ca-agenda-kicker">Planificación</div>
+          <h3>Agenda de la causa</h3>
+        </div>
+        <button class="btn small primary" id="add-evento">+ Nuevo evento</button>
+      </div>
+      <div id="agenda-form-wrap" class="agenda-form-wrap ca-agenda-form-wrap" hidden></div>
+      <div id="agenda-list-wrap">${agendaListHtml(c)}</div>
     </div>
-    <div id="agenda-form-wrap" class="agenda-form-wrap" hidden></div>
-    <div id="agenda-list-wrap">${agendaListHtml(c)}</div>
   </div>
 
   <div class="dtab-content active" data-tab="editar">
@@ -8796,11 +9947,17 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content" data-tab="encargo-receptor">
-    <div class="agenda-toolbar">
-      <button class="btn small primary" id="add-encargo-receptor">+ Nuevo encargo</button>
+    <div class="er-shell">
+      <div class="er-header">
+        <div>
+          <div class="er-kicker">Diligencias</div>
+          <h3>Encargo receptor</h3>
+        </div>
+        <button class="btn small primary" id="add-encargo-receptor">+ Nuevo encargo</button>
+      </div>
+      <div id="encargo-receptor-form-wrap" class="agenda-form-wrap er-form-wrap" hidden></div>
+      <div id="encargo-receptor-list-wrap">${encargosDeCausaListHtml(c)}</div>
     </div>
-    <div id="encargo-receptor-form-wrap" class="agenda-form-wrap" hidden></div>
-    <div id="encargo-receptor-list-wrap">${encargosDeCausaListHtml(c)}</div>
   </div>
 
   <div class="dtab-content" data-tab="exportar">
@@ -9343,16 +10500,59 @@ function renderRecordsList() {
   };
   const filtered = porBusqueda.filter(filtros[encargoFiltroTablero] || filtros.todos);
 
+  const total = porBusqueda.length;
+  const pendientes = porBusqueda.filter(filtros.pendientes).length;
+  const encargados = porBusqueda.filter(filtros.encargados).length;
+  const realizados = porBusqueda.filter(filtros.realizados).length;
+
   const botonesFiltro = [
     ['todos', 'Todos'],
-    ['pendientes', 'Pendientes de encargar'],
-    ['encargados', 'Encargados / pendientes del receptor'],
+    ['pendientes', 'Pendientes'],
+    ['encargados', 'Encargados'],
     ['realizados', 'Realizados']
-  ].map(([key, label]) => `<button class="btn small ${encargoFiltroTablero === key ? 'primary' : 'ghost'}" data-encargo-filtro="${key}" type="button">${label}</button>`).join(' ');
+  ].map(([key, label]) => `<button class="er-global-filter ${encargoFiltroTablero === key ? 'active' : ''}" data-encargo-filtro="${key}" type="button">${label}</button>`).join('');
 
-  let html = `<div class="section-title">Encargo receptor <span class="n">${filtered.length}</span></div>`;
-  html += `<div style="margin-bottom:14px; display:flex; gap:8px; flex-wrap:wrap;">${botonesFiltro}</div>`;
-  html += filtered.length ? `<div class="case-grid">${filtered.map(recordCardHtml).join('')}</div>` : `<div class="empty-msg">Sin registros${searchTerm ? ' que coincidan con la búsqueda' : ''}.</div>`;
+  const html = `
+    <div class="er-global-shell">
+      <section class="er-global-hero">
+        <div>
+          <div class="er-global-kicker">Diligencias</div>
+          <h2>Encargo receptor</h2>
+        </div>
+        <div class="er-global-total">${total}<span>registros</span></div>
+      </section>
+
+      <div class="er-global-stats">
+        <button class="er-global-stat ${encargoFiltroTablero === 'todos' ? 'active' : ''}" data-encargo-filtro="todos" type="button">
+          <span class="er-global-stat-num">${total}</span><span>Total</span>
+        </button>
+        <button class="er-global-stat er-global-stat-pending ${encargoFiltroTablero === 'pendientes' ? 'active' : ''}" data-encargo-filtro="pendientes" type="button">
+          <span class="er-global-stat-num">${pendientes}</span><span>Pendientes</span>
+        </button>
+        <button class="er-global-stat er-global-stat-assigned ${encargoFiltroTablero === 'encargados' ? 'active' : ''}" data-encargo-filtro="encargados" type="button">
+          <span class="er-global-stat-num">${encargados}</span><span>Encargados</span>
+        </button>
+        <button class="er-global-stat er-global-stat-done ${encargoFiltroTablero === 'realizados' ? 'active' : ''}" data-encargo-filtro="realizados" type="button">
+          <span class="er-global-stat-num">${realizados}</span><span>Realizados</span>
+        </button>
+      </div>
+
+      <div class="er-global-filterbar">
+        <div class="er-global-filter-label">Estado</div>
+        <div class="er-global-filter-tabs">${botonesFiltro}</div>
+      </div>
+
+      <section class="er-global-results">
+        <div class="er-global-results-head">
+          <div><span class="er-global-kicker">Registros</span><h3>${encargoFiltroTablero === 'todos' ? 'Todos los encargos' : (encargoFiltroTablero === 'pendientes' ? 'Pendientes de encargar' : (encargoFiltroTablero === 'encargados' ? 'Encargados al receptor' : 'Diligencias realizadas'))}</h3></div>
+          <span class="er-global-results-count">${filtered.length}</span>
+        </div>
+        ${filtered.length
+          ? `<div class="case-grid er-global-list">${filtered.map(recordCardHtml).join('')}</div>`
+          : `<div class="er-global-empty"><span class="er-empty-check">✓</span><span>${searchTerm ? 'Sin registros que coincidan con la búsqueda' : 'Sin registros en este estado'}</span></div>`}
+      </section>
+    </div>`;
+
   const container = document.getElementById('list-container');
   container.innerHTML = html;
   container.querySelectorAll('.case-card[data-rid]').forEach(el => el.addEventListener('click', () => openRecordDetail(el.dataset.rid)));
@@ -9672,30 +10872,70 @@ function emptyRecordParaCausa(c) {
 
 function encargosDeCausaListHtml(c) {
   const items = ENCARGOS.filter(e => e.causaId === c.id);
-  if (items.length === 0) {
-    return '<div class="empty-msg" style="margin-top:10px;">Aún no hay encargos receptor registrados para esta causa.</div>';
-  }
+  const pendientes = items.filter(e => (e.estadoGestion || 'Pendiente de encargo') === 'Pendiente de encargo').length;
+  const encargados = items.filter(e => e.estadoGestion === 'Encargado').length;
+  const realizados = items.filter(e => e.estadoGestion === 'Realizado').length;
   const orden = { 'Pendiente de encargo': 0, 'Encargado': 1, 'Realizado': 2 };
   const ordenados = items.slice().sort((a, b) => (orden[a.estadoGestion] ?? 9) - (orden[b.estadoGestion] ?? 9));
-  return `<div class="case-grid">${ordenados.map(recordCardHtml).join('')}</div>`;
+
+  return `
+    <div class="er-overview">
+      <div class="er-stat"><span class="er-stat-num">${items.length}</span><span class="er-stat-label">Total</span></div>
+      <div class="er-stat er-stat-pending"><span class="er-stat-num">${pendientes}</span><span class="er-stat-label">Pendientes</span></div>
+      <div class="er-stat er-stat-assigned"><span class="er-stat-num">${encargados}</span><span class="er-stat-label">Encargados</span></div>
+      <div class="er-stat er-stat-done"><span class="er-stat-num">${realizados}</span><span class="er-stat-label">Realizados</span></div>
+    </div>
+    ${items.length
+      ? `<div class="er-list-title"><span class="er-kicker">Registros</span><h4>Encargos de esta causa</h4></div><div class="case-grid er-case-grid">${ordenados.map(recordCardHtml).join('')}</div>`
+      : '<div class="er-empty"><span class="er-empty-check">✓</span><span>Sin encargos registrados</span></div>'}
+  `;
 }
 
 function encargoCausaFormHtml(rec, isNew) {
-  const fieldsHtml = ENCARGO_FIELD_ROWS_CAUSA.map(([left, right]) => `
-    <div class="form-grid2">
-      ${encargoFieldHtml(left, rec)}
-      ${right ? encargoFieldHtml(right, rec) : '<div></div>'}
-    </div>`).join('');
+  const field = (key) => {
+    const def = ENCARGO_FIELDS_CAUSA.find(([k]) => k === key);
+    return def ? encargoFieldHtml(def, rec) : '';
+  };
   return `
-  <div class="agenda-form">
-    <div class="subhead" style="margin-top:0;">${isNew ? 'Nuevo encargo receptor' : 'Editar encargo receptor'}</div>
-    ${fieldsHtml}
-    <button class="btn ghost" id="buscar-receptor-turno" type="button">Buscar receptor sugerido según fecha de resolución y tribunal</button>
-    <div id="receptor-sugerido-wrap"></div>
-    <div style="display:flex; gap:8px; margin-top:6px;">
+  <div class="agenda-form er-form-card">
+    <div class="er-form-head">
+      <div>
+        <span class="er-kicker">${isNew ? 'Nuevo registro' : 'Registro existente'}</span>
+        <h3>${isNew ? 'Nuevo encargo receptor' : 'Editar encargo receptor'}</h3>
+      </div>
+    </div>
+
+    <section class="er-form-section">
+      <div class="er-form-section-title"><span class="er-kicker">Causa</span><strong>Antecedentes base</strong></div>
+      <div class="form-grid2">${field('materia')}${field('tribunal')}</div>
+      <div class="form-grid2">${field('rol')}${field('folio')}</div>
+      <div class="form-grid2">${field('patrocinadoNombre')}${field('contraparteNombre')}</div>
+    </section>
+
+    <section class="er-form-section">
+      <div class="er-form-section-title"><span class="er-kicker">Encargo</span><strong>Fechas y contenido</strong></div>
+      <div class="form-grid2">${field('fechaResolucion')}${field('fechaEncargo')}</div>
+      <div class="form-grid2">${field('descripcionEncargo')}${field('observaciones')}</div>
+    </section>
+
+    <section class="er-form-section">
+      <div class="er-form-section-title"><span class="er-kicker">Seguimiento</span><strong>Estado y resultado</strong></div>
+      <div class="form-grid2">${field('estadoGestion')}${field('resultadoDiligencia')}</div>
+      <div class="form-grid2">${field('fechaRealizacion')}<div></div></div>
+    </section>
+
+    <section class="er-form-section er-form-receptor">
+      <div class="er-form-section-title"><span class="er-kicker">Receptor</span><strong>Asignación y contacto</strong></div>
+      <div class="form-grid2">${field('receptorTurnoNombre')}${field('telefonoReceptor')}</div>
+      <div class="form-grid2">${field('domicilioReceptor')}${field('correoReceptor')}</div>
+      <button class="btn ghost er-search-receptor" id="buscar-receptor-turno" type="button">Buscar receptor sugerido</button>
+      <div id="receptor-sugerido-wrap"></div>
+    </section>
+
+    <div class="er-form-actions">
       <button class="btn primary" id="erf-save" type="button">Guardar encargo</button>
       <button class="btn ghost" id="erf-cancel" type="button">Cancelar</button>
-      ${!isNew ? `<button class="btn danger" id="erf-delete" type="button" style="margin-left:auto;">Eliminar</button>` : ''}
+      ${!isNew ? `<button class="btn danger er-delete" id="erf-delete" type="button">Eliminar</button>` : ''}
     </div>
   </div>`;
 }
@@ -9911,6 +11151,7 @@ function wireTopLevelUI() {
 // BOOTSTRAP
 // ============================================================================
 export async function initApp() {
+  aplicarBrandingPracticaJuris();
   wireAuthUI();
   wireTopLevelUI();
   switchAuthForm('login');

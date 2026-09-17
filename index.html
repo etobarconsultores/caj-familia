@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Práctica Juris · Gestión de Causas</title>
+<title>Panel de Causas — CAJ Lo Prado</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
@@ -17,9 +17,9 @@
 <!-- ============ PANTALLA DE AUTENTICACIÓN ============ -->
 <div id="auth-screen" class="auth-screen" hidden>
   <div class="auth-card">
-    <span class="mark">PRÁCTICA JURIS</span>
+    <span class="mark">Expediente digital</span>
     <h1 id="auth-title">Iniciar sesión</h1>
-    <div class="sub" id="auth-sub">CAJ · Área Civil</div>
+    <div class="sub" id="auth-sub">CAJ Lo Prado · Área Civil</div>
 
     <form class="auth-form" id="form-login">
       <div>
@@ -47,33 +47,6 @@
         <label>Contraseña (mínimo 6 caracteres)</label>
         <input type="password" id="register-password" required minlength="6" autocomplete="new-password">
       </div>
-
-      <div class="auth-legal-consent" style="margin-top:4px; display:grid; gap:10px; font-size:12px; line-height:1.45;">
-        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="register-accept-terms" required style="margin-top:3px; flex:0 0 auto;">
-          <span>
-            He leído y acepto los
-            <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer">Términos y Condiciones de Uso de Práctica Juris</a>.
-          </span>
-        </label>
-
-        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="register-ack-privacy" required style="margin-top:3px; flex:0 0 auto;">
-          <span>
-            Declaro haber leído y comprendido la
-            <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer">Política de Privacidad de Práctica Juris</a>.
-          </span>
-        </label>
-
-        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="register-ack-security" required style="margin-top:3px; flex:0 0 auto;">
-          <span>
-            Declaro haber leído y comprendido la
-            <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer">Política de Seguridad y Protección de Datos de Práctica Juris</a>.
-          </span>
-        </label>
-      </div>
-
       <div class="auth-error" id="register-error"></div>
       <div class="auth-success" id="register-success"></div>
       <button type="submit" class="btn primary">Crear cuenta</button>
@@ -92,14 +65,6 @@
     <div class="auth-switch" id="auth-switch">
       ¿No tienes cuenta? <a id="link-to-register">Regístrate</a><br>
       <a id="link-to-forgot" style="display:inline-block; margin-top:8px;">¿Olvidaste tu contraseña?</a>
-    </div>
-
-    <div class="auth-legal-links" style="margin-top:16px; font-size:12px; line-height:1.6; color:#7a8491; text-align:center;">
-      <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer">Términos y Condiciones</a>
-      <span> · </span>
-      <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer">Política de Privacidad</a>
-      <span> · </span>
-      <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer">Política de Seguridad</a>
     </div>
   </div>
 </div>
@@ -137,15 +102,14 @@
     <button class="menu-toggle" id="menu-toggle">☰ Carpetas</button>
     <span class="org-module-chip" id="org-module-chip" hidden></span>
     <button class="btn small ghost" id="btn-cambiar-modulo" hidden>Cambiar módulo</button>
-    <button class="avatar-btn" id="avatar-btn" type="button" role="button" tabindex="0" title="Cuenta"><span id="avatar-inicial"></span></button>
   </div>
 
   <div class="shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <span class="mark">PRÁCTICA JURIS</span>
-        <h1>Gestión de Causas</h1>
-        <div class="sub">CAJ · Área Civil</div>
+        <span class="mark">Expediente digital</span>
+        <h1>Panel de Causas</h1>
+        <div class="sub">CAJ Lo Prado · Área Civil</div>
       </div>
 
       <div class="tabs" id="tabs-container">
@@ -184,8 +148,9 @@
       <div class="top-row">
         <div class="search-wrap">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="search" id="search" name="practicajuris-case-search" placeholder="Buscar por nombre, RUT, ROL o materia" autocomplete="off" autocapitalize="off" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')">
+          <input type="text" id="search" placeholder="Buscar por nombre, RUT, ROL o materia…">
         </div>
+        <button class="avatar-btn" id="avatar-btn" type="button" role="button" tabindex="0" title="Cuenta"><span id="avatar-inicial"></span></button>
       </div>
 
       <div class="stats-row" id="stats-row">
