@@ -47,6 +47,24 @@
         <label>Contraseña (mínimo 6 caracteres)</label>
         <input type="password" id="register-password" required minlength="6" autocomplete="new-password">
       </div>
+
+      <div class="register-legal-checks" style="display:grid; gap:10px; margin:4px 0 2px; font-size:12px; line-height:1.45; color:var(--ink-dim);">
+        <label style="display:flex; align-items:flex-start; gap:8px; text-transform:none; letter-spacing:0; cursor:pointer; margin:0;">
+          <input type="checkbox" id="register-accept-terms" style="width:15px; height:15px; min-width:15px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+          <span>He leído y acepto los <a href="/legal/terminos.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Términos y Condiciones de Uso</a>.</span>
+        </label>
+
+        <label style="display:flex; align-items:flex-start; gap:8px; text-transform:none; letter-spacing:0; cursor:pointer; margin:0;">
+          <input type="checkbox" id="register-ack-privacy" style="width:15px; height:15px; min-width:15px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+          <span>Declaro haber leído y comprendido la <a href="/legal/privacidad.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Política de Privacidad</a>.</span>
+        </label>
+
+        <label style="display:flex; align-items:flex-start; gap:8px; text-transform:none; letter-spacing:0; cursor:pointer; margin:0;">
+          <input type="checkbox" id="register-ack-security" style="width:15px; height:15px; min-width:15px; margin:2px 0 0; padding:0; accent-color:var(--brass);">
+          <span>Declaro haber leído y comprendido la <a href="/legal/seguridad.html" target="_blank" rel="noopener noreferrer" style="color:var(--brass); text-decoration:underline;">Política de Seguridad y Protección de Datos</a>.</span>
+        </label>
+      </div>
+
       <div class="auth-error" id="register-error"></div>
       <div class="auth-success" id="register-success"></div>
       <button type="submit" class="btn primary">Crear cuenta</button>
