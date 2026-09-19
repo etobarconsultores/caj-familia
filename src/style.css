@@ -521,7 +521,7 @@ body{
 .toast{
   position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
   background:var(--brass); color:#1a1a1a; padding:10px 20px; border-radius:5px;
-  font-size:13px; font-weight:500; z-index:200; opacity:0; pointer-events:none; transition:opacity .2s ease;
+  font-size:13px; font-weight:500; z-index:1200; opacity:0; pointer-events:none; transition:opacity .2s ease;
 }
 .toast.show{ opacity:1; }
 

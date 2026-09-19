@@ -25,6 +25,7 @@ let RECEPTORES = [];
 let TURNOS = [];
 let REVISIONES_SALA = [];
 let TUTORES_PRACTICA = [];
+let CURRENT_PRACTICA = null;
 let GOOGLE_STATUS = { conectado: false };
 let MODULE_ACCESOS = [];
 let CURRENT_ORG_MODULE = null;
@@ -122,6 +123,17 @@ function toast(msg) {
 function escapeHtml(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
+
+function etiquetaCajPractica(cajAsignado) {
+  const caj = String(cajAsignado || '').trim();
+  return caj ? `CAJ ${caj} · Área Civil` : 'CAJ · Área Civil';
+}
+
+function actualizarEtiquetaCajPractica(cajAsignado = CURRENT_PRACTICA?.cajAsignado) {
+  const label = etiquetaCajPractica(cajAsignado);
+  const sidebar = document.getElementById('practica-caj-label');
+  if (sidebar) sidebar.textContent = label;
 }
 
 function daysUntil(dateStr) {
@@ -802,6 +814,8 @@ async function renderPracticaSeccion(cont) {
       api.fetchTutoresPractica(CURRENT_USER.id)
     ]);
     TUTORES_PRACTICA = tutores || [];
+    CURRENT_PRACTICA = practica || null;
+    actualizarEtiquetaCajPractica();
 
     sec.innerHTML = `
       <div><label>CAJ asignado</label><input type="text" class="ct-input" id="practica-caj" value="${escapeHtml(practica?.cajAsignado || '')}" placeholder="Ej.: Lo Prado"></div>
@@ -847,23 +861,34 @@ async function renderPracticaSeccion(cont) {
     btnGuardar.addEventListener('click', async () => {
       const cajAsignado = inputCaj.value.trim();
       const direccionCaj = inputDireccion.value.trim();
-      const fechaInicio = fechaDdMmYyyyAIso(inputInicio.value);
-      const fechaTermino = fechaDdMmYyyyAIso(inputTermino.value);
+      const inicioRaw = inputInicio.value.trim();
+      const terminoRaw = inputTermino.value.trim();
+      const fechaInicio = inicioRaw ? fechaDdMmYyyyAIso(inicioRaw) : null;
+      const fechaTermino = terminoRaw ? fechaDdMmYyyyAIso(terminoRaw) : null;
       const nombresTutores = Array.from(tutoresCampos.querySelectorAll('.practica-tutor-nombre')).map(i => i.value.trim());
 
-      if (!cajAsignado) { toast('Ingresa tu CAJ asignado.'); return; }
-      if (!direccionCaj) { toast('Ingresa la dirección de tu CAJ.'); return; }
-      if (!fechaInicio) { toast('La fecha de inicio debe tener formato DD-MM-AAAA.'); return; }
-      if (!fechaTermino) { toast('La fecha de término debe tener formato DD-MM-AAAA.'); return; }
-      if (fechaTermino < fechaInicio) { toast('La fecha de término no puede ser anterior al inicio.'); return; }
+      // Los datos de práctica pueden completarse progresivamente. Solo se
+      // valida un campo opcional cuando la usuaria efectivamente lo informa.
+      if (inicioRaw && !fechaInicio) { toast('La fecha de inicio debe tener formato DD-MM-AAAA.'); return; }
+      if (terminoRaw && !fechaTermino) { toast('La fecha de término debe tener formato DD-MM-AAAA.'); return; }
+      if (fechaInicio && fechaTermino && fechaTermino < fechaInicio) { toast('La fecha de término no puede ser anterior al inicio.'); return; }
       if (nombresTutores.some(n => !n)) { toast('Completa el nombre de todos los tutores indicados.'); return; }
+
+      const hayAlgunDato = Boolean(
+        cajAsignado ||
+        direccionCaj ||
+        fechaInicio ||
+        fechaTermino ||
+        nombresTutores.length
+      );
+      if (!hayAlgunDato) { toast('Ingresa al menos un dato de práctica antes de guardar.'); return; }
 
       btnGuardar.disabled = true;
       try {
         const guardada = await api.savePracticaUsuaria(CURRENT_USER.id, {
           practicaId: practica?.id || null,
-          cajAsignado,
-          direccionCaj,
+          cajAsignado: cajAsignado || null,
+          direccionCaj: direccionCaj || null,
           fechaInicio,
           fechaTermino
         });
@@ -881,9 +906,16 @@ async function renderPracticaSeccion(cont) {
         }
 
         TUTORES_PRACTICA = await api.fetchTutoresPractica(CURRENT_USER.id);
+        CURRENT_PRACTICA = guardada || {
+          cajAsignado,
+          direccionCaj,
+          fechaInicio,
+          fechaTermino
+        };
+        actualizarEtiquetaCajPractica(CURRENT_PRACTICA.cajAsignado || cajAsignado);
         inputCaj.value = guardada.cajAsignado || cajAsignado;
-        inputInicio.value = fechaIsoADdMmYyyy(guardada.fechaInicio);
-        inputTermino.value = fechaIsoADdMmYyyy(guardada.fechaTermino);
+        inputInicio.value = fechaIsoADdMmYyyy(guardada.fechaInicio || '');
+        inputTermino.value = fechaIsoADdMmYyyy(guardada.fechaTermino || '');
         inputDireccion.value = guardada.direccionCaj || direccionCaj;
         inputCantidadTutores.value = String(TUTORES_PRACTICA.length);
         renderCamposTutores();
@@ -1851,6 +1883,21 @@ async function onSessionReady(session) {
   } catch (e) {
     console.error('No se pudo cargar la preferencia de apariencia:', e);
   }
+
+  // La identificación de la CAJ en el sidebar se obtiene de los datos de
+  // práctica de cada usuaria. Si aún no ha completado esa información, se
+  // muestra únicamente "CAJ · Área Civil".
+  if (PRACTICA_TABLAS_DISPONIBLES) {
+    try {
+      CURRENT_PRACTICA = await api.fetchPracticaUsuaria(CURRENT_USER.id);
+    } catch (e) {
+      console.error('No se pudo cargar el CAJ asignado para la etiqueta del sidebar:', e);
+      CURRENT_PRACTICA = null;
+    }
+  } else {
+    CURRENT_PRACTICA = null;
+  }
+  actualizarEtiquetaCajPractica();
 
   actualizarAvatar();
   actualizarVisibilidadTabReceptores();
@@ -11214,6 +11261,8 @@ export async function initApp() {
     } else {
       CAUSAS = [];
       ENCARGOS = [];
+      CURRENT_PRACTICA = null;
+      actualizarEtiquetaCajPractica();
       MODULE_ACCESOS = [];
       CURRENT_ORG_MODULE = null;
       borrarSeleccionModuloGuardada();
