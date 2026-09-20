@@ -14,10 +14,11 @@
     "googleapis": "^144.0.0",
     "jspdf": "^2.5.2",
     "pdfjs-dist": "^3.11.174",
+    "pizzip": "^3.1.8",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "vite": "^5.4.8",
-    "rollup": "npm:@rollup/wasm-node@4.62.5"
+    "rollup": "npm:@rollup/wasm-node@4.62.5",
+    "vite": "^5.4.8"
   }
 }

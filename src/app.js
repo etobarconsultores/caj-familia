@@ -4,6 +4,10 @@ import { SAJ_APP_URL, PJUD_APP_URL, GMAIL_URL } from './config.js';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
+import { generarFormulario10Docx } from './lib/formulario10Docx.js';
+import { generarFormulario9Docx } from './lib/formulario9Docx.js';
+import { generarInformePracticaDocx } from './lib/informePracticaDocx.js';
+import { generarTraspasoCausasXlsx } from './lib/traspasoCausasXlsx.js';
 
 // ============================================================================
 // Estado
@@ -24,7 +28,36 @@ let ENCARGOS = [];
 let RECEPTORES = [];
 let TURNOS = [];
 let REVISIONES_SALA = [];
+let ALEGATOS_OYENTE = [];
 let TUTORES_PRACTICA = [];
+
+const INFORME_FINAL_SECCIONES_KEY = 'practicajuris_informe_final_secciones_abiertas';
+
+function cargarSeccionesInformeFinalAbiertas() {
+  try {
+    const raw = sessionStorage.getItem(INFORME_FINAL_SECCIONES_KEY);
+    const ids = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function guardarSeccionesInformeFinalAbiertas() {
+  try {
+    sessionStorage.setItem(
+      INFORME_FINAL_SECCIONES_KEY,
+      JSON.stringify(Array.from(INFORME_FINAL_SECCIONES_ABIERTAS))
+    );
+  } catch {}
+}
+
+let INFORME_FINAL_SECCIONES_ABIERTAS = cargarSeccionesInformeFinalAbiertas();
+
+let INFORME_FINAL_ASISTENCIA_CACHE = {
+  practicaId: null,
+  registros: null
+};
 let CURRENT_PRACTICA = null;
 let GOOGLE_STATUS = { conectado: false };
 let MODULE_ACCESOS = [];
@@ -818,10 +851,34 @@ async function renderPracticaSeccion(cont) {
     actualizarEtiquetaCajPractica();
 
     sec.innerHTML = `
+      <div><label>RUN del postulante</label><input type="text" class="ct-input" id="practica-rut" value="${escapeHtml(practica?.postulanteRut || '')}" placeholder="Ej.: 12.345.678-9"></div>
       <div><label>CAJ asignado</label><input type="text" class="ct-input" id="practica-caj" value="${escapeHtml(practica?.cajAsignado || '')}" placeholder="Ej.: Lo Prado"></div>
       <div><label>Dirección de CAJ</label><input type="text" class="ct-input" id="practica-direccion" value="${escapeHtml(practica?.direccionCaj || '')}"></div>
+      <div><label>Abogado/a jefe de la unidad</label><input type="text" class="ct-input" id="practica-abogado-jefe" value="${escapeHtml(practica?.abogadoJefe || '')}" placeholder="Nombre completo"></div>
       <div><label>Inicio de práctica</label><input type="text" class="ct-input" id="practica-inicio" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaInicio || ''))}"></div>
       <div><label>Término de práctica</label><input type="text" class="ct-input" id="practica-termino" inputmode="numeric" placeholder="DD-MM-AAAA" maxlength="10" value="${escapeHtml(fechaIsoADdMmYyyy(practica?.fechaTermino || ''))}"></div>
+
+      <div class="practica-jornada-config">
+        <div class="subhead" style="margin:0 0 10px;">Jornada de práctica definida</div>
+        <div>
+          <label>Modalidad de permanencia</label>
+          <select class="ct-input" id="practica-permanencia-modalidad">
+            <option value="" ${!practica?.modalidadPermanencia ? 'selected' : ''}>Sin definir</option>
+            <option value="presencial" ${practica?.modalidadPermanencia === 'presencial' ? 'selected' : ''}>Con permanencia presencial</option>
+            <option value="sin_permanencia" ${practica?.modalidadPermanencia === 'sin_permanencia' ? 'selected' : ''}>Sin permanencia presencial / tramitación online</option>
+          </select>
+        </div>
+        <div class="practica-jornada-dias" id="practica-permanencia-dias">
+          ${[
+            [1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes']
+          ].map(([v, l]) => `<label class="practica-dia-check"><input type="checkbox" value="${v}" ${(practica?.diasPermanencia || []).includes(v) ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+        </div>
+        <div class="practica-jornada-horas">
+          <div><label>Hora de inicio</label><input type="time" class="ct-input" id="practica-permanencia-inicio" value="${escapeHtml(practica?.permanenciaHoraInicio || '')}"></div>
+          <div><label>Hora de término</label><input type="time" class="ct-input" id="practica-permanencia-termino" value="${escapeHtml(practica?.permanenciaHoraTermino || '')}"></div>
+        </div>
+        <div class="cuenta-muted practica-jornada-ayuda">Esta jornada se utilizará para precargar con X los días de permanencia dentro del calendario de asistencia del Informe Final.</div>
+      </div>
 
       <div style="border-top:1px solid var(--line); padding-top:14px; margin-top:14px;">
         <div class="subhead" style="margin:0 0 10px;">Tutores</div>
@@ -832,10 +889,16 @@ async function renderPracticaSeccion(cont) {
       <div style="margin-top:10px;"><button class="btn small primary" id="practica-guardar" type="button">Guardar datos de práctica</button></div>
     `;
 
+    const inputRut = sec.querySelector('#practica-rut');
     const inputCaj = sec.querySelector('#practica-caj');
     const inputDireccion = sec.querySelector('#practica-direccion');
+    const inputAbogadoJefe = sec.querySelector('#practica-abogado-jefe');
     const inputInicio = sec.querySelector('#practica-inicio');
     const inputTermino = sec.querySelector('#practica-termino');
+    const inputModalidadPermanencia = sec.querySelector('#practica-permanencia-modalidad');
+    const permanenciaDiasWrap = sec.querySelector('#practica-permanencia-dias');
+    const inputPermanenciaInicio = sec.querySelector('#practica-permanencia-inicio');
+    const inputPermanenciaTermino = sec.querySelector('#practica-permanencia-termino');
     const inputCantidadTutores = sec.querySelector('#practica-tutores-cantidad');
     const tutoresCampos = sec.querySelector('#practica-tutores-campos');
     const btnGuardar = sec.querySelector('#practica-guardar');
@@ -858,13 +921,30 @@ async function renderPracticaSeccion(cont) {
     renderCamposTutores();
     inputCantidadTutores.addEventListener('input', renderCamposTutores);
 
+    function actualizarControlesPermanencia() {
+      const presencial = inputModalidadPermanencia.value === 'presencial';
+      permanenciaDiasWrap.querySelectorAll('input[type="checkbox"]').forEach(ch => { ch.disabled = !presencial; });
+      inputPermanenciaInicio.disabled = !presencial;
+      inputPermanenciaTermino.disabled = !presencial;
+    }
+    actualizarControlesPermanencia();
+    inputModalidadPermanencia.addEventListener('change', actualizarControlesPermanencia);
+
     btnGuardar.addEventListener('click', async () => {
+      const postulanteRut = inputRut.value.trim();
       const cajAsignado = inputCaj.value.trim();
       const direccionCaj = inputDireccion.value.trim();
+      const abogadoJefe = inputAbogadoJefe.value.trim();
       const inicioRaw = inputInicio.value.trim();
       const terminoRaw = inputTermino.value.trim();
       const fechaInicio = inicioRaw ? fechaDdMmYyyyAIso(inicioRaw) : null;
       const fechaTermino = terminoRaw ? fechaDdMmYyyyAIso(terminoRaw) : null;
+      const modalidadPermanencia = inputModalidadPermanencia.value || null;
+      const diasPermanencia = modalidadPermanencia === 'presencial'
+        ? Array.from(permanenciaDiasWrap.querySelectorAll('input[type="checkbox"]:checked')).map(ch => Number(ch.value)).sort((a, b) => a - b)
+        : [];
+      const permanenciaHoraInicio = modalidadPermanencia === 'presencial' ? (inputPermanenciaInicio.value || null) : null;
+      const permanenciaHoraTermino = modalidadPermanencia === 'presencial' ? (inputPermanenciaTermino.value || null) : null;
       const nombresTutores = Array.from(tutoresCampos.querySelectorAll('.practica-tutor-nombre')).map(i => i.value.trim());
 
       // Los datos de práctica pueden completarse progresivamente. Solo se
@@ -872,13 +952,19 @@ async function renderPracticaSeccion(cont) {
       if (inicioRaw && !fechaInicio) { toast('La fecha de inicio debe tener formato DD-MM-AAAA.'); return; }
       if (terminoRaw && !fechaTermino) { toast('La fecha de término debe tener formato DD-MM-AAAA.'); return; }
       if (fechaInicio && fechaTermino && fechaTermino < fechaInicio) { toast('La fecha de término no puede ser anterior al inicio.'); return; }
+      if (modalidadPermanencia === 'presencial' && diasPermanencia.length === 0) { toast('Selecciona al menos un día de permanencia presencial.'); return; }
+      if (modalidadPermanencia === 'presencial' && (!permanenciaHoraInicio || !permanenciaHoraTermino)) { toast('Indica el horario de inicio y término de la permanencia presencial.'); return; }
+      if (modalidadPermanencia === 'presencial' && permanenciaHoraTermino <= permanenciaHoraInicio) { toast('La hora de término debe ser posterior a la hora de inicio.'); return; }
       if (nombresTutores.some(n => !n)) { toast('Completa el nombre de todos los tutores indicados.'); return; }
 
       const hayAlgunDato = Boolean(
+        postulanteRut ||
         cajAsignado ||
         direccionCaj ||
+        abogadoJefe ||
         fechaInicio ||
         fechaTermino ||
+        modalidadPermanencia ||
         nombresTutores.length
       );
       if (!hayAlgunDato) { toast('Ingresa al menos un dato de práctica antes de guardar.'); return; }
@@ -886,11 +972,17 @@ async function renderPracticaSeccion(cont) {
       btnGuardar.disabled = true;
       try {
         const guardada = await api.savePracticaUsuaria(CURRENT_USER.id, {
-          practicaId: practica?.id || null,
+          practicaId: CURRENT_PRACTICA?.id || practica?.id || null,
+          postulanteRut: postulanteRut || null,
           cajAsignado: cajAsignado || null,
           direccionCaj: direccionCaj || null,
+          abogadoJefe: abogadoJefe || null,
           fechaInicio,
-          fechaTermino
+          fechaTermino,
+          modalidadPermanencia,
+          diasPermanencia,
+          permanenciaHoraInicio,
+          permanenciaHoraTermino
         });
 
         for (let i = 0; i < nombresTutores.length; i++) {
@@ -906,17 +998,40 @@ async function renderPracticaSeccion(cont) {
         }
 
         TUTORES_PRACTICA = await api.fetchTutoresPractica(CURRENT_USER.id);
+        const practicaAnteriorId = CURRENT_PRACTICA?.id || null;
         CURRENT_PRACTICA = guardada || {
+          postulanteRut,
           cajAsignado,
           direccionCaj,
+          abogadoJefe,
           fechaInicio,
-          fechaTermino
+          fechaTermino,
+          modalidadPermanencia,
+          diasPermanencia,
+          permanenciaHoraInicio,
+          permanenciaHoraTermino
         };
+        if (
+          practicaAnteriorId !== CURRENT_PRACTICA?.id ||
+          CURRENT_PRACTICA?.fechaInicio !== fechaInicio ||
+          CURRENT_PRACTICA?.fechaTermino !== fechaTermino
+        ) {
+          INFORME_FINAL_ASISTENCIA_CACHE = { practicaId: null, registros: null };
+        }
         actualizarEtiquetaCajPractica(CURRENT_PRACTICA.cajAsignado || cajAsignado);
-        inputCaj.value = guardada.cajAsignado || cajAsignado;
-        inputInicio.value = fechaIsoADdMmYyyy(guardada.fechaInicio || '');
-        inputTermino.value = fechaIsoADdMmYyyy(guardada.fechaTermino || '');
-        inputDireccion.value = guardada.direccionCaj || direccionCaj;
+        inputRut.value = guardada?.postulanteRut || postulanteRut;
+        inputCaj.value = guardada?.cajAsignado || cajAsignado;
+        inputInicio.value = fechaIsoADdMmYyyy(guardada?.fechaInicio || '');
+        inputTermino.value = fechaIsoADdMmYyyy(guardada?.fechaTermino || '');
+        inputDireccion.value = guardada?.direccionCaj || direccionCaj;
+        inputAbogadoJefe.value = guardada?.abogadoJefe || abogadoJefe;
+        inputModalidadPermanencia.value = guardada?.modalidadPermanencia || modalidadPermanencia || '';
+        permanenciaDiasWrap.querySelectorAll('input[type="checkbox"]').forEach(ch => {
+          ch.checked = (guardada?.diasPermanencia || diasPermanencia || []).includes(Number(ch.value));
+        });
+        inputPermanenciaInicio.value = guardada?.permanenciaHoraInicio || permanenciaHoraInicio || '';
+        inputPermanenciaTermino.value = guardada?.permanenciaHoraTermino || permanenciaHoraTermino || '';
+        actualizarControlesPermanencia();
         inputCantidadTutores.value = String(TUTORES_PRACTICA.length);
         renderCamposTutores();
         toast('Datos de práctica actualizados correctamente');
@@ -2061,10 +2176,17 @@ async function loadAll() {
   document.getElementById('list-container').innerHTML = '<div class="loading-note">Cargando causas…</div>';
 
   const resultados = await Promise.allSettled([
-    api.fetchCausas(), api.fetchEncargos(), api.fetchReceptores(), api.fetchTurnos(), api.fetchRevisionesSala(), api.fetchTutoresPractica(CURRENT_USER.id), api.googleGetStatus()
+    api.fetchCausas(),
+    api.fetchEncargos(),
+    api.fetchReceptores(),
+    api.fetchTurnos(),
+    api.fetchRevisionesSala(),
+    api.fetchAlegatosOyente(CURRENT_USER.id, CURRENT_PRACTICA?.id || null),
+    api.fetchTutoresPractica(CURRENT_USER.id),
+    api.googleGetStatus()
   ]);
-  const [rCausas, rEncargos, rReceptores, rTurnos, rRevisionesSala, rTutoresPractica, rGoogleStatus] = resultados;
-  const nombres = ['causas', 'encargos', 'receptores', 'turnos', 'revisiones de sala', 'tutores de práctica', 'estado de Google Calendar'];
+  const [rCausas, rEncargos, rReceptores, rTurnos, rRevisionesSala, rAlegatosOyente, rTutoresPractica, rGoogleStatus] = resultados;
+  const nombres = ['causas', 'encargos', 'receptores', 'turnos', 'revisiones de sala', 'alegatos como oyente', 'tutores de práctica', 'estado de Google Calendar'];
 
   resultados.forEach((r, i) => {
     if (r.status === 'rejected') console.error(`No se pudo cargar "${nombres[i]}":`, r.reason);
@@ -2075,6 +2197,7 @@ async function loadAll() {
   RECEPTORES = rReceptores.status === 'fulfilled' ? rReceptores.value : [];
   TURNOS = rTurnos.status === 'fulfilled' ? rTurnos.value : [];
   REVISIONES_SALA = rRevisionesSala.status === 'fulfilled' ? rRevisionesSala.value : [];
+  ALEGATOS_OYENTE = rAlegatosOyente.status === 'fulfilled' ? rAlegatosOyente.value : [];
   TUTORES_PRACTICA = rTutoresPractica.status === 'fulfilled' ? rTutoresPractica.value : [];
   GOOGLE_STATUS = rGoogleStatus.status === 'fulfilled' && rGoogleStatus.value ? rGoogleStatus.value : { conectado: false };
 
@@ -2082,7 +2205,7 @@ async function loadAll() {
     document.getElementById('list-container').innerHTML = `<div class="empty-msg">No se pudieron cargar tus causas: ${escapeHtml(rCausas.reason?.message || 'error desconocido')}</div>`;
     return;
   }
-  if (resultados.slice(0, 6).some(r => r.status === 'rejected')) {
+  if (resultados.slice(0, 7).some(r => r.status === 'rejected')) {
     toast('Algunos datos secundarios no se pudieron cargar. Tus causas sí se cargaron correctamente.');
   }
   render();
@@ -3564,7 +3687,11 @@ function buildFichaData(c) {
     rows: proximosEventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.horaInicio || '', eventoTituloEfectivo(e), e.estado])
   });
 
-  if (c.driveFolderUrl) sections.push({ title: 'Documentación', kind: 'link', label: 'Carpeta de Google Drive', url: c.driveFolderUrl });
+  const carpetasDocumentacion = [
+    c.driveFolderUrl ? ['Carpeta en Google Drive', c.driveFolderUrl] : null,
+    c.cajVirtualFolderUrl ? ['Carpeta CAJ Virtual', c.cajVirtualFolderUrl] : null
+  ].filter(Boolean);
+  if (carpetasDocumentacion.length) sections.push({ title: 'Documentación', kind: 'links', rows: carpetasDocumentacion });
 
   return {
     brand: 'Práctica Juris · Gestión de Causas',
@@ -3589,6 +3716,10 @@ function renderFichaHtml(data) {
       const tbody = sec.rows.map(r => `<tr>${r.map(cell => `<td>${escapeHtml(String(cell || ''))}</td>`).join('')}</tr>`).join('');
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
     }
+    if (sec.kind === 'links') {
+      const rows = sec.rows.map(([label, url]) => `<tr><td class="ficha-k">${escapeHtml(label)}</td><td class="ficha-v"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></td></tr>`).join('');
+      return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody>${rows}</tbody></table></div>`;
+    }
     if (sec.kind === 'link') {
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody><tr><td class="ficha-k">${escapeHtml(sec.label)}</td><td class="ficha-v"><a href="${escapeHtml(sec.url)}" target="_blank" rel="noopener">${escapeHtml(sec.url)}</a></td></tr></tbody></table></div>`;
     }
@@ -3598,6 +3729,10 @@ function renderFichaHtml(data) {
   return `
   <div class="ficha-doc">
     <div class="ficha-header">
+      <div class="ficha-brand-row">
+        <img src="/assets/branding/practica-juris-logo-completo.png" alt="Práctica Juris" class="ficha-brand-logo" draggable="false">
+        <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="ficha-brand-isotipo" draggable="false">
+      </div>
       <div class="ficha-brand">${escapeHtml(data.brand)}</div>
       <h2>${escapeHtml(data.titulo)}</h2>
       <div class="ficha-meta">${escapeHtml(data.meta)}</div>
@@ -3628,6 +3763,7 @@ function estimateSectionHeight(sec) {
   if (sec.kind === 'kv') return 12 + sec.rows.length * 9;
   if (sec.kind === 'list') return 12 + sec.items.length * 7;
   if (sec.kind === 'table') return 12 + 8 + sec.rows.length * 6.5;
+  if (sec.kind === 'links') return 12 + (sec.rows?.length || 1) * 9;
   if (sec.kind === 'link') return 12 + 9;
   return 20;
 }
@@ -3729,6 +3865,7 @@ function crearEscritorPdf() {
     if (sec.kind === 'kv') drawKvRows(sec.rows);
     else if (sec.kind === 'list') drawList(sec.items);
     else if (sec.kind === 'table') drawTable(sec.headers, sec.widths, sec.rows);
+    else if (sec.kind === 'links') drawKvRows(sec.rows || []);
     else if (sec.kind === 'link') drawKvRows([[sec.label, sec.url]]);
   }
 
@@ -3749,11 +3886,37 @@ function crearEscritorPdf() {
   };
 }
 
-function renderFichaPdf(data) {
+async function cargarImagenDataUrl(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`No se pudo cargar ${url}`);
+  const blob = await resp.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function renderFichaPdf(data) {
   const w = crearEscritorPdf();
   const { pdf, margin, contentWidth } = w;
 
-  // Encabezado del documento (solo primera página)
+  // Encabezado del documento (solo primera página). Las imágenes son de la
+  // propia marca de la aplicación; si por cualquier motivo no cargan, el PDF
+  // sigue generándose con el encabezado textual.
+  try {
+    const [logo, isotipo] = await Promise.all([
+      cargarImagenDataUrl('/assets/branding/practica-juris-logo-completo.png'),
+      cargarImagenDataUrl('/assets/branding/practica-juris-isotipo.png')
+    ]);
+    pdf.addImage(logo, 'PNG', margin, w.y - 4, 46, 13);
+    pdf.addImage(isotipo, 'PNG', margin + contentWidth - 13, w.y - 4, 13, 13);
+    w.y += 16;
+  } catch (_) {
+    // Fallback silencioso: mantener el texto de marca.
+  }
+
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(110);
   pdf.text(data.brand, margin, w.y); w.y += 7;
 
@@ -3901,10 +4064,10 @@ function agendaCausaResumenHtml(c) {
   const semanaCount = activos.filter(e => e.fecha && e.fecha >= hoy && e.fecha <= limiteISO).length;
   const audiencias = proximos.filter(e => e.tipo === 'Audiencia').length;
   return `<div class="ca-agenda-stats">
-    <div class="ca-agenda-stat"><b>${proximos.length}</b><span>Próximos</span></div>
-    <div class="ca-agenda-stat"><b>${hoyCount}</b><span>Hoy</span></div>
-    <div class="ca-agenda-stat"><b>${semanaCount}</b><span>7 días</span></div>
-    <div class="ca-agenda-stat"><b>${audiencias}</b><span>Audiencias</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-next"><b>${proximos.length}</b><span>Próximos</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-today"><b>${hoyCount}</b><span>Hoy</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-week"><b>${semanaCount}</b><span>7 días</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-hearing"><b>${audiencias}</b><span>Audiencias</span></div>
   </div>`;
 }
 
@@ -4359,10 +4522,10 @@ function tituloAutomatico(c) {
 
 function emptyCausa() {
   return {
-    id: null, folio: null, categoria: 'nueva', subcategoria: null, tipoJuicio: null,
-    materia: null, etapa: null, bajEstado: null, recurso: null, rolIngreso: null, competencia: null,
+    id: null, folio: null, categoria: 'nueva', origenCarpeta: null, subcategoria: null, tipoJuicio: null,
+    materia: null, etapa: null, bajEstado: null, recurso: null, rolIngreso: null, competencia: null, corteNombre: null, parteCorte: null,
     rit: null, rol: null, tipoTribunal: null, numeroTribunal: null, ciudadTribunal: null, tribunal: null,
-    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null,
+    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null, cajVirtualFolderUrl: null,
     intervinientes: [], demandanteNombre: null, demandadoNombre: null, parteRepresentada: null,
     patrocinado: null, patrocinadoTipo: null, contraparteNombre: null, titulo: null
   };
@@ -4482,6 +4645,8 @@ function tipoPatrocinadoEfectivo(c) {
   return tipoPatrocinadoDesdeLegacy(c.parteRepresentada);
 }
 
+const JURISDICCION_CORTE_OPCIONES = ['C.A de Santiago', 'C.A de San Miguel', 'C.S de Santiago'];
+
 function antecedentesFormHtml(c) {
   const procedimientoCanon = procedimientoCanonico(c.subcategoria) || (c.subcategoria || null);
   const opcionesTipoJuicio = opcionesTipoJuicioParaProcedimiento(procedimientoCanon);
@@ -4511,14 +4676,24 @@ function antecedentesFormHtml(c) {
               <option value="terminada" ${c.categoria === 'terminada' ? 'selected' : ''}>Terminada</option>
             </select>
           </div>
+          <div>
+            <label>Origen de la carpeta</label>
+            <select id="af-origen-carpeta">
+              <option value="">Sin definir</option>
+              <option value="Nueva" ${c.origenCarpeta === 'Nueva' ? 'selected' : ''}>Nueva</option>
+              <option value="Traspasada" ${c.origenCarpeta === 'Traspasada' ? 'selected' : ''}>Traspasada</option>
+            </select>
+          </div>
           <div><label>Fecha ingreso causa</label><input type="date" id="af-fechaingreso" value="${escapeHtml(c.fechaIngreso || '')}"></div>
-          <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
         </div>
 
         <div class="form-grid4">
+          <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
           <div><label>Procedimiento</label><select id="af-procedimiento">${procedimientoOptionsHtml(procedimientoCanon)}</select></div>
           <div id="af-tipojuicio-wrap"><label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
           <div id="af-materia-wrap"><label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
+        </div>
+        <div class="form-grid4">
           <div><label>BAJ</label><select id="af-baj"><option value="">Sin definir</option>${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         </div>
       </div>
@@ -4530,7 +4705,6 @@ function antecedentesFormHtml(c) {
           <div class="af-section-kicker">Competencia</div>
           <div class="af-section-title">Tribunal y tramitación</div>
         </div>
-        <div class="af-section-note" id="af-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
       </div>
       <div class="af-section-body">
         <div class="form-grid4">
@@ -4567,6 +4741,26 @@ function antecedentesFormHtml(c) {
 
       </div>
       <div class="af-section-body">
+        ${!c.id ? `
+        <div class="form-grid2">
+          <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+          <div>
+            <label>RUT</label>
+            <div class="af-derived-value" id="af-patrocinado-rut-preview">Sin definir</div>
+          </div>
+          <div>
+            <label>Apellidos</label>
+            <input type="text" id="af-patrocinado-apellidos-nueva" value="" placeholder="Apellidos del patrocinado">
+          </div>
+          <div>
+            <label>Nombres</label>
+            <input type="text" id="af-patrocinado-nombres-nueva" value="" placeholder="Nombres del patrocinado">
+          </div>
+        </div>
+        <div class="af-preview-strip">
+          <div id="af-patrocinado-nombre-preview"><span>Nombre completo</span><strong>Sin definir</strong></div>
+        </div>
+        ` : `
         <div class="form-grid2">
           <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
           <div>
@@ -4574,10 +4768,7 @@ function antecedentesFormHtml(c) {
             <div class="af-derived-value" id="af-patrocinado-nombre-preview">${escapeHtml(nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoEfectivo(c), lista) || 'Sin definir')}</div>
           </div>
         </div>
-        <div class="af-preview-strip">
-          <div id="af-caratulado-preview"><span>Caratulado</span><strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
-          <div id="af-titulo-preview"><span>Título generado</span><strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
-        </div>
+        `}
       </div>
     </section>
 
@@ -4593,8 +4784,14 @@ function antecedentesFormHtml(c) {
         <div class="form-grid4">
           <div><label>Recurso</label><select id="af-recurso"><option value="">Sin definir</option>${RECURSO_OPCIONES.map(r => `<option value="${r}" ${c.recurso === r ? 'selected' : ''}>${r}</option>`).join('')}</select></div>
           <div><label>ROL ingreso Corte</label><input type="text" id="af-rolingreso" value="${escapeHtml(c.rolIngreso || '')}" placeholder="Ej: 9315-2025"></div>
-          <div><label>Competencia</label><select id="af-competencia"><option value="">Sin definir</option><option value="Corte de Apelaciones" ${c.competencia === 'Corte de Apelaciones' ? 'selected' : ''}>Corte de Apelaciones</option><option value="Corte Suprema" ${c.competencia === 'Corte Suprema' ? 'selected' : ''}>Corte Suprema</option></select></div>
-          <div></div>
+          <div>
+            <label>Jurisdicción</label>
+            <select id="af-corte-nombre">
+              <option value="">Sin definir</option>
+              ${JURISDICCION_CORTE_OPCIONES.map(j => `<option value="${j}" ${c.corteNombre === j ? 'selected' : ''}>${j}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>Parte</label><select id="af-parte-corte"><option value="">Sin definir</option><option value="Apelante/Recurrente" ${c.parteCorte === 'Apelante/Recurrente' ? 'selected' : ''}>Apelante/Recurrente</option><option value="Apelado/Recurrido" ${c.parteCorte === 'Apelado/Recurrido' ? 'selected' : ''}>Apelado/Recurrido</option></select></div>
         </div>
       </div>
     </section>
@@ -4615,8 +4812,13 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
   const rolInput = panel.querySelector('#af-rol').value.trim() || null;
   const numeroCivil = panel.querySelector('#af-tribunal-civil').value || null;
   const tipoPatrocinadoSel = panel.querySelector('#af-patrocinado-tipo').value || null;
-  const patrocinadoNombre = nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoSel, estadoIntervinientes);
+  const patrocinadoInterviniente = tipoPatrocinadoSel
+    ? estadoIntervinientes.find(i => i.tipoParte === tipoPatrocinadoSel)
+    : null;
+  const patrocinadoNombre = patrocinadoInterviniente?.nombre || null;
   const parteRepresentada = parteRepresentadaLegacyDesdeTipo(tipoPatrocinadoSel);
+  const apellidosNueva = panel.querySelector('#af-patrocinado-apellidos-nueva');
+  const nombresNueva = panel.querySelector('#af-patrocinado-nombres-nueva');
   const tipoJuicioEl = panel.querySelector('#af-tipojuicio');
   const materiaEl = panel.querySelector('#af-materia');
   const etapaEl = panel.querySelector('#af-etapa');
@@ -4624,6 +4826,7 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
     ...c,
     folio: panel.querySelector('#af-saj').value.trim() || null,
     categoria: panel.querySelector('#af-categoria').value,
+    origenCarpeta: panel.querySelector('#af-origen-carpeta').value || null,
     fechaIngreso: panel.querySelector('#af-fechaingreso').value || null,
     tutor: panel.querySelector('#af-tutor').value || null,
     subcategoria: procedimiento,
@@ -4638,10 +4841,17 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
     intervinientes: estadoIntervinientes.filter(i => i.nombre && i.tipoParte),
     patrocinado: patrocinadoNombre,
     patrocinadoTipo: tipoPatrocinadoSel || null,
+    patrocinadoApellidos: apellidosNueva ? (apellidosNueva.value.trim() || null) : (c.patrocinadoApellidos || null),
+    patrocinadoNombres: nombresNueva ? (nombresNueva.value.trim() || null) : (c.patrocinadoNombres || null),
+    rut: patrocinadoInterviniente?.rut || c.rut || null,
     parteRepresentada,
     recurso: panel.querySelector('#af-recurso').value || null,
     rolIngreso: panel.querySelector('#af-rolingreso').value.trim() || null,
-    competencia: panel.querySelector('#af-competencia').value || null
+    corteNombre: panel.querySelector('#af-corte-nombre').value || null,
+    competencia: panel.querySelector('#af-corte-nombre').value === 'C.S de Santiago'
+      ? 'Corte Suprema'
+      : (panel.querySelector('#af-corte-nombre').value ? 'Corte de Apelaciones' : null),
+    parteCorte: panel.querySelector('#af-parte-corte').value || null
   };
 }
 
@@ -4653,16 +4863,55 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   // (tabla nueva, o el respaldo demandante/demandado si aún no existe).
   let estadoIntervinientes = intervinientesEfectivos(c).map(i => ({ id: i.id, tipoParte: i.tipoParte, rut: i.rut || '', nombre: i.nombre }));
 
+  let ultimaSugerenciaPatrocinado = { apellidos: '', nombres: '', tipo: '' };
+
+  function sincronizarPatrocinadoNuevaCausa({ forzarPartes = false } = {}) {
+    if (!esNuevaCausa) return;
+
+    const tipo = form.querySelector('#af-patrocinado-tipo')?.value || '';
+    const seleccionado = tipo ? estadoIntervinientes.find(i => i.tipoParte === tipo) : null;
+    const rutPreview = form.querySelector('#af-patrocinado-rut-preview');
+    const nombrePreview = form.querySelector('#af-patrocinado-nombre-preview');
+    const apellidosInput = form.querySelector('#af-patrocinado-apellidos-nueva');
+    const nombresInput = form.querySelector('#af-patrocinado-nombres-nueva');
+
+    const nombreCompleto = seleccionado?.nombre || '';
+    const rut = seleccionado?.rut || '';
+    const sugerencia = sugerirPartesNombrePatrocinadoF9(nombreCompleto);
+
+    if (rutPreview) rutPreview.textContent = rut || 'Sin definir';
+    if (nombrePreview) {
+      nombrePreview.innerHTML = `<span>Nombre completo</span><strong>${escapeHtml(nombreCompleto || 'Sin definir')}</strong>`;
+    }
+
+    if (apellidosInput && nombresInput) {
+      const puedeActualizar =
+        forzarPartes ||
+        !apellidosInput.value.trim() ||
+        !nombresInput.value.trim() ||
+        (
+          apellidosInput.value.trim() === ultimaSugerenciaPatrocinado.apellidos &&
+          nombresInput.value.trim() === ultimaSugerenciaPatrocinado.nombres
+        );
+
+      if (puedeActualizar) {
+        apellidosInput.value = sugerencia.apellidos || '';
+        nombresInput.value = sugerencia.nombres || '';
+      }
+    }
+
+    ultimaSugerenciaPatrocinado = {
+      apellidos: sugerencia.apellidos || '',
+      nombres: sugerencia.nombres || '',
+      tipo
+    };
+  }
+
   function refreshPreviews() {
+    sincronizarPatrocinadoNuevaCausa();
     const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
-    const tribunalPreview = form.querySelector('#af-tribunal-preview');
-    if (tribunalPreview) tribunalPreview.innerHTML = `Se mostrará como: <strong>${escapeHtml(tribunalTexto(snap) || 'Sin definir')}</strong>`;
-    const caratuladoPreview = form.querySelector('#af-caratulado-preview');
-    if (caratuladoPreview) caratuladoPreview.innerHTML = `Caratulado: <strong>${escapeHtml(caratuladoTexto(snap) || 'Sin definir')}</strong>`;
-    const tituloPreview = form.querySelector('#af-titulo-preview');
-    if (tituloPreview) tituloPreview.innerHTML = `Título generado: <strong>${escapeHtml(tituloAutomatico(snap) || 'Sin definir')}</strong>`;
     const patrocinadoPreview = form.querySelector('#af-patrocinado-nombre-preview');
-    if (patrocinadoPreview) patrocinadoPreview.textContent = snap.patrocinado || 'Sin definir';
+    if (patrocinadoPreview && !esNuevaCausa) patrocinadoPreview.textContent = snap.patrocinado || 'Sin definir';
   }
 
   function renderIntervinientes() {
@@ -4729,19 +4978,30 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   // Patrocinado (el nombre se deriva, no se digita — se refresca junto con
   // el resto de las vistas previas al cambiar el tipo o los intervinientes)
   const patrocinadoTipoSel = form.querySelector('#af-patrocinado-tipo');
-  if (patrocinadoTipoSel) patrocinadoTipoSel.addEventListener('input', refreshPreviews);
+  if (patrocinadoTipoSel) patrocinadoTipoSel.addEventListener('input', () => {
+    sincronizarPatrocinadoNuevaCausa({ forzarPartes: true });
+    refreshPreviews();
+  });
+  sincronizarPatrocinadoNuevaCausa();
 
   form.querySelector('#af-save').addEventListener('click', async () => {
     const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
     const patch = {
-      folio: snap.folio, categoria: snap.categoria, fechaIngreso: snap.fechaIngreso, tutor: snap.tutor,
+      folio: snap.folio, categoria: snap.categoria, origenCarpeta: snap.origenCarpeta, fechaIngreso: snap.fechaIngreso, tutor: snap.tutor,
       subcategoria: snap.subcategoria, tipoJuicio: snap.tipoJuicio, materia: snap.materia, bajEstado: snap.bajEstado,
       rit: snap.rit, rol: snap.rol, tipoTribunal: snap.tipoTribunal, numeroTribunal: snap.numeroTribunal, ciudadTribunal: snap.ciudadTribunal,
-      etapa: snap.etapa, patrocinado: snap.patrocinado, patrocinadoTipo: snap.patrocinadoTipo, parteRepresentada: snap.parteRepresentada,
+      etapa: snap.etapa, patrocinado: snap.patrocinado, patrocinadoTipo: snap.patrocinadoTipo,
+      patrocinadoApellidos: snap.patrocinadoApellidos, patrocinadoNombres: snap.patrocinadoNombres,
+      rut: snap.rut, parteRepresentada: snap.parteRepresentada,
       recurso: snap.recurso, rolIngreso: snap.rolIngreso, competencia: snap.competencia,
+      corteNombre: snap.corteNombre, parteCorte: snap.parteCorte,
       titulo: tituloAutomatico(snap) || null
     };
     const intervinientesValidos = estadoIntervinientes.filter(i => i.nombre && i.tipoParte);
+    if (esNuevaCausa && snap.patrocinadoTipo && (!snap.patrocinadoApellidos || !snap.patrocinadoNombres)) {
+      toast('Completa apellidos y nombres del patrocinado antes de guardar la causa.');
+      return;
+    }
     try {
       if (esNuevaCausa) {
         const nueva = await api.createCausa(CURRENT_USER.id, patch);
@@ -5221,6 +5481,7 @@ function salaCardHtml(c) {
       <div class="ps-meta-line ps-recurso">${escapeHtml(c.recurso || '')}</div>
 
       ${detalleTabla.length ? `<div class="ps-table-detail">${detalleTabla.map(escapeHtml).join(' · ')}</div>` : ''}
+      ${ultima?.alegada ? `<div class="ps-table-detail">Alegada · ${escapeHtml(fmtFechaSolo(ultima.fechaAlegada || ultima.fecha))}</div>` : ''}
       ${ultima?.observacion ? `<div class="ps-note">${escapeHtml(ultima.observacion)}</div>` : ''}
     </div>
 
@@ -5270,6 +5531,19 @@ function salaFormHtml(c) {
       <div>
         <label>Sala</label>
         <input type="text" id="sf-sala-${c.id}" value="${escapeHtml(ultima?.sala || '')}">
+      </div>
+    </div>
+    <div class="form-grid2">
+      <div>
+        <label>Alegada</label>
+        <select id="sf-alegada-${c.id}">
+          <option value="no" ${!ultima?.alegada ? 'selected' : ''}>No</option>
+          <option value="si" ${ultima?.alegada ? 'selected' : ''}>Sí</option>
+        </select>
+      </div>
+      <div>
+        <label>Fecha efectiva de alegato</label>
+        <input type="date" id="sf-fechaalegada-${c.id}" value="${escapeHtml(ultima?.fechaAlegada || '')}">
       </div>
     </div>
     <div>
@@ -5451,12 +5725,26 @@ function wireSalaForm(container, wrap, causa) {
   actualizarVisibilidadEnTabla();
   resultadoSel.addEventListener('change', actualizarVisibilidadEnTabla);
 
+  const alegadaSel = wrap.querySelector(`#sf-alegada-${id}`);
+  const fechaAlegadaInput = wrap.querySelector(`#sf-fechaalegada-${id}`);
+  function actualizarVisibilidadAlegada() {
+    if (!alegadaSel || !fechaAlegadaInput) return;
+    fechaAlegadaInput.disabled = alegadaSel.value !== 'si';
+    if (alegadaSel.value !== 'si') fechaAlegadaInput.value = '';
+  }
+  actualizarVisibilidadAlegada();
+  alegadaSel?.addEventListener('change', actualizarVisibilidadAlegada);
+
   wrap.querySelector('[data-action="cancelar-revision-sala"]').addEventListener('click', () => {
     wrap.hidden = true; wrap.innerHTML = '';
   });
 
   wrap.querySelector('[data-action="guardar-revision-sala"]').addEventListener('click', async () => {
     const ahora = new Date();
+    const alegada = alegadaSel?.value === 'si';
+    const fechaAlegada = fechaAlegadaInput?.value || null;
+    if (alegada && !fechaAlegada) { toast('Indica la fecha efectiva del alegato.'); return; }
+
     const patch = {
       fecha: todayISO(),
       hora: `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`,
@@ -5464,7 +5752,9 @@ function wireSalaForm(container, wrap, causa) {
       observacion: wrap.querySelector(`#sf-observacion-${id}`).value.trim() || null,
       fechaAlegato: resultadoSel.value === 'En tabla' ? (wrap.querySelector(`#sf-fechaalegato-${id}`).value || null) : null,
       sala: resultadoSel.value === 'En tabla' ? (wrap.querySelector(`#sf-sala-${id}`).value.trim() || null) : null,
-      numeroTabla: resultadoSel.value === 'En tabla' ? (wrap.querySelector(`#sf-numerotabla-${id}`).value.trim() || null) : null
+      numeroTabla: resultadoSel.value === 'En tabla' ? (wrap.querySelector(`#sf-numerotabla-${id}`).value.trim() || null) : null,
+      alegada,
+      fechaAlegada: alegada ? fechaAlegada : null
     };
     try {
       const nueva = await api.createRevisionSala(CURRENT_USER.id, id, patch);
@@ -5513,34 +5803,44 @@ function receptoresFiltradosPorBusqueda() {
 }
 
 function receptorCardHtml(r) {
-  return `<div class="receptor-card" data-receptor-id="${r.id}">
-    <div class="receptor-card-top">
-      <label style="display:flex; align-items:center; gap:8px; flex:1; cursor:pointer;">
+  const iniciales = String(r.nombreCompleto || '')
+    .trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase() || 'R';
+  return `<article class="receptor-card radm-receptor-card" data-receptor-id="${r.id}">
+    <div class="radm-receptor-main">
+      <label class="radm-receptor-select">
         <input type="checkbox" class="receptor-check" data-id="${r.id}" ${receptoresSeleccionados.has(r.id) ? 'checked' : ''}>
-        <strong>${escapeHtml(r.nombreCompleto)}</strong>
+        <span class="radm-receptor-avatar">${escapeHtml(iniciales)}</span>
       </label>
-      <span class="stamp evento-estado-${r.activo ? 'calm-estado' : 'noprior'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
+      <div class="radm-receptor-info">
+        <div class="radm-receptor-name-row">
+          <strong>${escapeHtml(r.nombreCompleto)}</strong>
+          <span class="radm-status ${r.activo ? 'active' : 'inactive'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
+        </div>
+        <div class="radm-receptor-meta">
+          ${r.telefono ? `<span>Tel. ${escapeHtml(r.telefono)}</span>` : ''}
+          ${r.correo ? `<span>${escapeHtml(r.correo)}</span>` : ''}
+          ${r.jurisdiccion ? `<span>${escapeHtml(r.jurisdiccion)}</span>` : ''}
+        </div>
+        ${r.domicilio ? `<div class="radm-receptor-address">${escapeHtml(r.domicilio)}</div>` : ''}
+        ${r.fuenteOficial ? `<div class="radm-receptor-source">Fuente: ${escapeHtml(r.fuenteOficial)}</div>` : ''}
+      </div>
     </div>
-    <div class="gestion-meta">
-      ${r.telefono ? `<span>${escapeHtml(r.telefono)}</span>` : ''}
-      ${r.correo ? `<span>${escapeHtml(r.correo)}</span>` : ''}
-      ${r.jurisdiccion ? `<span>${escapeHtml(r.jurisdiccion)}</span>` : ''}
+    <div class="radm-receptor-actions">
+      <button class="btn small" data-action="edit-receptor" data-id="${r.id}">Editar</button>
+      <button class="btn small ghost" data-action="toggle-receptor" data-id="${r.id}">${r.activo ? 'Marcar inactivo' : 'Marcar activo'}</button>
+      <button class="btn small danger" data-action="delete-receptor" data-id="${r.id}">Eliminar</button>
     </div>
-    ${r.domicilio ? `<div class="gestion-meta">${escapeHtml(r.domicilio)}</div>` : ''}
-    ${r.fuenteOficial ? `<div class="ficha-empty" style="color:var(--ink-faint);">Fuente: ${escapeHtml(r.fuenteOficial)}</div>` : ''}
-    <div class="gestion-actions">
-      <button data-action="edit-receptor" data-id="${r.id}">Editar</button>
-      <button data-action="toggle-receptor" data-id="${r.id}">${r.activo ? 'Marcar inactivo' : 'Marcar activo'}</button>
-      <button data-action="delete-receptor" data-id="${r.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
-    </div>
-  </div>`;
+  </article>`;
 }
 
 function receptorFormHtml(r) {
   const e = r || {};
   return `
-  <div class="agenda-form">
-    <div class="subhead" style="margin-top:0;">${r ? 'Editar receptor' : 'Nuevo receptor'}</div>
+  <div class="agenda-form radm-form-card">
+    <div class="radm-form-head">
+      <div class="radm-kicker">${r ? 'Edición' : 'Nuevo registro'}</div>
+      <h3>${r ? 'Editar receptor' : 'Nuevo receptor'}</h3>
+    </div>
     <div><label>Nombre completo</label><input type="text" id="rf-nombre" value="${escapeHtml(e.nombreCompleto || '')}"></div>
     <div class="form-grid2">
       <div><label>Teléfono</label><input type="text" id="rf-telefono" value="${escapeHtml(e.telefono || '')}"></div>
@@ -5596,8 +5896,14 @@ function renderReceptoresTab() {
 
   const activos = receptoresFiltrados.filter(r => r.activo);
   const inactivos = receptoresFiltrados.filter(r => !r.activo);
-  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-receptor">+ Nuevo receptor</button></div>
-  <div id="receptor-form-wrap" class="agenda-form-wrap" hidden></div>`;
+  let html = `<div class="radm-section-toolbar">
+    <div>
+      <div class="radm-section-kicker">Catálogo</div>
+      <strong>Receptores registrados</strong>
+    </div>
+    <button class="btn small primary" id="add-receptor">+ Nuevo receptor</button>
+  </div>
+  <div id="receptor-form-wrap" class="agenda-form-wrap radm-form-wrap" hidden></div>`;
   if (RECEPTORES.length === 0) {
     html += `<div class="empty-msg">Aún no hay receptores en el catálogo. Agrega uno manualmente o usa "Importar PDF / CSV".</div>`;
   } else if (receptoresFiltrados.length === 0) {
@@ -5740,21 +6046,45 @@ async function eliminarReceptoresConVerificacion(ids) {
 
 // ---------- Sub-vista: turnos ----------
 function turnoRowHtml(t) {
-  return `<div class="pjud-row" data-turno-id="${t.id}" style="grid-template-columns:auto 1.6fr 1fr 1fr 1fr auto;">
-    <div><input type="checkbox" class="turno-check" data-id="${t.id}" ${turnosSeleccionados.has(t.id) ? 'checked' : ''}></div>
-    <div>${escapeHtml(t.receptor ? t.receptor.nombreCompleto : 'Receptor eliminado')}</div>
-    <div>${escapeHtml(fmtFechaSolo(t.fechaInicio))} — ${escapeHtml(fmtFechaSolo(t.fechaFin))}</div>
-    <div>${escapeHtml(t.jurisdiccion || '—')}</div>
-    <div>${escapeHtml(t.fuenteOficial || '—')}</div>
-    <div><button class="btn small" data-action="delete-turno" data-id="${t.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button></div>
-  </div>`;
+  const nombre = t.receptor ? t.receptor.nombreCompleto : 'Receptor eliminado';
+  const iniciales = String(nombre || '')
+    .trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase() || 'T';
+  return `<article class="radm-turn-card" data-turno-id="${t.id}">
+    <div class="radm-turn-card-top">
+      <label class="radm-turn-select">
+        <input type="checkbox" class="turno-check" data-id="${t.id}" ${turnosSeleccionados.has(t.id) ? 'checked' : ''}>
+        <span class="radm-turn-avatar">${escapeHtml(iniciales)}</span>
+      </label>
+      <div class="radm-turn-card-main">
+        <strong>${escapeHtml(nombre)}</strong>
+        <span class="radm-turn-period">${escapeHtml(fmtFechaSolo(t.fechaInicio))} — ${escapeHtml(fmtFechaSolo(t.fechaFin))}</span>
+      </div>
+      <span class="radm-turn-chip">Turno</span>
+    </div>
+    <div class="radm-turn-details">
+      <div>
+        <span class="radm-detail-label">Jurisdicción</span>
+        <span class="radm-detail-value">${escapeHtml(t.jurisdiccion || 'Sin definir')}</span>
+      </div>
+      <div>
+        <span class="radm-detail-label">Fuente</span>
+        <span class="radm-detail-value">${escapeHtml(t.fuenteOficial || 'Sin fuente registrada')}</span>
+      </div>
+    </div>
+    <div class="radm-turn-card-actions">
+      <button class="btn small danger" data-action="delete-turno" data-id="${t.id}">Eliminar turno</button>
+    </div>
+  </article>`;
 }
 
 function turnoFormHtml() {
   const opciones = RECEPTORES.filter(r => r.activo).map(r => `<option value="${r.id}">${escapeHtml(r.nombreCompleto)}</option>`).join('');
   return `
-  <div class="agenda-form">
-    <div class="subhead" style="margin-top:0;">Nuevo turno</div>
+  <div class="agenda-form radm-form-card">
+    <div class="radm-form-head">
+      <div class="radm-kicker">Nuevo registro</div>
+      <h3>Nuevo turno</h3>
+    </div>
     <div><label>Receptor</label><select id="tf-receptor"><option value="">— Selecciona —</option>${opciones}</select></div>
     <div class="form-grid2">
       <div><label>Fecha inicio</label><input type="date" id="tf-inicio"></div>
@@ -5780,15 +6110,23 @@ function detectarSuperposicion(receptorId, fechaInicio, fechaFin, excluirId) {
 function renderTurnosTab() {
   turnosSeleccionados.forEach(id => { if (!TURNOS.find(t => t.id === id)) turnosSeleccionados.delete(id); });
 
-  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-turno">+ Nuevo turno</button> <button class="btn small" id="importar-turno-excel">Importar turno mensual (Excel)</button></div>
-  <div id="turno-form-wrap" class="agenda-form-wrap" hidden></div>`;
+  let html = `<div class="radm-section-toolbar">
+    <div>
+      <div class="radm-section-kicker">Turnos</div>
+      <strong>Períodos registrados</strong>
+    </div>
+    <div class="radm-toolbar-actions">
+      <button class="btn small primary" id="add-turno">+ Nuevo turno</button>
+      <button class="btn small" id="importar-turno-excel">Importar turno mensual (Excel)</button>
+    </div>
+  </div>
+  <div id="turno-form-wrap" class="agenda-form-wrap radm-form-wrap" hidden></div>`;
   if (TURNOS.length === 0) {
     html += `<div class="empty-msg">Aún no hay turnos cargados. Agrega uno manualmente o importa el archivo Excel de turnos.</div>`;
   } else {
     html += bulkSelectBarHtml(turnosSeleccionados, TURNOS.length, 'turnos');
     const ordenados = TURNOS.slice().sort((a, b) => b.fechaInicio.localeCompare(a.fechaInicio));
-    html += `<div class="pjud-table">
-      <div class="pjud-row pjud-head" style="grid-template-columns:auto 1.6fr 1fr 1fr 1fr auto;"><div></div><div>Receptor</div><div>Período</div><div>Jurisdicción</div><div>Fuente</div><div></div></div>
+    html += `<div class="radm-turn-grid">
       ${ordenados.map(turnoRowHtml).join('')}
     </div>`;
   }
@@ -5880,34 +6218,77 @@ const FUENTE_CONTACTO_URL = 'https://cortesantiago.cl/listado-receptores-judicia
 
 function renderImportarTab() {
   return `
-  <div class="import-box">
-    <p style="font-size:12.5px; color:var(--ink-dim);">
-      Sube el PDF oficial de la Corte de Apelaciones de Santiago (listado de receptores o turno mensual),
-      un archivo Excel (.xlsx/.xls) del listado oficial de receptores, o un archivo CSV/TXT. La aplicación
-      intenta detectar automáticamente el tipo de documento — siempre puedes corregirlo manualmente. Nada
-      se guarda sin tu confirmación en la vista previa.
-    </p>
-    <p style="font-size:11.5px; color:var(--ink-faint);">
-      Excel de la base maestra de receptores: se reconocen las columnas
-      <code>Nombre</code>, <code>Corte</code>, <code>Tribunal</code>, <code>Correo Principal</code>,
-      <code>Correo Alternativo</code>, <code>Teléfono 1</code>, <code>Teléfono 2</code>, <code>Teléfono 3</code>
-      y <code>Dirección</code>. Cada campo se guarda por separado, en su propia columna. Un Excel siempre se trata como
-      listado de receptores — nunca crea turnos.
-    </p>
-    <p style="font-size:11.5px; color:var(--ink-faint);">
-      Formato CSV/TXT alternativo (columnas): <code>nombre,telefono,correo,domicilio,jurisdiccion,fecha_inicio,fecha_fin</code>
-      (fechas en AAAA-MM-DD).
-    </p>
-    <p style="font-size:11.5px; color:var(--ink-faint);">
-      Fuentes oficiales de referencia: <a href="${FUENTE_TURNOS_URL}" target="_blank" rel="noopener">turnos de receptores (PJUD)</a> ·
-      <a href="${FUENTE_CONTACTO_URL}" target="_blank" rel="noopener">datos de contacto (Corte de Santiago)</a>.
-    </p>
-    <div class="import-dropzone" id="import-dropzone">
-      <input type="file" id="import-file" accept=".pdf,.csv,.txt,.xlsx,.xls" hidden>
-      <div>Arrastra aquí el PDF, Excel o CSV, o <button class="btn small" id="import-browse" type="button">elegir archivo</button></div>
+  <div class="radm-import-layout">
+    <section class="radm-import-hero">
+      <div>
+        <div class="radm-section-kicker">Carga asistida</div>
+        <h3>Importar información de receptores</h3>
+        <p>Centraliza aquí las cargas desde fuentes oficiales. La aplicación detecta el tipo de archivo y siempre muestra una vista previa antes de guardar.</p>
+      </div>
+      <span class="radm-import-badge">PDF · Excel · CSV</span>
+    </section>
+
+    <div class="radm-import-options">
+      <article class="radm-import-option">
+        <div class="radm-import-option-icon">01</div>
+        <div>
+          <span class="radm-import-option-type">Catálogo de receptores</span>
+          <strong>Listado oficial</strong>
+          <p>PDF, Excel o CSV con nombres, tribunal, correos, teléfonos y dirección.</p>
+        </div>
+      </article>
+      <article class="radm-import-option">
+        <div class="radm-import-option-icon">02</div>
+        <div>
+          <span class="radm-import-option-type">Turnos mensuales</span>
+          <strong>Períodos de turno</strong>
+          <p>PDF oficial o archivo de turnos para asociar receptor, período y jurisdicción.</p>
+        </div>
+      </article>
     </div>
-    <div id="import-status" style="font-size:12px; color:var(--ink-faint); margin-top:8px;"></div>
-    <div id="import-preview-wrap" style="margin-top:16px;"></div>
+
+    <section class="radm-upload-card">
+      <div class="radm-upload-title">
+        <div>
+          <div class="radm-section-kicker">Archivo</div>
+          <strong>Selecciona el documento a procesar</strong>
+        </div>
+        <span class="radm-upload-security">Vista previa antes de guardar</span>
+      </div>
+
+      <div class="import-dropzone radm-dropzone" id="import-dropzone">
+        <input type="file" id="import-file" accept=".pdf,.csv,.txt,.xlsx,.xls" hidden>
+        <div class="radm-dropzone-icon">⇧</div>
+        <strong>Arrastra el archivo aquí</strong>
+        <span>o selecciónalo desde tu equipo</span>
+        <button class="btn primary" id="import-browse" type="button">Elegir archivo</button>
+        <small>PDF · XLSX · XLS · CSV · TXT</small>
+      </div>
+      <div id="import-status" class="radm-import-status"></div>
+      <div id="import-preview-wrap" class="radm-import-preview"></div>
+    </section>
+
+    <section class="radm-import-help">
+      <div class="radm-import-help-head">
+        <div class="radm-section-kicker">Referencia</div>
+        <strong>Formatos reconocidos</strong>
+      </div>
+      <div class="radm-import-help-grid">
+        <div class="radm-help-card">
+          <span>Excel catálogo</span>
+          <p>Nombre, Corte, Tribunal, Correo Principal, Correo Alternativo, Teléfono 1, Teléfono 2, Teléfono 3 y Dirección.</p>
+        </div>
+        <div class="radm-help-card">
+          <span>CSV / TXT</span>
+          <p><code>nombre, telefono, correo, domicilio, jurisdiccion, fecha_inicio, fecha_fin</code></p>
+        </div>
+      </div>
+      <div class="radm-source-links">
+        <span>Fuentes oficiales:</span>
+        <a href="${FUENTE_TURNOS_URL}" target="_blank" rel="noopener">Turnos de receptores (PJUD)</a>
+        <a href="${FUENTE_CONTACTO_URL}" target="_blank" rel="noopener">Datos de contacto (Corte de Santiago)</a>
+      </div>
+    </section>
   </div>`;
 }
 
@@ -8364,13 +8745,32 @@ function renderReceptoresAdmin() {
   else if (receptoresAdminTab === 'turnos') bodyHtml = renderTurnosTab();
   else bodyHtml = renderImportarTab();
 
+  const receptoresActivos = RECEPTORES.filter(r => r.activo).length;
+  const receptoresInactivos = RECEPTORES.length - receptoresActivos;
+
   container.innerHTML = `
-    <div class="section-title">Administración de receptores</div>
-    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">
-      Catálogo de receptores judiciales y sus periodos de turno (Región Metropolitana, área civil, encargos con beneficio de asistencia judicial). Independiente de Encargo receptor, que solo consulta esta información.
+    <div class="radm-shell">
+      <section class="radm-hero">
+        <div>
+          <div class="radm-kicker">Herramientas administrativas</div>
+          <h2>Administración de receptores</h2>
+          <p>Gestiona el catálogo de receptores judiciales, sus períodos de turno y las importaciones de fuentes oficiales.</p>
+        </div>
+        <span class="radm-admin-badge">Solo administrador</span>
+      </section>
+
+      <div class="radm-stats">
+        <div class="radm-stat radm-stat-total"><span class="radm-stat-num">${RECEPTORES.length}</span><span class="radm-stat-label">Receptores</span></div>
+        <div class="radm-stat radm-stat-active"><span class="radm-stat-num">${receptoresActivos}</span><span class="radm-stat-label">Activos</span></div>
+        <div class="radm-stat radm-stat-inactive"><span class="radm-stat-num">${receptoresInactivos}</span><span class="radm-stat-label">Inactivos</span></div>
+        <div class="radm-stat radm-stat-turns"><span class="radm-stat-num">${TURNOS.length}</span><span class="radm-stat-label">Turnos registrados</span></div>
+      </div>
+
+      <section class="radm-card">
+        <div class="radm-tabs">${tabs.map(([k, l]) => `<button class="radm-tab ${receptoresAdminTab === k ? 'active' : ''}" data-radm-tab="${k}">${l}</button>`).join('')}</div>
+        <div class="radm-body">${bodyHtml}</div>
+      </section>
     </div>
-    <div class="agenda-viewtabs">${tabs.map(([k, l]) => `<button class="btn small ${receptoresAdminTab === k ? 'primary' : ''}" data-radm-tab="${k}">${l}</button>`).join('')}</div>
-    <div>${bodyHtml}</div>
   `;
 
   container.querySelectorAll('[data-radm-tab]').forEach(btn => {
@@ -8805,222 +9205,1721 @@ async function intentarSincronizarEventoGoogle(evento, actualizarUiCallback) {
 }
 
 
-function renderInformeFinal() {
-  const container = document.getElementById('list-container');
-  if (informeFinalEtapa === 'configurar') {
-    container.innerHTML = informeFinalConfiguradorHtml();
-    wireInformeFinalConfigurador(container);
-  } else {
-    container.innerHTML = informeFinalPreviewHtml();
-    wireInformeFinalPreview(container);
+
+const DIAS_SEMANA_PRACTICA = [
+  [1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes']
+];
+
+function fechaIsoDesdeDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dia}`;
+}
+
+function jornadaPracticaTexto(practica = CURRENT_PRACTICA) {
+  if (!practica?.modalidadPermanencia) return 'Pendiente';
+  if (practica.modalidadPermanencia === 'sin_permanencia') return 'Sin permanencia presencial / tramitación online';
+  const nombres = (practica.diasPermanencia || [])
+    .map(v => DIAS_SEMANA_PRACTICA.find(([id]) => id === Number(v))?.[1])
+    .filter(Boolean);
+  const dias = nombres.length ? nombres.join(', ') : 'Días sin definir';
+  const horario = practica.permanenciaHoraInicio && practica.permanenciaHoraTermino
+    ? ` · ${practica.permanenciaHoraInicio}–${practica.permanenciaHoraTermino}`
+    : '';
+  return `${dias}${horario}`;
+}
+
+function asistenciaMesesEntre(inicioIso, terminoIso) {
+  if (!inicioIso || !terminoIso) return [];
+  const ini = new Date(`${inicioIso}T12:00:00`);
+  const fin = new Date(`${terminoIso}T12:00:00`);
+  if (Number.isNaN(ini.getTime()) || Number.isNaN(fin.getTime()) || fin < ini) return [];
+  const meses = [];
+  let y = ini.getFullYear();
+  let m = ini.getMonth();
+  const endY = fin.getFullYear();
+  const endM = fin.getMonth();
+  while (y < endY || (y === endY && m <= endM)) {
+    meses.push({ y, m });
+    m++;
+    if (m > 11) { m = 0; y++; }
+  }
+  return meses;
+}
+
+function asistenciaEstadoEfectivo(fechaIso, practica, guardadosMap) {
+  if (guardadosMap.has(fechaIso)) return guardadosMap.get(fechaIso)?.estado || '';
+  if (practica?.modalidadPermanencia !== 'presencial') return '';
+  const d = new Date(`${fechaIso}T12:00:00`);
+  return (practica.diasPermanencia || []).includes(d.getDay()) ? 'X' : '';
+}
+
+function asistenciaMesHtml({ y, m }, practica, guardadosMap) {
+  const inicio = practica.fechaInicio;
+  const termino = practica.fechaTermino;
+  const nombreMes = new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' })
+    .format(new Date(y, m, 1, 12))
+    .replace(/^./, c => c.toUpperCase());
+
+  const primero = new Date(y, m, 1, 12);
+  const ultimoDia = new Date(y, m + 1, 0, 12).getDate();
+  const offsetLunes = (primero.getDay() + 6) % 7;
+  const celdas = [];
+
+  for (let i = 0; i < offsetLunes; i++) celdas.push('<div class="if-att-day is-empty"></div>');
+
+  for (let dia = 1; dia <= ultimoDia; dia++) {
+    const fecha = fechaIsoDesdeDateLocal(new Date(y, m, dia, 12));
+    const enRango = fecha >= inicio && fecha <= termino;
+    if (!enRango) {
+      celdas.push(`<div class="if-att-day is-out"><span class="if-att-num">${dia}</span></div>`);
+      continue;
+    }
+    const estado = asistenciaEstadoEfectivo(fecha, practica, guardadosMap);
+    celdas.push(`
+      <div class="if-att-day is-active ${estado ? `status-${estado.toLowerCase()}` : ''}" data-fecha="${fecha}">
+        <span class="if-att-num">${dia}</span>
+        <select class="if-att-state" data-fecha="${fecha}" aria-label="Asistencia ${fecha}">
+          <option value="" ${estado === '' ? 'selected' : ''}>—</option>
+          <option value="X" ${estado === 'X' ? 'selected' : ''}>X</option>
+          <option value="O" ${estado === 'O' ? 'selected' : ''}>O</option>
+          <option value="L" ${estado === 'L' ? 'selected' : ''}>L</option>
+          <option value="R" ${estado === 'R' ? 'selected' : ''}>R</option>
+        </select>
+      </div>`);
+  }
+
+  return `
+    <section class="if-att-month">
+      <div class="if-att-month-title">${escapeHtml(nombreMes)}</div>
+      <div class="if-att-weekdays">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(x => `<span>${x}</span>`).join('')}</div>
+      <div class="if-att-grid">${celdas.join('')}</div>
+    </section>`;
+}
+
+function asistenciaResumen(practica, guardadosMap) {
+  if (!practica?.fechaInicio || !practica?.fechaTermino) return { x: 0, o: 0, l: 0, recuperados: 0 };
+  const ini = new Date(`${practica.fechaInicio}T12:00:00`);
+  const fin = new Date(`${practica.fechaTermino}T12:00:00`);
+  let x = 0, o = 0, l = 0, recuperados = 0;
+  for (let d = new Date(ini); d <= fin; d.setDate(d.getDate() + 1)) {
+    const fecha = fechaIsoDesdeDateLocal(d);
+    const estado = asistenciaEstadoEfectivo(fecha, practica, guardadosMap);
+    if (estado === 'X') x++;
+    if (estado === 'O') o++;
+    if (estado === 'L') l++;
+    if (estado === 'R') recuperados++;
+  }
+  return { x, o, l, recuperados };
+}
+
+async function cargarAsistenciaInformeFinal() {
+  const host = document.getElementById('if-asistencia-panel');
+  if (!host) return;
+
+  const practica = CURRENT_PRACTICA;
+  if (!practica?.id) {
+    host.innerHTML = `<div class="if-att-empty">Guarda primero los datos de práctica para habilitar el calendario de asistencia.</div>`;
+    return;
+  }
+  if (!practica.fechaInicio || !practica.fechaTermino) {
+    host.innerHTML = `<div class="if-att-empty">Define las fechas de inicio y término de la práctica para generar el calendario.</div>`;
+    return;
+  }
+
+  try {
+    let guardados;
+    if (
+      INFORME_FINAL_ASISTENCIA_CACHE.practicaId === practica.id &&
+      Array.isArray(INFORME_FINAL_ASISTENCIA_CACHE.registros)
+    ) {
+      guardados = INFORME_FINAL_ASISTENCIA_CACHE.registros;
+    } else {
+      host.innerHTML = `<div class="if-att-loading">Cargando asistencia…</div>`;
+      guardados = await api.fetchPracticaAsistencia(CURRENT_USER.id, practica.id);
+      INFORME_FINAL_ASISTENCIA_CACHE = {
+        practicaId: practica.id,
+        registros: guardados
+      };
+    }
+
+    const guardadosMap = new Map(guardados.map(r => [r.fecha, r]));
+
+    function sincronizarCacheDesdeMapa() {
+      INFORME_FINAL_ASISTENCIA_CACHE = {
+        practicaId: practica.id,
+        registros: Array.from(guardadosMap.values())
+      };
+    }
+
+    function pintar() {
+      const resumen = asistenciaResumen(practica, guardadosMap);
+      const meses = asistenciaMesesEntre(practica.fechaInicio, practica.fechaTermino);
+      host.innerHTML = `
+        <div class="if-att-head">
+          <div>
+            <div class="if-kicker">Formulario N° 10 · 2.1</div>
+            <h3>Asistencia</h3>
+            <p>El calendario comprende únicamente el período de práctica informado. Los días de permanencia se precargan con X y cada fecha puede editarse como X, O, L, R o dejarse vacía.</p>
+          </div>
+          <div class="if-att-range">${escapeHtml(fmtFechaSolo(practica.fechaInicio))} → ${escapeHtml(fmtFechaSolo(practica.fechaTermino))}</div>
+        </div>
+
+        <div class="if-att-jornada">
+          <span>Jornada de práctica definida</span>
+          <strong>${escapeHtml(jornadaPracticaTexto(practica))}</strong>
+        </div>
+
+        <div class="if-att-summary">
+          <div><span>Presentes</span><strong>${resumen.x}</strong></div>
+          <div><span>Ausencias</span><strong>${resumen.o}</strong></div>
+          <div><span>Licencias médicas</span><strong>${resumen.l}</strong></div>
+          <div><span>Días recuperados</span><strong>${resumen.recuperados}</strong></div>
+        </div>
+
+        <div class="if-att-legend">
+          <span><b>X</b> Presente</span>
+          <span><b>O</b> Ausente</span>
+          <span><b>L</b> Licencia médica</span>
+          <span><b>R</b> Día recuperado</span>
+        </div>
+
+        <div class="if-att-months">
+          ${meses.map(m => asistenciaMesHtml(m, practica, guardadosMap)).join('')}
+        </div>
+
+        <div class="if-att-note">
+          Cada cambio de fecha se guarda automáticamente. Cuando hayas revisado el registro, presiona “Guardar asistencia” para marcar esta sección como completada en el Formulario N°10.
+        </div>
+        <div class="if-att-actions">
+          <button class="btn primary" id="if-guardar-asistencia" type="button">
+            ${practica.asistenciaCompletada === true ? 'Guardar asistencia nuevamente' : 'Guardar asistencia'}
+          </button>
+          <span class="if-att-save-status ${practica.asistenciaCompletada === true ? 'is-complete' : ''}">
+            ${practica.asistenciaCompletada === true ? 'Asistencia confirmada' : 'Pendiente de confirmar'}
+          </span>
+        </div>
+      `;
+
+      host.querySelectorAll('.if-att-state').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const fecha = sel.dataset.fecha;
+          const estado = sel.value || '';
+          sel.disabled = true;
+          try {
+            const row = await api.upsertPracticaAsistencia(CURRENT_USER.id, practica.id, {
+              fecha,
+              estado,
+              recuperado: false
+            });
+            guardadosMap.set(fecha, row);
+            sincronizarCacheDesdeMapa();
+
+            if (CURRENT_PRACTICA?.asistenciaCompletada === true) {
+              const cierre = await api.updatePracticaCierre(CURRENT_USER.id, practica.id, {
+                asistenciaCompletada: false
+              });
+              Object.assign(CURRENT_PRACTICA, cierre || {});
+              practica.asistenciaCompletada = false;
+            }
+
+            pintar();
+          } catch (e) {
+            toast('No se pudo guardar la asistencia: ' + e.message);
+            sel.disabled = false;
+          }
+        });
+      });
+
+      host.querySelector('#if-guardar-asistencia')?.addEventListener('click', async e => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          const cierre = await api.updatePracticaCierre(CURRENT_USER.id, practica.id, {
+            asistenciaCompletada: true
+          });
+          Object.assign(CURRENT_PRACTICA, cierre || {});
+          practica.asistenciaCompletada = true;
+          sincronizarCacheDesdeMapa();
+          toast('Asistencia guardada');
+          INFORME_FINAL_SECCIONES_ABIERTAS.add('if-toggle-asistencia');
+          guardarSeccionesInformeFinalAbiertas();
+          actualizarResumenFormulario10SinRecarga();
+          pintar();
+        } catch (err) {
+          toast('No se pudo confirmar la asistencia: ' + err.message);
+          btn.disabled = false;
+        }
+      });
+    }
+
+    pintar();
+  } catch (e) {
+    console.error('Error cargando asistencia de práctica:', e);
+    host.innerHTML = `<div class="if-att-empty is-error">No se pudo cargar el registro de asistencia: ${escapeHtml(e.message)}</div>`;
   }
 }
 
-function informeFinalConfiguradorHtml() {
-  const causas = informeFinalCausasFiltradas();
-  const opcionesFiltro = [
-    ['todas', 'Todas las causas'], ['tramitacion', 'Solo en tramitación'],
-    ['nueva', 'Solo nuevas / redacción'], ['terminada', 'Solo terminadas'], ['manual', 'Selección manual']
+
+
+function alegatosPropiosRegistrados() {
+  const porCausa = new Map();
+  (REVISIONES_SALA || [])
+    .filter(r => r.alegada === true)
+    .forEach(r => {
+      const actual = porCausa.get(r.causaId);
+      const fechaR = r.fechaAlegada || r.fechaAlegato || r.fecha || '';
+      const fechaActual = actual ? (actual.fechaAlegada || actual.fechaAlegato || actual.fecha || '') : '';
+      if (!actual || fechaR > fechaActual) porCausa.set(r.causaId, r);
+    });
+
+  return Array.from(porCausa.values()).map(r => {
+    const causa = CAUSAS.find(c => c.id === r.causaId);
+    if (!causa) return null;
+    return {
+      causaId: causa.id,
+      nicRol: causa.rolIngreso || causa.rol || '',
+      corte: causa.corteNombre || causa.competencia || '',
+      materia: 'Civil',
+      fecha: r.fechaAlegada || r.fechaAlegato || r.fecha || '',
+      participacion: causa.parteCorte || '',
+      caratulado: caratuladoTexto(causa) || causa.titulo || ''
+    };
+  }).filter(Boolean);
+}
+
+function resumenCumplimientoAlegatos() {
+  const propios = alegatosPropiosRegistrados();
+  const oyentes = ALEGATOS_OYENTE || [];
+  const totalRequerido = 5;
+  const oyentesRequeridos = Math.max(0, totalRequerido - propios.length);
+  const oyentesPendientes = Math.max(0, oyentesRequeridos - oyentes.length);
+  return {
+    propios,
+    oyentes,
+    totalRequerido,
+    oyentesRequeridos,
+    oyentesPendientes,
+    totalRegistrado: propios.length + oyentes.length,
+    cumplido: propios.length + oyentes.length >= totalRequerido
+  };
+}
+
+function alegatosOyenteFilasHtml() {
+  if (!ALEGATOS_OYENTE.length) {
+    return `<div class="if-alegatos-empty">Aún no hay alegatos registrados como oyente.</div>`;
+  }
+  return ALEGATOS_OYENTE.map((a, idx) => `
+    <div class="if-alegato-row" data-alegato-id="${a.id}">
+      <div><label>NIC / ROL</label><input class="ct-input if-ao-nic" value="${escapeHtml(a.nicRol || '')}" placeholder="Ej.: 1234-2026"></div>
+      <div>
+        <label>Jurisdicción</label>
+        <select class="ct-input if-ao-corte">
+          <option value="">Sin definir</option>
+          ${JURISDICCION_CORTE_OPCIONES.map(j => `<option value="${j}" ${a.corte === j ? 'selected' : ''}>${j}</option>`).join('')}
+        </select>
+      </div>
+      <div><label>Materia</label><input class="ct-input if-ao-materia" value="${escapeHtml(a.materia || '')}" placeholder="Civil, Familia, Laboral…"></div>
+      <div><label>Fecha</label><input type="date" class="ct-input if-ao-fecha" value="${escapeHtml(a.fecha || '')}"></div>
+      <div class="if-alegato-participacion"><label>Participación</label><div class="if-alegato-static">Oyente</div></div>
+      <div class="if-alegato-actions">
+        <button class="btn small primary" type="button" data-action="guardar-alegato-oyente" data-id="${a.id}">Guardar</button>
+        <button class="btn small danger" type="button" data-action="eliminar-alegato-oyente" data-id="${a.id}">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function informeFinalDiagnosticoDatos() {
+  const nombre = String(CURRENT_USER?.nombre || '').trim();
+  const rut = String(CURRENT_PRACTICA?.postulanteRut || '').trim();
+  const caj = String(CURRENT_PRACTICA?.cajAsignado || '').trim();
+  const abogadoJefe = String(CURRENT_PRACTICA?.abogadoJefe || '').trim();
+  const inicio = CURRENT_PRACTICA?.fechaInicio || '';
+  const termino = CURRENT_PRACTICA?.fechaTermino || '';
+  const jornada = jornadaPracticaTexto(CURRENT_PRACTICA);
+  const jornadaDefinida = !!CURRENT_PRACTICA?.modalidadPermanencia;
+  const asistenciaCompletada = CURRENT_PRACTICA?.asistenciaCompletada === true;
+  const revisionIntermedia1 = CURRENT_PRACTICA?.revisionIntermedia1 || null;
+  const revisionIntermedia2 = CURRENT_PRACTICA?.revisionIntermedia2 || null;
+  const revisionesRegistradas = !!(revisionIntermedia1 || revisionIntermedia2);
+  const apercibimientoRespondido = CURRENT_PRACTICA?.apercibimiento === true || CURRENT_PRACTICA?.apercibimiento === false;
+  const honorariosRespondido = CURRENT_PRACTICA?.honorariosCostas === true || CURRENT_PRACTICA?.honorariosCostas === false;
+  const fechasAdministrativasPostulante = [
+    CURRENT_PRACTICA?.fechaEntregaCarpetasRevision,
+    CURRENT_PRACTICA?.fechaEntregaInformeFinal,
+    CURRENT_PRACTICA?.fechaEntregaPreinformeTutor,
+    CURRENT_PRACTICA?.fechaComunicacionPropuestaEvaluacion
   ];
+  const fechasAdministrativasCompletas = fechasAdministrativasPostulante.every(Boolean);
+  const fechasAdministrativasCantidad = fechasAdministrativasPostulante.filter(Boolean).length;
+  const alegatos = resumenCumplimientoAlegatos();
+  const justificacionAplica = CURRENT_PRACTICA?.justificacionCalificacionAplica;
+  const justificacionRespondida = justificacionAplica === true || justificacionAplica === false;
+  const justificacionTipo = CURRENT_PRACTICA?.justificacionCalificacionTipo || '';
+  const justificacionCausas = Array.isArray(CURRENT_PRACTICA?.justificacionCalificacionCausas)
+    ? CURRENT_PRACTICA.justificacionCalificacionCausas
+    : [];
+  const justificacionCompleta = justificacionRespondida && (
+    justificacionAplica === false || (
+      ['sobresaliente', 'deficiente'].includes(justificacionTipo) &&
+      justificacionCausas.length > 0 &&
+      justificacionCausas.every(x => String(x?.causaId || '').trim() && String(x?.gestion || '').trim())
+    )
+  );
+  const tutores = (TUTORES_PRACTICA || []).map(t => t?.nombre).filter(Boolean);
+  const causas = CAUSAS || [];
 
-  const totalCampos = INFORME_CAMPOS_GRUPOS.reduce((acc, [, campos]) => acc + campos.length, 0);
-  const camposSeleccionados = Object.values(informeFinalCampos).filter(Boolean).length;
-  const audiencias = resumenAudienciasAsistidas(CAUSAS);
+  const tiene = (v) => String(v || '').trim().length > 0;
+  const causasBasicasCompletas = causas.filter(c =>
+    tiene(rolCompletoTexto(c)) &&
+    tiene(tribunalTexto(c)) &&
+    tiene(c.materia) &&
+    tiene(patrocinadoEfectivo(c))
+  ).length;
 
-  let manualHtml = '';
-  if (informeFinalFiltro === 'manual') {
-    manualHtml = `
-      <div class="if-manual-wrap">
-        <div class="if-manual-toolbar">
-          <label class="if-check-inline">
-            <input type="checkbox" id="informe-select-all">
-            <span>Seleccionar todas</span>
-          </label>
-          <button class="btn small ghost" id="informe-deselect-all" type="button">Deseleccionar todas</button>
-          <span class="if-manual-count">${informeFinalSeleccion.size} seleccionada${informeFinalSeleccion.size === 1 ? '' : 's'}</span>
+  const causasConSaj = causas.filter(c => tiene(c.folio)).length;
+  const causasConOrigen = causas.filter(c => ['Nueva', 'Traspasada'].includes(c.origenCarpeta)).length;
+  const causasConPatrocinadoF9 = causas.filter(c => {
+    const p = partesPatrocinadoF9(c);
+    return tiene(p.apellidos) && tiene(p.nombres);
+  }).length;
+  const causasConCronologia = causas.filter(c => (c.cronologia || []).length > 0).length;
+  const causasTerminadas = causas.filter(c => c.categoria === 'terminada').length;
+  const audiencias = resumenAudienciasAsistidas(causas);
+
+  return {
+    nombre, rut, caj, abogadoJefe, inicio, termino, jornada, jornadaDefinida, asistenciaCompletada,
+    revisionIntermedia1, revisionIntermedia2, revisionesRegistradas,
+    apercibimientoRespondido, honorariosRespondido,
+    fechasAdministrativasCompletas, fechasAdministrativasCantidad, alegatos,
+    justificacionAplica, justificacionRespondida, justificacionTipo, justificacionCausas, justificacionCompleta,
+    tutores, causas,
+    causasBasicasCompletas, causasConSaj, causasConOrigen, causasConPatrocinadoF9, causasConCronologia,
+    causasTerminadas, audiencias
+  };
+}
+
+function informeFinalEstadoDocumento({ disponibles, total, pendientesFijos = 0 }) {
+  const totalRequisitos = Math.max(1, total + pendientesFijos);
+  const cubiertos = Math.max(0, Math.min(disponibles, total));
+  const faltantes = Math.max(0, totalRequisitos - cubiertos);
+  const porcentaje = Math.round((cubiertos / totalRequisitos) * 100);
+  if (faltantes === 0) return { label: 'Datos completos', clase: 'is-ready', porcentaje, faltantes };
+  if (cubiertos === 0) return { label: 'Faltan datos', clase: 'is-missing', porcentaje, faltantes };
+  return { label: 'Datos parciales', clase: 'is-partial', porcentaje, faltantes };
+}
+
+function informeFinalDatoFila(label, valor, ok = true) {
+  const texto = (valor === null || valor === undefined || valor === '') ? 'Pendiente' : String(valor);
+  return `
+    <div class="if-inst-data-row ${ok ? 'is-ok' : 'is-pending'}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(texto)}</strong>
+    </div>`;
+}
+
+function informeFinalPendientesHtml(items) {
+  if (!items.length) {
+    return `<div class="if-inst-complete-note"><span>✓</span><span>No se detectan datos pendientes en esta etapa.</span></div>`;
+  }
+  return `
+    <div class="if-inst-pending-list">
+      ${items.map(x => `<div class="if-inst-pending-item"><span>•</span><span>${escapeHtml(x)}</span></div>`).join('')}
+    </div>`;
+}
+
+function informeFinalDocumentoCard({
+  numero,
+  titulo,
+  estado,
+  datosHtml,
+  contenidoExtra = '',
+  kicker = 'Formato institucional',
+  buttonLabel = 'Generar documento'
+}) {
+  return `
+    <article class="if-inst-card" data-if-doc="${escapeHtml(numero)}">
+      <div class="if-inst-card-head">
+        <div class="if-inst-doc-id">${escapeHtml(numero)}</div>
+        <div class="if-inst-card-title">
+          <div class="if-kicker">${escapeHtml(kicker)}</div>
+          <h3>${escapeHtml(titulo)}</h3>
         </div>
-        <div class="if-cause-list">
-          ${CAUSAS.map(c => `
-            <label class="if-cause-item">
-              <input type="checkbox" class="informe-causa-check" data-id="${c.id}" ${informeFinalSeleccion.has(c.id) ? 'checked' : ''}>
-              <span class="if-cause-copy">
-                <strong>${escapeHtml(c.titulo)}</strong>
-                <span>${escapeHtml(CATEGORIA_LABEL[c.categoria] || c.categoria)}${c.rol ? ' · ' + escapeHtml(c.rol) : ''}</span>
-              </span>
-            </label>`).join('')}
+        <span class="if-inst-status ${estado.clase}">${escapeHtml(estado.label)}</span>
+      </div>
+
+      <div class="if-inst-progress">
+        <div class="if-inst-progress-bar"><span style="width:${estado.porcentaje}%"></span></div>
+        <span>${estado.porcentaje}% de datos detectados</span>
+      </div>
+
+      <div class="if-inst-card-grid if-inst-card-grid-single">
+        <section class="if-inst-subcard">
+          <div class="if-inst-subhead">Información disponible</div>
+          ${(() => {
+            const totalDatos = (datosHtml.match(/if-inst-data-row/g) || []).length;
+            const filasPorColumna = Math.ceil(totalDatos / 2);
+            return `<div class="if-inst-data-list if-inst-data-list-2cols" style="--if-data-rows:${filasPorColumna}">${datosHtml}</div>`;
+          })()}
+        </section>
+      </div>
+
+      ${contenidoExtra}
+
+      <div class="if-inst-card-foot if-inst-card-foot-actions">
+        <button class="btn primary if-inst-generate" type="button" disabled title="Completa los datos requeridos para generar el documento">
+          ${escapeHtml(buttonLabel)}
+        </button>
+      </div>
+    </article>`;
+}
+
+
+
+function informeFinalAudienciasHtml(audiencias = []) {
+  if (!audiencias.length) {
+    return `<div class="if-alegatos-empty">No se detectan audiencias realizadas. El Formulario N°10 conservará una fila vacía en esta sección.</div>`;
+  }
+  return `
+    <div class="if-audiencias-table">
+      <div class="if-audiencias-table-head"><span>Tipo audiencia</span><span>Fecha</span><span>ROL/RIT</span><span>Materia</span><span>Tribunal</span></div>
+      ${audiencias.map(a => `<div class="if-audiencias-table-row"><span>${escapeHtml(a.tipoAudiencia || 'Audiencia')}</span><span>${escapeHtml(a.fecha ? fmtFechaSolo(a.fecha) : '—')}</span><span>${escapeHtml(a.rit || '—')}</span><span>${escapeHtml(a.materia || '—')}</span><span>${escapeHtml(a.tribunal || '—')}</span></div>`).join('')}
+    </div>`;
+}
+
+function informeFinalJustificacionCausasHtml() {
+  const guardadas = new Map((CURRENT_PRACTICA?.justificacionCalificacionCausas || []).map(x => [String(x?.causaId || ''), x]));
+  if (!CAUSAS.length) return `<div class="if-alegatos-empty">No hay causas registradas para seleccionar.</div>`;
+  return CAUSAS.map(c => {
+    const id = String(c.id || '');
+    const existente = guardadas.get(id);
+    const checked = !!existente;
+    const rotulo = [rolCompletoTexto(c) || 'Sin ROL/RIT', caratuladoTexto(c) || 'Sin caratulado'].filter(Boolean).join(' — ');
+    return `
+      <div class="if-just-causa ${checked ? 'is-selected' : ''}" data-causa-id="${escapeHtml(id)}">
+        <label class="if-just-check">
+          <input type="checkbox" class="if-just-causa-check" data-causa-id="${escapeHtml(id)}" ${checked ? 'checked' : ''}>
+          <span><strong>${escapeHtml(rotulo)}</strong><small>${escapeHtml(tribunalTexto(c) || 'Tribunal sin definir')} · ${escapeHtml(c.materia || c.subcategoria || 'Materia sin definir')}</small></span>
+        </label>
+        <div class="if-just-detail" ${checked ? '' : 'hidden'}>
+          <label>Gestiones que justifican la calificación</label>
+          <textarea class="ct-input if-just-gestion" data-causa-id="${escapeHtml(id)}" rows="4" placeholder="Describe únicamente las gestiones sobresalientes o deficientes que justifican incluir esta causa.">${escapeHtml(existente?.gestion || '')}</textarea>
         </div>
       </div>`;
+  }).join('');
+}
+
+
+function sugerirPartesNombrePatrocinadoF9(nombreCompleto) {
+  const partes = String(nombreCompleto || '').trim().replace(/\s+/g, ' ').split(' ').filter(Boolean);
+  if (!partes.length) return { apellidos: '', nombres: '' };
+  if (partes.length === 1) return { apellidos: partes[0], nombres: '' };
+  if (partes.length === 2) return { apellidos: partes[1], nombres: partes[0] };
+  return {
+    apellidos: partes.slice(-2).join(' '),
+    nombres: partes.slice(0, -2).join(' ')
+  };
+}
+
+function partesPatrocinadoF9(c) {
+  const apellidosGuardados = String(c?.patrocinadoApellidos || '').trim();
+  const nombresGuardados = String(c?.patrocinadoNombres || '').trim();
+  if (apellidosGuardados && nombresGuardados) {
+    return { apellidos: apellidosGuardados, nombres: nombresGuardados, origen: 'guardado' };
+  }
+  const nombreCompleto = String(patrocinadoEfectivo(c) || c?.patrocinado || '').trim();
+  const sugerencia = sugerirPartesNombrePatrocinadoF9(nombreCompleto);
+  return {
+    apellidos: apellidosGuardados || sugerencia.apellidos || '',
+    nombres: nombresGuardados || sugerencia.nombres || '',
+    origen: 'automatico'
+  };
+}
+
+function actualizarResumenFormulario10SinRecarga() {
+  const card = document.querySelector('.if-inst-card[data-if-doc="10"]');
+  if (!card) return;
+  const d = informeFinalDiagnosticoDatos();
+  const pendientes = [];
+  if (!d.nombre) pendientes.push('Nombre del postulante');
+  if (!d.rut) pendientes.push('RUN del postulante');
+  if (!d.caj) pendientes.push('Unidad operativa / CAJ');
+  if (!d.abogadoJefe) pendientes.push('Abogado/a jefe de la unidad operativa');
+  if (!d.tutores.length) pendientes.push('Abogado/a tutor/a');
+  if (!d.inicio) pendientes.push('Fecha de inicio de práctica');
+  if (!d.termino) pendientes.push('Fecha de término de práctica');
+  if (!d.jornadaDefinida) pendientes.push('Jornada de práctica definida');
+  if (!d.asistenciaCompletada) pendientes.push('Registro de asistencia e inasistencias');
+  if (!d.revisionesRegistradas) pendientes.push('Fechas de revisiones intermedias');
+  if (!d.fechasAdministrativasCompletas) pendientes.push(`Fechas administrativas del proceso de pre-evaluación (${d.fechasAdministrativasCantidad}/4)`);
+  if (!d.apercibimientoRespondido) pendientes.push('Apercibimientos');
+  if (!d.honorariosRespondido) pendientes.push('Honorarios/costas percibidos');
+  if (!d.alegatos.cumplido) pendientes.push(`Alegatos requeridos por completar (${d.alegatos.totalRegistrado}/5)`);
+  if (!d.justificacionCompleta) pendientes.push('Definir la sección 7 · Justificación de calificación sobresaliente / deficiente');
+  if (!d.justificacionCompleta) pendientes.push('Definir la sección 7 · Justificación de calificación sobresaliente / deficiente');
+
+
+  const disponibles = (d.nombre ? 1 : 0) + (d.rut ? 1 : 0) + (d.caj ? 1 : 0) +
+    (d.abogadoJefe ? 1 : 0) + (d.tutores.length ? 1 : 0) + (d.inicio ? 1 : 0) +
+    (d.termino ? 1 : 0) + (d.jornadaDefinida ? 1 : 0) + (d.asistenciaCompletada ? 1 : 0) +
+    (d.revisionesRegistradas ? 1 : 0) + (d.apercibimientoRespondido ? 1 : 0) +
+    (d.honorariosRespondido ? 1 : 0) + (d.fechasAdministrativasCompletas ? 1 : 0) +
+    (d.alegatos.cumplido ? 1 : 0) + (d.causas.length ? 1 : 0) + 1 +
+    (d.justificacionCompleta ? 1 : 0);
+  const estado = informeFinalEstadoDocumento({ disponibles, total: 17 });
+  if (estado.porcentaje === 100) estado.label = 'Datos del postulante completos';
+
+  const datosHtml = [
+    informeFinalDatoFila('Postulante', d.nombre, !!d.nombre),
+    informeFinalDatoFila('RUN', d.rut, !!d.rut),
+    informeFinalDatoFila('CAJ', d.caj ? `CAJ ${d.caj}` : '', !!d.caj),
+    informeFinalDatoFila('Abogado/a jefe', d.abogadoJefe, !!d.abogadoJefe),
+    informeFinalDatoFila('Tutor/a', d.tutores.join(', '), d.tutores.length > 0),
+    informeFinalDatoFila('Inicio de práctica', d.inicio ? fmtFechaSolo(d.inicio) : '', !!d.inicio),
+    informeFinalDatoFila('Término de práctica', d.termino ? fmtFechaSolo(d.termino) : '', !!d.termino),
+    informeFinalDatoFila('Jornada definida', d.jornada, d.jornadaDefinida),
+    informeFinalDatoFila('Asistencia', d.asistenciaCompletada ? 'Confirmada' : '', d.asistenciaCompletada),
+    informeFinalDatoFila('Revisiones intermedias', d.revisionesRegistradas ? [d.revisionIntermedia1, d.revisionIntermedia2].filter(Boolean).map(fmtFechaSolo).join(' · ') : '', d.revisionesRegistradas),
+    informeFinalDatoFila('Apercibimientos', d.apercibimientoRespondido ? (CURRENT_PRACTICA.apercibimiento ? 'Sí' : 'No') : '', d.apercibimientoRespondido),
+    informeFinalDatoFila('Honorarios/costas', d.honorariosRespondido ? (CURRENT_PRACTICA.honorariosCostas ? 'Sí' : 'No') : '', d.honorariosRespondido),
+    informeFinalDatoFila('Fechas administrativas', `${d.fechasAdministrativasCantidad}/4`, d.fechasAdministrativasCompletas),
+    informeFinalDatoFila('Alegatos registrados', `${d.alegatos.totalRegistrado}/5`, d.alegatos.cumplido),
+    informeFinalDatoFila('Causas para estadísticas', d.causas.length, d.causas.length > 0),
+    informeFinalDatoFila('Audiencias realizadas detectadas', d.audiencias.length, true),
+    informeFinalDatoFila('Justificación calificación', d.justificacionRespondida ? (d.justificacionAplica ? `${d.justificacionTipo === 'deficiente' ? 'Deficiente' : 'Sobresaliente'} · ${d.justificacionCausas.length} causa(s)` : 'No corresponde') : '', d.justificacionCompleta)
+  ].join('');
+
+  const status = card.querySelector('.if-inst-status');
+  if (status) { status.className = `if-inst-status ${estado.clase}`; status.textContent = estado.label; }
+  const bar = card.querySelector('.if-inst-progress-bar span');
+  if (bar) bar.style.width = `${estado.porcentaje}%`;
+  const pct = card.querySelector('.if-inst-progress > span:last-child');
+  if (pct) pct.textContent = `${estado.porcentaje}% de datos detectados`;
+  const generarBtn = card.querySelector('.if-inst-generate');
+  if (generarBtn) {
+    generarBtn.disabled = estado.porcentaje !== 100;
+    generarBtn.title = estado.porcentaje === 100
+      ? 'Generar Formulario N°10 en formato DOCX institucional'
+      : 'Completa los datos del postulante antes de generar el documento';
+  }
+  const subcards = card.querySelectorAll('.if-inst-card-grid .if-inst-subcard');
+  const dataList = subcards[0]?.querySelector('.if-inst-data-list');
+  if (dataList) dataList.innerHTML = datosHtml;
+  if (subcards[1]) {
+    subcards[1].querySelector('.if-inst-pending-list, .if-inst-complete-note')?.remove();
+    subcards[1].insertAdjacentHTML('beforeend', informeFinalPendientesHtml(pendientes));
+  }
+}
+
+
+function claveUsuarioTraspaso(c) {
+  const rut = String(c?.rut || '').replace(/[^0-9kK]/g, '').toUpperCase();
+  if (rut) return `rut:${rut}`;
+  const nombre = String(patrocinadoEfectivo(c) || c?.patrocinado || '').trim().toLowerCase();
+  return nombre ? `nombre:${nombre}` : `causa:${c?.id || ''}`;
+}
+
+function estadoNotificacionTraspaso(c) {
+  const personas = (c?.notificacionPersonas || []).filter(p => String(p?.estadoNotificacion || '').trim());
+  if (!personas.length) return c?.notifEstado || '';
+  if (personas.length === 1) return personas[0].estadoNotificacion || '';
+  return personas
+    .map(p => `${p.nombre ? `${p.nombre}: ` : ''}${p.estadoNotificacion || ''}`.trim())
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function receptorEncargadoTraspaso(c) {
+  const activos = (ENCARGOS || [])
+    .filter(e =>
+      String(e?.causaId || '') === String(c?.id || '') &&
+      e?.estadoGestion !== 'Realizado' &&
+      String(e?.receptorTurnoNombre || '').trim()
+    )
+    .slice()
+    .sort((a, b) => {
+      const fa = a?.fechaConfirmacionReceptor || a?.fechaEncargo || '';
+      const fb = b?.fechaConfirmacionReceptor || b?.fechaEncargo || '';
+      return fb.localeCompare(fa);
+    });
+  return activos[0]?.receptorTurnoNombre || '';
+}
+
+function resumenTraspasoCausasVigentes() {
+  const causasVigentes = (CAUSAS || []).filter(c => c.categoria !== 'terminada');
+  const usuarios = new Set(causasVigentes.map(claveUsuarioTraspaso));
+  const hoy = todayISO();
+  const audienciasPendientes = causasVigentes.reduce((total, c) => total + (c.agendaEventos || []).filter(e =>
+    e.tipo === 'Audiencia' &&
+    isEventoActivo(e) &&
+    !!e.fecha &&
+    e.fecha >= hoy
+  ).length, 0);
+  const apelaciones = causasVigentes.filter(c => !!(c.recurso || c.rolIngreso || c.corteNombre || c.parteCorte)).length;
+  return { causasVigentes, usuarios: usuarios.size, audienciasPendientes, apelaciones };
+}
+
+function construirDatosTraspaso(causasVigentes, credencialesPorCausa = new Map()) {
+  const causasOrdenadas = causasVigentes.slice().sort((a, b) =>
+    String(a.fechaIngreso || '').localeCompare(String(b.fechaIngreso || '')) ||
+    String(rolCompletoTexto(a) || '').localeCompare(String(rolCompletoTexto(b) || ''))
+  );
+
+  const numeroPorCausa = new Map();
+  const causas = causasOrdenadas.map((c, idx) => {
+    const numero = idx + 1;
+    numeroPorCausa.set(String(c.id), numero);
+    const gestionActiva = pickActiveGestion(c);
+    const ultima = (c.cronologia || [])[0] || null;
+    return {
+      numero,
+      fechaIngreso: c.fechaIngreso || '',
+      tutor: c.tutor || '',
+      rut: c.rut || '',
+      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
+      tipoParte: c.patrocinadoTipo || c.parteRepresentada || '',
+      procedimiento: c.subcategoria || '',
+      materia: c.materia || '',
+      saj: c.folio || '',
+      caratulado: caratuladoTexto(c) || '',
+      rol: rolCompletoTexto(c) || '',
+      tribunal: tribunalTexto(c) || '',
+      etapa: c.etapa || '',
+      queSigue: gestionActiva?.descripcion || '',
+      ultimaGestion: ultima?.descripcion || '',
+      fechaUltimaGestion: ultima?.fecha || '',
+      estadoNotificacion: estadoNotificacionTraspaso(c),
+      receptor: receptorEncargadoTraspaso(c),
+      observaciones: c.observacionesTraspaso || ''
+    };
+  });
+
+  const usuariosMap = new Map();
+  causasOrdenadas.forEach(c => {
+    const key = claveUsuarioTraspaso(c);
+    const existente = usuariosMap.get(key) || {
+      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
+      rut: c.rut || '',
+      telefono: '',
+      telefonoAlt: '',
+      correo: '',
+      correoAlt: '',
+      clavePjud: '',
+      claveUnica: '',
+      observaciones: ''
+    };
+    existente.telefono ||= c.telefono || '';
+    existente.telefonoAlt ||= c.telefonoAlt || '';
+    existente.correo ||= c.correo || '';
+    existente.correoAlt ||= c.correoAlt || '';
+    existente.observaciones ||= c.nota || '';
+    const cred = credencialesPorCausa.get(String(c.id)) || {};
+    existente.clavePjud ||= cred.clavePjud || '';
+    existente.claveUnica ||= cred.claveUnica || '';
+    usuariosMap.set(key, existente);
+  });
+  const usuarios = Array.from(usuariosMap.values()).map((u, idx) => ({ numero: idx + 1, ...u }));
+
+  const hoy = todayISO();
+  const audiencias = [];
+  causasOrdenadas.forEach(c => {
+    (c.agendaEventos || []).forEach(e => {
+      if (e.tipo !== 'Audiencia' || !isEventoActivo(e) || !e.fecha || e.fecha < hoy) return;
+      audiencias.push({
+        rol: rolCompletoTexto(c) || '',
+        caratulado: caratuladoTexto(c) || '',
+        tribunal: tribunalTexto(c) || '',
+        materia: c.materia || c.subcategoria || '',
+        fecha: e.fecha || '',
+        hora: e.horaInicio || '',
+        tipoEvento: e.tipoAudiencia || 'Audiencia',
+        modalidad: e.modalidad || '',
+        link: e.enlace || '',
+        quePreparar: e.descripcion || e.titulo || '',
+        observaciones: e.observaciones || ''
+      });
+    });
+  });
+  audiencias.sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+  audiencias.forEach((a, idx) => { a.numero = idx + 1; });
+
+  const apelaciones = causasOrdenadas
+    .filter(c => !!(c.recurso || c.rolIngreso || c.corteNombre || c.parteCorte))
+    .map(c => ({
+      numero: numeroPorCausa.get(String(c.id)) || '',
+      rut: c.rut || '',
+      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
+      materia: c.materia || c.subcategoria || '',
+      saj: c.folio || '',
+      caratulado: caratuladoTexto(c) || '',
+      rol: rolCompletoTexto(c) || '',
+      tribunal: tribunalTexto(c) || '',
+      recurso: c.recurso || '',
+      rolCorte: c.rolIngreso || c.rolCA || '',
+      jurisdiccion: c.corteNombre || c.competencia || '',
+      parte: c.parteCorte || ''
+    }));
+
+  return { causas, usuarios, audiencias, apelaciones };
+}
+
+async function obtenerCredencialesTraspaso(causasVigentes) {
+  const estados = new Map();
+  let hayCredenciales = false;
+
+  for (const c of causasVigentes) {
+    const estado = await api.credentialsStatus(c.id);
+    estados.set(String(c.id), estado || {});
+    if (estado?.claveWebGuardada || estado?.claveUnicaGuardada) hayCredenciales = true;
   }
 
-  const camposHtml = INFORME_CAMPOS_GRUPOS.map(([grupo, campos]) => `
-    <section class="if-fields-card">
-      <div class="if-fields-head">
-        <div>
-          <div class="if-kicker">${escapeHtml(grupo === 'Datos básicos' ? 'Contenido' : grupo === 'Gestión' ? 'Seguimiento' : 'Agenda')}</div>
-          <h4>${escapeHtml(grupo)}</h4>
-        </div>
-        <span class="if-fields-count">${campos.filter(([key]) => informeFinalCampos[key]).length}/${campos.length}</span>
-      </div>
-      <div class="if-fields-grid">
-        ${campos.map(([key, label]) => `
-          <label class="if-field-option">
-            <input type="checkbox" class="informe-campo-check" data-campo="${key}" ${informeFinalCampos[key] ? 'checked' : ''}>
-            <span>${escapeHtml(label)}</span>
-          </label>`).join('')}
-      </div>
-    </section>`).join('');
+  const resultado = new Map();
+  if (!hayCredenciales) return resultado;
 
-  return `
-    <div class="if-shell">
-      <section class="if-hero">
+  const estadoPin = await api.pinStatus();
+  if (!estadoPin?.pinConfigurado) {
+    throw new Error('Hay credenciales guardadas, pero no existe un PIN de seguridad configurado.');
+  }
+
+  let pin = window.prompt('Ingresa tu PIN de seguridad de 4 dígitos para incluir las claves en el Excel de traspaso:');
+  if (pin === null) return null;
+  if (!/^\d{4}$/.test(pin)) throw new Error('El PIN debe tener exactamente 4 dígitos.');
+
+  try {
+    for (const c of causasVigentes) {
+      const estado = estados.get(String(c.id)) || {};
+      const cred = { clavePjud: '', claveUnica: '' };
+      if (estado.claveWebGuardada) {
+        const revelada = await api.credentialsReveal(c.id, 'claveWeb', pin);
+        cred.clavePjud = revelada?.valor || '';
+      }
+      if (estado.claveUnicaGuardada) {
+        const revelada = await api.credentialsReveal(c.id, 'claveUnica', pin);
+        cred.claveUnica = revelada?.valor || '';
+      }
+      resultado.set(String(c.id), cred);
+    }
+  } finally {
+    pin = '';
+  }
+
+  return resultado;
+}
+
+function renderInformeFinal() {
+  const container = document.getElementById('list-container');
+  const d = informeFinalDiagnosticoDatos();
+  const traspasoResumen = resumenTraspasoCausasVigentes();
+
+  const pendInforme = [];
+  if (!d.nombre) pendInforme.push('Nombre del postulante');
+  if (!d.caj) pendInforme.push('CAJ asignado');
+  if (!d.tutores.length) pendInforme.push('Abogado/a tutor/a');
+  if (!d.causas.length) pendInforme.push('Causas asignadas');
+  if (d.causasBasicasCompletas < d.causas.length) pendInforme.push(`Antecedentes básicos incompletos en ${d.causas.length - d.causasBasicasCompletas} causa(s)`);
+  if (d.causasConCronologia < d.causas.length) pendInforme.push(`Relato/cronología de gestiones pendiente en ${d.causas.length - d.causasConCronologia} causa(s)`);
+
+  const reqInforme = 4 + d.causas.length * 2;
+  const dispInforme =
+    (d.nombre ? 1 : 0) +
+    (d.caj ? 1 : 0) +
+    (d.tutores.length ? 1 : 0) +
+    (d.causas.length ? 1 : 0) +
+    d.causasBasicasCompletas +
+    d.causasConCronologia;
+  const estadoInforme = informeFinalEstadoDocumento({ disponibles: dispInforme, total: reqInforme });
+
+  const informeDatos = [
+    informeFinalDatoFila('Postulante', d.nombre, !!d.nombre),
+    informeFinalDatoFila('RUN', d.rut, !!d.rut),
+    informeFinalDatoFila('CAJ', d.caj ? `CAJ ${d.caj}` : '', !!d.caj),
+    informeFinalDatoFila('Abogado/a jefe', d.abogadoJefe, !!d.abogadoJefe),
+    informeFinalDatoFila('Tutor/a', d.tutores.join(', '), d.tutores.length > 0),
+    informeFinalDatoFila('Causas registradas', d.causas.length, d.causas.length > 0),
+    informeFinalDatoFila('Causas con antecedentes básicos', `${d.causasBasicasCompletas}/${d.causas.length}`, d.causas.length > 0 && d.causasBasicasCompletas === d.causas.length),
+    informeFinalDatoFila('Causas con cronología', `${d.causasConCronologia}/${d.causas.length}`, d.causas.length > 0 && d.causasConCronologia === d.causas.length)
+  ].join('');
+
+  const pendF9 = [];
+  if (!d.causas.length) pendF9.push('Causas asignadas');
+  if (d.causasConSaj < d.causas.length) pendF9.push(`Folio SAJ pendiente en ${d.causas.length - d.causasConSaj} causa(s)`);
+  if (d.causasBasicasCompletas < d.causas.length) pendF9.push(`Patrocinado, materia, ROL/RIT o tribunal incompleto en ${d.causas.length - d.causasBasicasCompletas} causa(s)`);
+  if (d.causasConOrigen < d.causas.length) pendF9.push(`Origen Nueva/Traspasada pendiente en ${d.causas.length - d.causasConOrigen} causa(s)`);
+  if (d.causasConPatrocinadoF9 < d.causas.length) pendF9.push(`No fue posible determinar automáticamente apellidos y nombres en ${d.causas.length - d.causasConPatrocinadoF9} causa(s)`);
+
+  const reqF9 = 1 + d.causas.length * 4;
+  const dispF9 = (d.causas.length ? 1 : 0) + d.causasBasicasCompletas + d.causasConSaj + d.causasConOrigen + d.causasConPatrocinadoF9;
+  const estadoF9 = informeFinalEstadoDocumento({ disponibles: dispF9, total: reqF9 });
+
+  const f9Datos = [
+    informeFinalDatoFila('Causas registradas', d.causas.length, d.causas.length > 0),
+    informeFinalDatoFila('Con datos básicos completos', `${d.causasBasicasCompletas}/${d.causas.length}`, d.causas.length > 0 && d.causasBasicasCompletas === d.causas.length),
+    informeFinalDatoFila('Con folio SAJ', `${d.causasConSaj}/${d.causas.length}`, d.causas.length > 0 && d.causasConSaj === d.causas.length),
+    informeFinalDatoFila('Con origen Nueva/Traspasada', `${d.causasConOrigen}/${d.causas.length}`, d.causas.length > 0 && d.causasConOrigen === d.causas.length),
+    informeFinalDatoFila('Patrocinados identificados', `${d.causasConPatrocinadoF9}/${d.causas.length}`, d.causas.length > 0 && d.causasConPatrocinadoF9 === d.causas.length),
+    informeFinalDatoFila('Terminadas', d.causasTerminadas, true)
+  ].join('');
+
+  const pendF10 = [];
+  if (!d.nombre) pendF10.push('Nombre del postulante');
+  if (!d.rut) pendF10.push('RUN del postulante');
+  if (!d.caj) pendF10.push('Unidad operativa / CAJ');
+  if (!d.abogadoJefe) pendF10.push('Abogado/a jefe de la unidad operativa');
+  if (!d.tutores.length) pendF10.push('Abogado/a tutor/a');
+  if (!d.inicio) pendF10.push('Fecha de inicio de práctica');
+  if (!d.termino) pendF10.push('Fecha de término de práctica');
+  if (!d.jornadaDefinida) pendF10.push('Jornada de práctica definida');
+  if (!d.asistenciaCompletada) pendF10.push('Registro de asistencia e inasistencias');
+  if (!d.revisionesRegistradas) pendF10.push('Fechas de revisiones intermedias');
+  if (!d.fechasAdministrativasCompletas) pendF10.push(`Fechas administrativas del proceso de pre-evaluación (${d.fechasAdministrativasCantidad}/4)`);
+  if (!d.apercibimientoRespondido) pendF10.push('Apercibimientos');
+  if (!d.honorariosRespondido) pendF10.push('Honorarios/costas percibidos');
+  if (!d.alegatos.cumplido) pendF10.push(`Alegatos requeridos por completar (${d.alegatos.totalRegistrado}/5)`);
+
+
+  const f10Disponibles =
+    (d.nombre ? 1 : 0) +
+    (d.rut ? 1 : 0) +
+    (d.caj ? 1 : 0) +
+    (d.abogadoJefe ? 1 : 0) +
+    (d.tutores.length ? 1 : 0) +
+    (d.inicio ? 1 : 0) +
+    (d.termino ? 1 : 0) +
+    (d.jornadaDefinida ? 1 : 0) +
+    (d.asistenciaCompletada ? 1 : 0) +
+    (d.revisionesRegistradas ? 1 : 0) +
+    (d.apercibimientoRespondido ? 1 : 0) +
+    (d.honorariosRespondido ? 1 : 0) +
+    (d.fechasAdministrativasCompletas ? 1 : 0) +
+    (d.alegatos.cumplido ? 1 : 0) +
+    (d.causas.length ? 1 : 0) +
+    1 +
+    (d.justificacionCompleta ? 1 : 0);
+  const estadoF10 = informeFinalEstadoDocumento({ disponibles: f10Disponibles, total: 17 });
+  if (estadoF10.porcentaje === 100) estadoF10.label = 'Datos del postulante completos';
+
+  const f10Datos = [
+    informeFinalDatoFila('Postulante', d.nombre, !!d.nombre),
+    informeFinalDatoFila('RUN', d.rut, !!d.rut),
+    informeFinalDatoFila('CAJ', d.caj ? `CAJ ${d.caj}` : '', !!d.caj),
+    informeFinalDatoFila('Abogado/a jefe', d.abogadoJefe, !!d.abogadoJefe),
+    informeFinalDatoFila('Tutor/a', d.tutores.join(', '), d.tutores.length > 0),
+    informeFinalDatoFila('Inicio de práctica', d.inicio ? fmtFechaSolo(d.inicio) : '', !!d.inicio),
+    informeFinalDatoFila('Término de práctica', d.termino ? fmtFechaSolo(d.termino) : '', !!d.termino),
+    informeFinalDatoFila('Jornada definida', d.jornada, d.jornadaDefinida),
+    informeFinalDatoFila('Asistencia', d.asistenciaCompletada ? 'Confirmada' : '', d.asistenciaCompletada),
+    informeFinalDatoFila('Revisiones intermedias', d.revisionesRegistradas ? [d.revisionIntermedia1, d.revisionIntermedia2].filter(Boolean).map(fmtFechaSolo).join(' · ') : '', d.revisionesRegistradas),
+    informeFinalDatoFila('Apercibimientos', d.apercibimientoRespondido ? (CURRENT_PRACTICA.apercibimiento ? 'Sí' : 'No') : '', d.apercibimientoRespondido),
+    informeFinalDatoFila('Honorarios/costas', d.honorariosRespondido ? (CURRENT_PRACTICA.honorariosCostas ? 'Sí' : 'No') : '', d.honorariosRespondido),
+    informeFinalDatoFila('Fechas administrativas', `${d.fechasAdministrativasCantidad}/4`, d.fechasAdministrativasCompletas),
+    informeFinalDatoFila('Alegatos registrados', `${d.alegatos.totalRegistrado}/5`, d.alegatos.cumplido),
+    informeFinalDatoFila('Causas para estadísticas', d.causas.length, d.causas.length > 0),
+    informeFinalDatoFila('Audiencias realizadas detectadas', d.audiencias.length, true),
+    informeFinalDatoFila('Justificación calificación', d.justificacionRespondida ? (d.justificacionAplica ? `${d.justificacionTipo === 'deficiente' ? 'Deficiente' : 'Sobresaliente'} · ${d.justificacionCausas.length} causa(s)` : 'No corresponde') : '', d.justificacionCompleta)
+  ].join('');
+
+  const estadoTraspaso = informeFinalEstadoDocumento({
+    disponibles: traspasoResumen.causasVigentes.length > 0 ? 1 : 0,
+    total: 1
+  });
+  if (estadoTraspaso.porcentaje === 100) estadoTraspaso.label = 'Listo para generar';
+
+  const traspasoDatos = [
+    informeFinalDatoFila('Causas vigentes', traspasoResumen.causasVigentes.length, traspasoResumen.causasVigentes.length > 0),
+    informeFinalDatoFila('Usuarios incluidos', traspasoResumen.usuarios, traspasoResumen.causasVigentes.length > 0),
+    informeFinalDatoFila('Audiencias pendientes', traspasoResumen.audienciasPendientes, true),
+    informeFinalDatoFila('Causas con apelaciones', traspasoResumen.apelaciones, true)
+  ].join('');
+
+  container.innerHTML = `
+    <div class="if-shell if-inst-shell">
+      <section class="if-hero if-inst-hero">
         <div>
           <div class="if-kicker">Cierre de práctica</div>
           <h2>Informe Final</h2>
+          <p>Generación de documentos de cierre y traspaso de la práctica profesional.</p>
         </div>
-        <div class="if-hero-meta">
-          <span class="if-hero-number">${causas.length}</span>
-          <span>causas</span>
-        </div>
-      </section>
-
-      <section class="if-config-card">
-        <div class="if-config-head">
-          <div>
-            <div class="if-kicker">Configuración</div>
-            <h3>Preparar informe</h3>
-          </div>
-          <span class="if-readonly-badge">Solo lectura</span>
-        </div>
-
-        <div class="if-config-grid">
-          <div class="if-control">
-            <label for="informe-filtro">Causas a incluir</label>
-            <select id="informe-filtro">
-              ${opcionesFiltro.map(([v, l]) => `<option value="${v}" ${informeFinalFiltro === v ? 'selected' : ''}>${l}</option>`).join('')}
-            </select>
-            <span class="if-control-meta">${causas.length} causa${causas.length === 1 ? '' : 's'} coincide${causas.length === 1 ? '' : 'n'} con este filtro</span>
-          </div>
-
-          <div class="if-control">
-            <label for="informe-orden">Orden del informe</label>
-            <select id="informe-orden">
-              ${INFORME_ORDEN_OPCIONES.map(([v, l]) => `<option value="${v}" ${informeFinalOrden === v ? 'selected' : ''}>${l}</option>`).join('')}
-            </select>
-            <span class="if-control-meta">Define cómo se agrupan las causas en el documento</span>
-          </div>
-        </div>
-
-        ${manualHtml}
-      </section>
-
-      <section class="if-content-section">
-        <div class="if-section-heading">
-          <div>
-            <div class="if-kicker">Contenido del informe</div>
-            <h3>Campos a incluir</h3>
-          </div>
-          <span class="if-selection-summary">${camposSeleccionados}/${totalCampos} seleccionados</span>
-        </div>
-        <div class="if-fields-layout">
-          ${camposHtml}
+        <div class="if-inst-hero-badge">
+          <span class="if-inst-lock">▣</span>
+          <span>Plantillas institucionales protegidas</span>
         </div>
       </section>
 
-      <div class="if-primary-action">
-        <button class="btn primary" id="informe-ver-preview" type="button">Vista previa</button>
+
+      <div class="if-inst-documents">
+        ${informeFinalDocumentoCard({
+          numero: '01',
+          titulo: 'Informe de Práctica Profesional',
+          subtitulo: 'Informe narrativo por causa, conservando la portada, estructura y distribución del modelo institucional.',
+          estado: estadoInforme,
+          datosHtml: informeDatos,
+          pendientes: pendInforme,
+          nota: 'Plantilla maestra DOCX · no se altera el diseño institucional'
+        })}
+
+        ${informeFinalDocumentoCard({
+          numero: '09',
+          titulo: 'Formulario N° 9 — Listado de causas asignadas',
+          subtitulo: 'Listado institucional con datos del patrocinado y antecedentes de cada causa.',
+          estado: estadoF9,
+          datosHtml: f9Datos,
+          pendientes: pendF9,
+          nota: 'Plantilla maestra DOCX · las filas se completarán automáticamente con los datos de cada ficha'
+        })}
+
+        ${informeFinalDocumentoCard({
+          numero: '10',
+          titulo: 'Formulario N° 10 — Informe de pre-evaluación',
+          subtitulo: 'Prellenado de antecedentes objetivos, estadísticas, audiencias y demás información disponible en la app.',
+          estado: estadoF10,
+          datosHtml: f10Datos,
+          pendientes: pendF10,
+          nota: 'Calificaciones, observaciones y firmas corresponden al evaluador y no afectan el estado de completitud del postulante',
+          contenidoExtra: `
+            <div class="if-form10-master">
+              <button class="if-form10-master-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-form10-datos') ? 'is-open' : ''}" id="if-toggle-form10-datos" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-form10-datos') ? 'true' : 'false'}" aria-controls="if-form10-datos-panel">
+                <span class="if-form10-master-copy">
+                  <span class="if-kicker">Datos complementarios</span>
+                  <strong>Completar Formulario N°10</strong>
+                  <small>Asistencia, revisiones, audiencias, alegatos y demás antecedentes del cierre de práctica</small>
+                </span>
+                <span class="if-form10-master-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-master-panel" id="if-form10-datos-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-form10-datos') ? '' : 'hidden'}>
+                <div class="if-inst-sections">
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-asistencia') ? 'is-open' : ''}" id="if-toggle-asistencia" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-asistencia') ? 'true' : 'false'}" aria-controls="if-asistencia-panel">
+                <span>
+                  <span class="if-inst-section-number">2.1</span>
+                  <strong>Asistencia</strong>
+                  <small>Jornada, presentes, ausencias, licencias médicas y días recuperados</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-att-panel if-att-panel-embedded" id="if-asistencia-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-asistencia') ? '' : 'hidden'}>
+                <div class="if-att-loading">Cargando asistencia…</div>
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-revisiones') ? 'is-open' : ''}" id="if-toggle-revisiones" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-revisiones') ? 'true' : 'false'}" aria-controls="if-revisiones-panel">
+                <span>
+                  <span class="if-inst-section-number">2.2</span>
+                  <strong>Revisiones intermedias</strong>
+                  <small>Fechas de revisión de causas asignadas</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-revisiones-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-revisiones') ? '' : 'hidden'}>
+                <div class="if-form10-grid2">
+                  <div>
+                    <label>1ª revisión</label>
+                    <input type="date" class="ct-input" id="if-revision-1" value="${escapeHtml(CURRENT_PRACTICA?.revisionIntermedia1 || '')}">
+                  </div>
+                  <div>
+                    <label>2ª revisión</label>
+                    <input type="date" class="ct-input" id="if-revision-2" value="${escapeHtml(CURRENT_PRACTICA?.revisionIntermedia2 || '')}">
+                  </div>
+                </div>
+                <div class="if-form10-actions"><button class="btn primary small" id="if-guardar-revisiones" type="button">Guardar revisiones</button></div>
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-apercibimientos') ? 'is-open' : ''}" id="if-toggle-apercibimientos" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-apercibimientos') ? 'true' : 'false'}" aria-controls="if-apercibimientos-panel">
+                <span>
+                  <span class="if-inst-section-number">2.3</span>
+                  <strong>Apercibimientos realizados</strong>
+                  <small>Indica si existió apercibimiento y su fecha, cuando corresponda</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-apercibimientos-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-apercibimientos') ? '' : 'hidden'}>
+                <div class="if-form10-grid2">
+                  <div>
+                    <label>Apercibimiento</label>
+                    <select class="ct-input" id="if-apercibimiento">
+                      <option value="" ${CURRENT_PRACTICA?.apercibimiento === null || CURRENT_PRACTICA?.apercibimiento === undefined ? 'selected' : ''}>Sin informar</option>
+                      <option value="si" ${CURRENT_PRACTICA?.apercibimiento === true ? 'selected' : ''}>Sí</option>
+                      <option value="no" ${CURRENT_PRACTICA?.apercibimiento === false ? 'selected' : ''}>No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Fecha</label>
+                    <input type="date" class="ct-input" id="if-apercibimiento-fecha" value="${escapeHtml(CURRENT_PRACTICA?.apercibimientoFecha || '')}">
+                  </div>
+                </div>
+                <div class="if-form10-actions"><button class="btn primary small" id="if-guardar-apercibimiento" type="button">Guardar apercibimiento</button></div>
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-honorarios') ? 'is-open' : ''}" id="if-toggle-honorarios" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-honorarios') ? 'true' : 'false'}" aria-controls="if-honorarios-panel">
+                <span>
+                  <span class="if-inst-section-number">2.4</span>
+                  <strong>Honorarios / costas percibidos</strong>
+                  <small>Indica si se percibieron costas y, de corresponder, el monto</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-honorarios-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-honorarios') ? '' : 'hidden'}>
+                <div class="if-form10-grid2">
+                  <div>
+                    <label>¿Percibió honorarios/costas?</label>
+                    <select class="ct-input" id="if-honorarios">
+                      <option value="" ${CURRENT_PRACTICA?.honorariosCostas === null || CURRENT_PRACTICA?.honorariosCostas === undefined ? 'selected' : ''}>Sin informar</option>
+                      <option value="si" ${CURRENT_PRACTICA?.honorariosCostas === true ? 'selected' : ''}>Sí</option>
+                      <option value="no" ${CURRENT_PRACTICA?.honorariosCostas === false ? 'selected' : ''}>No</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Monto</label>
+                    <input type="number" min="0" step="1" class="ct-input" id="if-honorarios-monto" value="${CURRENT_PRACTICA?.honorariosCostasMonto ?? ''}" placeholder="0">
+                  </div>
+                </div>
+                <div class="if-form10-actions"><button class="btn primary small" id="if-guardar-honorarios" type="button">Guardar honorarios/costas</button></div>
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-audiencias') ? 'is-open' : ''}" id="if-toggle-audiencias" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-audiencias') ? 'true' : 'false'}" aria-controls="if-audiencias-panel">
+                <span>
+                  <span class="if-inst-section-number">2.5</span>
+                  <strong>Habilitación de audiencias</strong>
+                  <small>Audiencias realizadas detectadas automáticamente desde la Agenda de las causas</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-audiencias-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-audiencias') ? '' : 'hidden'}>
+                <div class="if-form10-source-note">Esta sección es automática. Solo se incorporan eventos de tipo <strong>Audiencia</strong> cuyo estado sea <strong>Realizado</strong>.</div>
+                ${informeFinalAudienciasHtml(d.audiencias)}
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-fechas-admin') ? 'is-open' : ''}" id="if-toggle-fechas-admin" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-fechas-admin') ? 'true' : 'false'}" aria-controls="if-fechas-admin-panel">
+                <span>
+                  <span class="if-inst-section-number">ADM</span>
+                  <strong>Fechas administrativas</strong>
+                  <small>Hitos de cierre y tramitación del proceso de pre-evaluación</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-fechas-admin-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-fechas-admin') ? '' : 'hidden'}>
+                <div class="if-form10-grid2">
+                  <div>
+                    <label>Entrega de carpetas a revisión</label>
+                    <input type="date" class="ct-input" id="if-fecha-carpetas-revision" value="${escapeHtml(CURRENT_PRACTICA?.fechaEntregaCarpetasRevision || '')}">
+                  </div>
+                  <div>
+                    <label>Entrega del informe final de práctica</label>
+                    <input type="date" class="ct-input" id="if-fecha-informe-final" value="${escapeHtml(CURRENT_PRACTICA?.fechaEntregaInformeFinal || '')}">
+                  </div>
+                  <div>
+                    <label>Entrega del pre-informe por abogado/a tutor/a</label>
+                    <input type="date" class="ct-input" id="if-fecha-preinforme-tutor" value="${escapeHtml(CURRENT_PRACTICA?.fechaEntregaPreinformeTutor || '')}">
+                  </div>
+                  <div>
+                    <label>Comunicación de propuesta de evaluación al postulante</label>
+                    <input type="date" class="ct-input" id="if-fecha-comunicacion-evaluacion" value="${escapeHtml(CURRENT_PRACTICA?.fechaComunicacionPropuestaEvaluacion || '')}">
+                  </div>
+                </div>
+                <div class="if-form10-institution-note">
+                  <strong>Campos institucionales:</strong>
+                  “Fecha de Recepción en Dirección Regional o Contraparte Técnica” y
+                  “Fecha de Recepción en Unidad de Prácticas Profesionales” se dejarán
+                  en blanco en el documento, ya que no corresponde completarlos al postulante.
+                </div>
+                <div class="if-form10-admin-status">Completadas por el postulante: <strong>${d.fechasAdministrativasCantidad}/4</strong></div>
+                <div class="if-form10-actions"><button class="btn primary small" id="if-guardar-fechas-admin" type="button">Guardar fechas administrativas</button></div>
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-alegatos') ? 'is-open' : ''}" id="if-toggle-alegatos" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-alegatos') ? 'true' : 'false'}" aria-controls="if-alegatos-panel">
+                <span>
+                  <span class="if-inst-section-number">2.6</span>
+                  <strong>Comparecencia a alegatos</strong>
+                  <small>Alegatos propios y registro manual de asistencias como oyente</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-alegatos-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-alegatos') ? '' : 'hidden'}>
+                ${(() => {
+                  const r = resumenCumplimientoAlegatos();
+                  return `
+                    <div class="if-alegatos-summary">
+                      <div><span>Alegatos como parte</span><strong>${r.propios.length}</strong></div>
+                      <div><span>Oyente requeridos</span><strong>${r.oyentesRequeridos}</strong></div>
+                      <div><span>Oyente registrados</span><strong>${r.oyentes.length}</strong></div>
+                      <div><span>Pendientes</span><strong>${r.oyentesPendientes}</strong></div>
+                    </div>
+
+                    <div class="if-alegatos-subhead">Alegatos provenientes de Programación de salas</div>
+                    ${r.propios.length ? `
+                      <div class="if-alegatos-table">
+                        <div class="if-alegatos-table-head"><span>NIC/ROL</span><span>Jurisdicción</span><span>Materia</span><span>Fecha</span><span>Participación</span></div>
+                        ${r.propios.map(a => `<div class="if-alegatos-table-row"><span>${escapeHtml(a.nicRol || '—')}</span><span>${escapeHtml(a.corte || '—')}</span><span>${escapeHtml(a.materia)}</span><span>${escapeHtml(a.fecha ? fmtFechaSolo(a.fecha) : '—')}</span><span>${escapeHtml(a.participacion || 'Sin definir')}</span></div>`).join('')}
+                      </div>
+                    ` : `<div class="if-alegatos-empty">No hay causas marcadas como alegadas en Programación de salas.</div>`}
+
+                    <div class="if-alegatos-subhead">Alegatos como oyente</div>
+                    <div id="if-alegatos-oyente-list">${alegatosOyenteFilasHtml()}</div>
+
+                    <div class="if-alegato-new">
+                      <div><label>NIC / ROL</label><input class="ct-input" id="if-ao-new-nic" placeholder="Ej.: 1234-2026"></div>
+                      <div>
+                        <label>Jurisdicción</label>
+                        <select class="ct-input" id="if-ao-new-corte">
+                          <option value="">Sin definir</option>
+                          ${JURISDICCION_CORTE_OPCIONES.map(j => `<option value="${j}">${j}</option>`).join('')}
+                        </select>
+                      </div>
+                      <div><label>Materia</label><input class="ct-input" id="if-ao-new-materia" placeholder="Civil, Familia, Laboral…"></div>
+                      <div><label>Fecha</label><input type="date" class="ct-input" id="if-ao-new-fecha"></div>
+                      <div class="if-alegato-participacion"><label>Participación</label><div class="if-alegato-static">Oyente</div></div>
+                      <div class="if-alegato-actions"><button class="btn primary small" id="if-agregar-alegato-oyente" type="button">Agregar oyente</button></div>
+                    </div>
+                  `;
+                })()}
+              </section>
+
+              <button class="if-inst-section-toggle ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-justificacion') ? 'is-open' : ''}" id="if-toggle-justificacion" type="button" aria-expanded="${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-justificacion') ? 'true' : 'false'}" aria-controls="if-justificacion-panel">
+                <span>
+                  <span class="if-inst-section-number">7</span>
+                  <strong>Justificación de calificación sobresaliente / deficiente</strong>
+                  <small>Selección manual de las causas que justifican esta sección, cuando corresponda</small>
+                </span>
+                <span class="if-inst-section-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <section class="if-form10-panel" id="if-justificacion-panel" ${INFORME_FINAL_SECCIONES_ABIERTAS.has('if-toggle-justificacion') ? '' : 'hidden'}>
+                <div class="if-form10-grid2">
+                  <div>
+                    <label>¿Corresponde completar la sección 7?</label>
+                    <select class="ct-input" id="if-justificacion-aplica">
+                      <option value="" ${d.justificacionRespondida ? '' : 'selected'}>Sin definir</option>
+                      <option value="no" ${d.justificacionAplica === false ? 'selected' : ''}>No</option>
+                      <option value="si" ${d.justificacionAplica === true ? 'selected' : ''}>Sí</option>
+                    </select>
+                  </div>
+                  <div id="if-justificacion-tipo-wrap" ${d.justificacionAplica === true ? '' : 'hidden'}>
+                    <label>Tipo de justificación</label>
+                    <select class="ct-input" id="if-justificacion-tipo">
+                      <option value="">Sin definir</option>
+                      <option value="sobresaliente" ${d.justificacionTipo === 'sobresaliente' ? 'selected' : ''}>Sobresaliente</option>
+                      <option value="deficiente" ${d.justificacionTipo === 'deficiente' ? 'selected' : ''}>Deficiente</option>
+                    </select>
+                  </div>
+                </div>
+                <div id="if-justificacion-causas-wrap" ${d.justificacionAplica === true ? '' : 'hidden'}>
+                  <div class="if-form10-source-note">Selecciona únicamente las causas que deban incorporarse en la sección 7. ROL/RIT, tribunal y materia se completarán automáticamente; tú indicas las gestiones concretas que justifican la calificación.</div>
+                  <div class="if-just-causas-list">${informeFinalJustificacionCausasHtml()}</div>
+                </div>
+                <div class="if-form10-actions"><button class="btn primary small" id="if-guardar-justificacion" type="button">Guardar sección 7</button></div>
+              </section>
+                </div>
+              </section>
+            </div>
+          `
+        })}
+
+        ${informeFinalDocumentoCard({
+          numero: 'TR',
+          titulo: 'Traspaso de causas vigentes',
+          estado: estadoTraspaso,
+          datosHtml: traspasoDatos,
+          kicker: 'Documento de traspaso',
+          buttonLabel: 'Generar Excel'
+        })}
       </div>
 
-      <section class="if-audiencias-card">
-        <div class="if-audiencias-head">
-          <div>
-            <div class="if-kicker">Registro de práctica</div>
-            <h3>Resumen de audiencias asistidas</h3>
-          </div>
-          <div class="if-audiencias-count"><strong>${audiencias.length}</strong><span>realizadas</span></div>
-        </div>
 
-        ${!audiencias.length
-          ? `<div class="if-empty"><span class="if-empty-check">✓</span><span>Sin audiencias realizadas registradas</span></div>`
-          : `
-            <div class="if-table-wrap">
-              <table class="ficha-table if-audiencias-table">
-                <thead><tr><th>Tipo audiencia</th><th>Fecha</th><th>RIT</th><th>Materia</th><th>Tribunal</th></tr></thead>
-                <tbody>
-                  ${audiencias.map(a => `<tr>
-                    <td>${escapeHtml(a.tipoAudiencia)}</td>
-                    <td>${escapeHtml(fmtFechaSolo(a.fecha))}</td>
-                    <td>${escapeHtml(a.rit)}</td>
-                    <td>${escapeHtml(a.materia)}</td>
-                    <td>${escapeHtml(a.tribunal)}</td>
-                  </tr>`).join('')}
-                </tbody>
-              </table>
-            </div>
-            <div class="if-audiencias-actions">
-              <button class="btn small" id="informe-audiencias-excel" type="button">Descargar Excel</button>
-            </div>`
-        }
-      </section>
-    </div>`;
-}
-function wireInformeFinalConfigurador(container) {
-  const filtroSel = container.querySelector('#informe-filtro');
-  filtroSel.addEventListener('change', () => { informeFinalFiltro = filtroSel.value; renderInformeFinal(); });
+    </div>
+  `;
 
-  const ordenSel = container.querySelector('#informe-orden');
-  ordenSel.addEventListener('change', () => { informeFinalOrden = ordenSel.value; });
+  function wireSeccionF10(toggleId, panelId, { onOpen } = {}) {
+    const toggle = document.getElementById(toggleId);
+    const panel = document.getElementById(panelId);
+    if (!toggle || !panel) return;
 
-  container.querySelectorAll('.informe-campo-check').forEach(chk => {
-    chk.addEventListener('change', () => { informeFinalCampos[chk.dataset.campo] = chk.checked; });
+    const aplicarEstado = async (abrir) => {
+      panel.hidden = !abrir;
+      toggle.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+      toggle.classList.toggle('is-open', abrir);
+      if (abrir) {
+        INFORME_FINAL_SECCIONES_ABIERTAS.add(toggleId);
+        guardarSeccionesInformeFinalAbiertas();
+        if (onOpen) await onOpen(panel);
+      } else {
+        INFORME_FINAL_SECCIONES_ABIERTAS.delete(toggleId);
+        guardarSeccionesInformeFinalAbiertas();
+      }
+    };
+
+    toggle.addEventListener('click', async () => {
+      await aplicarEstado(panel.hidden);
+    });
+
+    if (INFORME_FINAL_SECCIONES_ABIERTAS.has(toggleId)) {
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.classList.add('is-open');
+      panel.hidden = false;
+      if (onOpen) void onOpen(panel);
+    }
+  }
+
+  wireSeccionF10('if-toggle-form10-datos', 'if-form10-datos-panel');
+
+  wireSeccionF10('if-toggle-asistencia', 'if-asistencia-panel', {
+    onOpen: async panel => {
+      if (panel.dataset.loaded === 'true') return;
+      panel.dataset.loaded = 'true';
+      await cargarAsistenciaInformeFinal();
+    }
   });
+  wireSeccionF10('if-toggle-revisiones', 'if-revisiones-panel');
+  wireSeccionF10('if-toggle-apercibimientos', 'if-apercibimientos-panel');
+  wireSeccionF10('if-toggle-honorarios', 'if-honorarios-panel');
+  wireSeccionF10('if-toggle-audiencias', 'if-audiencias-panel');
+  wireSeccionF10('if-toggle-fechas-admin', 'if-fechas-admin-panel');
+  wireSeccionF10('if-toggle-alegatos', 'if-alegatos-panel');
+  wireSeccionF10('if-toggle-justificacion', 'if-justificacion-panel');
 
-  container.querySelectorAll('.informe-causa-check').forEach(chk => {
+  const justificacionAplicaSelect = document.getElementById('if-justificacion-aplica');
+  const justificacionTipoWrap = document.getElementById('if-justificacion-tipo-wrap');
+  const justificacionCausasWrap = document.getElementById('if-justificacion-causas-wrap');
+  function syncJustificacionUi() {
+    const aplica = justificacionAplicaSelect?.value === 'si';
+    if (justificacionTipoWrap) justificacionTipoWrap.hidden = !aplica;
+    if (justificacionCausasWrap) justificacionCausasWrap.hidden = !aplica;
+  }
+  justificacionAplicaSelect?.addEventListener('change', syncJustificacionUi);
+  syncJustificacionUi();
+  document.querySelectorAll('.if-just-causa-check').forEach(chk => {
     chk.addEventListener('change', () => {
-      if (chk.checked) informeFinalSeleccion.add(chk.dataset.id);
-      else informeFinalSeleccion.delete(chk.dataset.id);
-      renderInformeFinal();
+      const card = chk.closest('.if-just-causa');
+      const detail = card?.querySelector('.if-just-detail');
+      if (detail) detail.hidden = !chk.checked;
+      card?.classList.toggle('is-selected', chk.checked);
     });
   });
-  const selectAll = container.querySelector('#informe-select-all');
-  if (selectAll) selectAll.addEventListener('change', () => {
-    if (selectAll.checked) CAUSAS.forEach(c => informeFinalSeleccion.add(c.id));
-    else informeFinalSeleccion.clear();
-    renderInformeFinal();
-  });
-  const deselectAll = container.querySelector('#informe-deselect-all');
-  if (deselectAll) deselectAll.addEventListener('click', () => { informeFinalSeleccion.clear(); renderInformeFinal(); });
 
-  container.querySelector('#informe-ver-preview').addEventListener('click', () => {
-    informeFinalEtapa = 'preview';
-    renderInformeFinal();
+  const apercibimientoSelect = document.getElementById('if-apercibimiento');
+  const apercibimientoFecha = document.getElementById('if-apercibimiento-fecha');
+  function syncApercibimientoFecha() {
+    if (!apercibimientoSelect || !apercibimientoFecha) return;
+    const requiereFecha = apercibimientoSelect.value === 'si';
+    apercibimientoFecha.disabled = !requiereFecha;
+    if (!requiereFecha) apercibimientoFecha.value = '';
+  }
+  if (apercibimientoSelect) {
+    syncApercibimientoFecha();
+    apercibimientoSelect.addEventListener('change', syncApercibimientoFecha);
+  }
+
+  const honorariosSelect = document.getElementById('if-honorarios');
+  const honorariosMonto = document.getElementById('if-honorarios-monto');
+  function syncHonorariosMonto() {
+    if (!honorariosSelect || !honorariosMonto) return;
+    const requiereMonto = honorariosSelect.value === 'si';
+    honorariosMonto.disabled = !requiereMonto;
+    if (!requiereMonto) honorariosMonto.value = '';
+  }
+  if (honorariosSelect) {
+    syncHonorariosMonto();
+    honorariosSelect.addEventListener('change', syncHonorariosMonto);
+  }
+
+  function actualizarInformeFinalManteniendoSeccion(toggleId) {
+    INFORME_FINAL_SECCIONES_ABIERTAS.add(toggleId);
+    guardarSeccionesInformeFinalAbiertas();
+    actualizarResumenFormulario10SinRecarga();
+  }
+
+  document.getElementById('if-guardar-revisiones')?.addEventListener('click', async e => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const guardado = await api.updatePracticaCierre(CURRENT_USER.id, CURRENT_PRACTICA.id, {
+        revisionIntermedia1: document.getElementById('if-revision-1')?.value || null,
+        revisionIntermedia2: document.getElementById('if-revision-2')?.value || null
+      });
+      Object.assign(CURRENT_PRACTICA, guardado || {});
+      toast('Revisiones intermedias guardadas');
+      btn.disabled = false;
+      actualizarInformeFinalManteniendoSeccion('if-toggle-revisiones');
+    } catch (err) {
+      toast('No se pudieron guardar las revisiones: ' + err.message);
+      btn.disabled = false;
+    }
   });
 
-  const excelBtn = container.querySelector('#informe-audiencias-excel');
-  if (excelBtn) excelBtn.addEventListener('click', () => {
-    const audiencias = resumenAudienciasAsistidas(CAUSAS);
-    const filasHoja = [
-      ['TIPO AUDIENCIA', 'FECHA', 'RIT', 'MATERIA', 'TRIBUNAL'],
-      ...audiencias.map(a => [a.tipoAudiencia, fmtFechaSolo(a.fecha), a.rit, a.materia, a.tribunal])
-    ];
-    const hoja = XLSX.utils.aoa_to_sheet(filasHoja);
-    const libro = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, 'Audiencias');
-    XLSX.writeFile(libro, `resumen_audiencias_${todayISO()}.xlsx`);
+  document.getElementById('if-guardar-apercibimiento')?.addEventListener('click', async e => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const valor = document.getElementById('if-apercibimiento')?.value || '';
+    const fecha = document.getElementById('if-apercibimiento-fecha')?.value || null;
+    if (!valor) { toast('Indica Sí o No en apercibimiento.'); return; }
+    if (valor === 'si' && !fecha) { toast('Indica la fecha del apercibimiento.'); return; }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const guardado = await api.updatePracticaCierre(CURRENT_USER.id, CURRENT_PRACTICA.id, {
+        apercibimiento: valor === 'si',
+        apercibimientoFecha: valor === 'si' ? fecha : null
+      });
+      Object.assign(CURRENT_PRACTICA, guardado || {});
+      toast('Apercibimiento guardado');
+      btn.disabled = false;
+      actualizarInformeFinalManteniendoSeccion('if-toggle-apercibimientos');
+    } catch (err) {
+      toast('No se pudo guardar el apercibimiento: ' + err.message);
+      btn.disabled = false;
+    }
   });
+
+  document.getElementById('if-guardar-honorarios')?.addEventListener('click', async e => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const valor = document.getElementById('if-honorarios')?.value || '';
+    const montoRaw = document.getElementById('if-honorarios-monto')?.value || '';
+    if (!valor) { toast('Indica Sí o No en honorarios/costas.'); return; }
+    if (valor === 'si' && (montoRaw === '' || Number(montoRaw) < 0)) { toast('Indica un monto válido.'); return; }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const guardado = await api.updatePracticaCierre(CURRENT_USER.id, CURRENT_PRACTICA.id, {
+        honorariosCostas: valor === 'si',
+        honorariosCostasMonto: valor === 'si' ? Math.round(Number(montoRaw)) : null
+      });
+      Object.assign(CURRENT_PRACTICA, guardado || {});
+      toast('Honorarios/costas guardados');
+      btn.disabled = false;
+      actualizarInformeFinalManteniendoSeccion('if-toggle-honorarios');
+    } catch (err) {
+      toast('No se pudieron guardar los honorarios/costas: ' + err.message);
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('if-guardar-fechas-admin')?.addEventListener('click', async e => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const guardado = await api.updatePracticaCierre(CURRENT_USER.id, CURRENT_PRACTICA.id, {
+        fechaEntregaCarpetasRevision: document.getElementById('if-fecha-carpetas-revision')?.value || null,
+        fechaEntregaInformeFinal: document.getElementById('if-fecha-informe-final')?.value || null,
+        fechaEntregaPreinformeTutor: document.getElementById('if-fecha-preinforme-tutor')?.value || null,
+        fechaComunicacionPropuestaEvaluacion: document.getElementById('if-fecha-comunicacion-evaluacion')?.value || null
+      });
+      Object.assign(CURRENT_PRACTICA, guardado || {});
+      toast('Fechas administrativas guardadas');
+      btn.disabled = false;
+      actualizarInformeFinalManteniendoSeccion('if-toggle-fechas-admin');
+    } catch (err) {
+      toast('No se pudieron guardar las fechas administrativas: ' + err.message);
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('if-guardar-justificacion')?.addEventListener('click', async e => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const aplicaRaw = document.getElementById('if-justificacion-aplica')?.value || '';
+    if (!aplicaRaw) { toast('Indica si corresponde completar la sección 7.'); return; }
+    const aplica = aplicaRaw === 'si';
+    const tipo = aplica ? (document.getElementById('if-justificacion-tipo')?.value || '') : null;
+    if (aplica && !['sobresaliente', 'deficiente'].includes(tipo)) { toast('Selecciona el tipo de justificación.'); return; }
+
+    const causasSeleccionadas = [];
+    if (aplica) {
+      document.querySelectorAll('.if-just-causa-check:checked').forEach(chk => {
+        const causaId = String(chk.dataset.causaId || '');
+        const gestion = document.querySelector(`.if-just-gestion[data-causa-id="${CSS.escape(causaId)}"]`)?.value.trim() || '';
+        causasSeleccionadas.push({ causaId, gestion });
+      });
+      if (!causasSeleccionadas.length) { toast('Selecciona al menos una causa para la sección 7.'); return; }
+      if (causasSeleccionadas.some(x => !x.gestion)) { toast('Completa las gestiones que justifican cada causa seleccionada.'); return; }
+    }
+
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const guardado = await api.updatePracticaCierre(CURRENT_USER.id, CURRENT_PRACTICA.id, {
+        justificacionCalificacionAplica: aplica,
+        justificacionCalificacionTipo: aplica ? tipo : null,
+        justificacionCalificacionCausas: aplica ? causasSeleccionadas : []
+      });
+      Object.assign(CURRENT_PRACTICA, guardado || {});
+      toast('Sección 7 guardada');
+      btn.disabled = false;
+      actualizarInformeFinalManteniendoSeccion('if-toggle-justificacion');
+    } catch (err) {
+      toast('No se pudo guardar la sección 7: ' + err.message);
+      btn.disabled = false;
+    }
+  });
+
+  function actualizarContadoresAlegatosDom() {
+    const panel = document.getElementById('if-alegatos-panel');
+    if (!panel) return;
+    const r = resumenCumplimientoAlegatos();
+    const valores = panel.querySelectorAll('.if-alegatos-summary strong');
+    if (valores[0]) valores[0].textContent = String(r.propios.length);
+    if (valores[1]) valores[1].textContent = String(r.oyentesRequeridos);
+    if (valores[2]) valores[2].textContent = String(r.oyentes.length);
+    if (valores[3]) valores[3].textContent = String(r.oyentesPendientes);
+    actualizarResumenFormulario10SinRecarga();
+  }
+
+  function wireFilasAlegatosOyente() {
+    document.querySelectorAll('[data-action="guardar-alegato-oyente"]').forEach(btn => {
+      btn.onclick = async () => {
+        const row = btn.closest('.if-alegato-row');
+        const id = btn.dataset.id;
+        if (!row || !id) return;
+        const patch = {
+          nicRol: row.querySelector('.if-ao-nic')?.value.trim() || '',
+          corte: row.querySelector('.if-ao-corte')?.value.trim() || '',
+          materia: row.querySelector('.if-ao-materia')?.value.trim() || '',
+          fecha: row.querySelector('.if-ao-fecha')?.value || ''
+        };
+        if (!patch.nicRol || !patch.corte || !patch.materia || !patch.fecha) { toast('Completa todos los datos del alegato.'); return; }
+        btn.disabled = true;
+        try {
+          const actualizado = await api.updateAlegatoOyente(id, patch);
+          const idx = ALEGATOS_OYENTE.findIndex(a => a.id === id);
+          if (idx >= 0) ALEGATOS_OYENTE[idx] = actualizado;
+          toast('Alegato como oyente actualizado');
+          btn.disabled = false;
+          actualizarContadoresAlegatosDom();
+        } catch (err) {
+          toast('No se pudo actualizar el alegato: ' + err.message);
+          btn.disabled = false;
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-action="eliminar-alegato-oyente"]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.dataset.id;
+        if (!id || !confirm('¿Eliminar este alegato como oyente?')) return;
+        btn.disabled = true;
+        try {
+          await api.deleteAlegatoOyente(id);
+          ALEGATOS_OYENTE = ALEGATOS_OYENTE.filter(a => a.id !== id);
+          btn.closest('.if-alegato-row')?.remove();
+          const list = document.getElementById('if-alegatos-oyente-list');
+          if (list && !list.querySelector('.if-alegato-row')) {
+            list.innerHTML = '<div class="if-alegatos-empty">Aún no hay alegatos registrados como oyente.</div>';
+          }
+          toast('Alegato como oyente eliminado');
+          actualizarContadoresAlegatosDom();
+        } catch (err) {
+          toast('No se pudo eliminar el alegato: ' + err.message);
+          btn.disabled = false;
+        }
+      };
+    });
+  }
+
+  document.getElementById('if-agregar-alegato-oyente')?.addEventListener('click', async () => {
+    if (!CURRENT_PRACTICA?.id) { toast('Guarda primero los datos de práctica.'); return; }
+    const nicRol = document.getElementById('if-ao-new-nic')?.value.trim() || '';
+    const corte = document.getElementById('if-ao-new-corte')?.value.trim() || '';
+    const materia = document.getElementById('if-ao-new-materia')?.value.trim() || '';
+    const fecha = document.getElementById('if-ao-new-fecha')?.value || '';
+    if (!nicRol || !corte || !materia || !fecha) { toast('Completa NIC/ROL, jurisdicción, materia y fecha.'); return; }
+    try {
+      const creado = await api.createAlegatoOyente(CURRENT_USER.id, CURRENT_PRACTICA.id, { nicRol, corte, materia, fecha });
+      ALEGATOS_OYENTE.push(creado);
+      const list = document.getElementById('if-alegatos-oyente-list');
+      if (list) list.innerHTML = alegatosOyenteFilasHtml();
+      const nicInput = document.getElementById('if-ao-new-nic');
+      const corteInput = document.getElementById('if-ao-new-corte');
+      const materiaInput = document.getElementById('if-ao-new-materia');
+      const fechaInput = document.getElementById('if-ao-new-fecha');
+      if (nicInput) nicInput.value = '';
+      if (corteInput) corteInput.value = '';
+      if (materiaInput) materiaInput.value = '';
+      if (fechaInput) fechaInput.value = '';
+      toast('Alegato como oyente agregado');
+      wireFilasAlegatosOyente();
+      actualizarContadoresAlegatosDom();
+    } catch (err) {
+      toast('No se pudo agregar el alegato como oyente: ' + err.message);
+    }
+  });
+
+  wireFilasAlegatosOyente();
+
+  const cardInformePractica = document.querySelector('.if-inst-card[data-if-doc="01"]');
+  const btnGenerarInformePractica = cardInformePractica?.querySelector('.if-inst-generate');
+  if (btnGenerarInformePractica) {
+    btnGenerarInformePractica.disabled = estadoInforme.porcentaje !== 100;
+    btnGenerarInformePractica.title = estadoInforme.porcentaje === 100
+      ? 'Generar Informe de Práctica Profesional en formato DOCX institucional'
+      : 'Completa los antecedentes y la cronología de todas las causas antes de generar el informe';
+
+    btnGenerarInformePractica.addEventListener('click', async () => {
+      if (btnGenerarInformePractica.disabled) return;
+      const textoOriginal = btnGenerarInformePractica.textContent;
+      btnGenerarInformePractica.disabled = true;
+      btnGenerarInformePractica.textContent = 'Generando DOCX…';
+      try {
+        const diag = informeFinalDiagnosticoDatos();
+        await generarInformePracticaDocx({
+          postulante: diag.nombre,
+          caj: diag.caj,
+          tutores: diag.tutores,
+          fechaInforme: CURRENT_PRACTICA?.fechaEntregaInformeFinal || '',
+          causas: CAUSAS.map(c => ({
+            rol: rolCompletoTexto(c) || '',
+            tribunal: tribunalTexto(c) || '',
+            caratulado: caratuladoTexto(c) || '',
+            materia: c.materia || c.subcategoria || '',
+            cronologia: (c.cronologia || []).map(g => ({
+              fecha: g.fecha || '',
+              descripcion: g.descripcion || ''
+            }))
+          }))
+        });
+        toast('Informe de Práctica Profesional generado');
+      } catch (err) {
+        console.error('No se pudo generar el Informe de Práctica:', err);
+        toast('No se pudo generar el Informe de Práctica: ' + err.message);
+      } finally {
+        btnGenerarInformePractica.textContent = textoOriginal;
+        btnGenerarInformePractica.disabled = estadoInforme.porcentaje !== 100;
+      }
+    });
+  }
+
+
+  const cardFormulario9 = document.querySelector('.if-inst-card[data-if-doc="09"]');
+  const btnGenerarFormulario9 = cardFormulario9?.querySelector('.if-inst-generate');
+  if (btnGenerarFormulario9) {
+    btnGenerarFormulario9.disabled = estadoF9.porcentaje !== 100;
+    btnGenerarFormulario9.title = estadoF9.porcentaje === 100
+      ? 'Generar Formulario N°9 en formato DOCX institucional'
+      : 'Completa los datos pendientes en la ficha de cada causa antes de generar el documento';
+    btnGenerarFormulario9.addEventListener('click', async () => {
+      if (btnGenerarFormulario9.disabled) return;
+      const textoOriginal = btnGenerarFormulario9.textContent;
+      btnGenerarFormulario9.disabled = true;
+      btnGenerarFormulario9.textContent = 'Generando DOCX…';
+      try {
+        await generarFormulario9Docx({ causas: CAUSAS });
+        toast('Formulario N°9 generado');
+      } catch (err) {
+        console.error('No se pudo generar el Formulario N°9:', err);
+        toast('No se pudo generar el Formulario N°9: ' + err.message);
+      } finally {
+        btnGenerarFormulario9.textContent = textoOriginal;
+        btnGenerarFormulario9.disabled = informeFinalDiagnosticoDatos().causasConPatrocinadoF9 !== CAUSAS.length || estadoF9.porcentaje !== 100;
+      }
+    });
+  }
+
+  const cardFormulario10 = document.querySelector('.if-inst-card[data-if-doc="10"]');
+  const btnGenerarFormulario10 = cardFormulario10?.querySelector('.if-inst-generate');
+  if (btnGenerarFormulario10) {
+    btnGenerarFormulario10.disabled = estadoF10.porcentaje !== 100;
+    btnGenerarFormulario10.title = estadoF10.porcentaje === 100
+      ? 'Generar Formulario N°10 en formato DOCX institucional'
+      : 'Completa los datos del postulante antes de generar el documento';
+
+    btnGenerarFormulario10.addEventListener('click', async () => {
+      if (btnGenerarFormulario10.disabled) return;
+      const textoOriginal = btnGenerarFormulario10.textContent;
+      btnGenerarFormulario10.disabled = true;
+      btnGenerarFormulario10.textContent = 'Generando DOCX…';
+      try {
+        const asistencia = await api.fetchPracticaAsistencia(CURRENT_USER.id, CURRENT_PRACTICA?.id || null);
+        const diag = informeFinalDiagnosticoDatos();
+        await generarFormulario10Docx({
+          postulante: diag.nombre,
+          rut: diag.rut,
+          unidad: diag.caj ? `Corporación de Asistencia Judicial de ${diag.caj}` : '',
+          abogadoJefe: diag.abogadoJefe,
+          tutores: diag.tutores,
+          practica: CURRENT_PRACTICA,
+          causas: CAUSAS,
+          asistencia,
+          audiencias: diag.audiencias,
+          alegatosPropios: diag.alegatos.propios,
+          alegatosOyente: diag.alegatos.oyentes,
+          justificacion: {
+            aplica: diag.justificacionAplica,
+            tipo: diag.justificacionTipo,
+            causas: diag.justificacionCausas.map(sel => {
+              const causa = CAUSAS.find(c => String(c.id) === String(sel.causaId));
+              return {
+                causaId: sel.causaId,
+                rol: causa ? (rolCompletoTexto(causa) || '') : '',
+                tribunal: causa ? (tribunalTexto(causa) || '') : '',
+                materia: causa ? (causa.materia || causa.subcategoria || '') : '',
+                gestion: sel.gestion || ''
+              };
+            })
+          }
+        });
+        toast('Formulario N°10 generado');
+      } catch (err) {
+        console.error('No se pudo generar el Formulario N°10:', err);
+        toast('No se pudo generar el Formulario N°10: ' + err.message);
+      } finally {
+        btnGenerarFormulario10.textContent = textoOriginal;
+        btnGenerarFormulario10.disabled = informeFinalDiagnosticoDatos().asistenciaCompletada !== true || estadoF10.porcentaje !== 100;
+      }
+    });
+  }
+
+  const cardTraspaso = document.querySelector('.if-inst-card[data-if-doc="TR"]');
+  const btnGenerarTraspaso = cardTraspaso?.querySelector('.if-inst-generate');
+  if (btnGenerarTraspaso) {
+    btnGenerarTraspaso.disabled = traspasoResumen.causasVigentes.length === 0;
+    btnGenerarTraspaso.title = traspasoResumen.causasVigentes.length
+      ? 'Generar Excel de traspaso con las causas vigentes'
+      : 'No hay causas vigentes para traspasar';
+
+    btnGenerarTraspaso.addEventListener('click', async () => {
+      if (btnGenerarTraspaso.disabled) return;
+      const textoOriginal = btnGenerarTraspaso.textContent;
+      btnGenerarTraspaso.disabled = true;
+      btnGenerarTraspaso.textContent = 'Generando Excel…';
+
+      let credenciales = null;
+      try {
+        const resumenActual = resumenTraspasoCausasVigentes();
+        if (!resumenActual.causasVigentes.length) {
+          toast('No hay causas vigentes para traspasar.');
+          return;
+        }
+
+        credenciales = await obtenerCredencialesTraspaso(resumenActual.causasVigentes);
+        if (credenciales === null) {
+          toast('Generación cancelada');
+          return;
+        }
+
+        const datos = construirDatosTraspaso(resumenActual.causasVigentes, credenciales);
+        await generarTraspasoCausasXlsx(datos);
+        toast('Excel de traspaso generado');
+      } catch (err) {
+        console.error('No se pudo generar el Excel de traspaso:', err);
+        toast('No se pudo generar el Excel de traspaso: ' + err.message);
+      } finally {
+        if (credenciales?.clear) credenciales.clear();
+        btnGenerarTraspaso.textContent = textoOriginal;
+        btnGenerarTraspaso.disabled = resumenTraspasoCausasVigentes().causasVigentes.length === 0;
+      }
+    });
+  }
+
 }
 
-// Informe Final — resumen de audiencias asistidas: se alimenta de Agenda,
-// solo tipo='Audiencia' y estado='Realizado', ordenadas cronológicamente.
+// Informe Final — audiencias realizadas detectadas desde Agenda.
+// Se conserva como fuente objetiva para el Formulario N° 10, usando la
+// materia real registrada en cada causa (nunca un valor fijo).
 function resumenAudienciasAsistidas(causas) {
   const filas = [];
   causas.forEach(c => {
     (c.agendaEventos || []).forEach(e => {
       if (e.tipo === 'Audiencia' && e.estado === 'Realizado') {
         filas.push({
-          tipoAudiencia: e.tipoAudiencia || '',
+          tipoAudiencia: e.tipoAudiencia || e.tipo || 'Audiencia',
           fecha: e.fecha || '',
           rit: rolCompletoTexto(c) || '',
-          materia: 'Civil',
+          materia: c.materia || c.subcategoria || '',
           tribunal: tribunalTexto(c) || ''
         });
       }
@@ -9029,202 +10928,6 @@ function resumenAudienciasAsistidas(causas) {
   filas.sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
   return filas;
 }
-
-function informeFinalPreviewHtml() {
-  const causas = informeFinalCausasFiltradas();
-  const campos = Object.entries(informeFinalCampos).filter(([, v]) => v).map(([k]) => k);
-  const camposLabels = INFORME_CAMPOS_GRUPOS.flatMap(([, c]) => c).filter(([k]) => campos.includes(k)).map(([, l]) => l);
-
-  return `
-    <div class="if-shell">
-      <section class="if-hero">
-        <div>
-          <div class="if-kicker">Vista previa</div>
-          <h2>Informe Final</h2>
-        </div>
-        <div class="if-hero-meta">
-          <span class="if-hero-number">${causas.length}</span>
-          <span>causas</span>
-        </div>
-      </section>
-
-      <div class="if-preview-stats">
-        <div class="if-preview-stat">
-          <strong>${causas.length}</strong>
-          <span>Causas totales</span>
-        </div>
-        <div class="if-preview-stat if-preview-stat-info">
-          <strong>${causas.filter(c => c.categoria === 'tramitacion').length}</strong>
-          <span>En tramitación</span>
-        </div>
-        <div class="if-preview-stat if-preview-stat-semi">
-          <strong>${causas.filter(c => c.categoria === 'nueva').length}</strong>
-          <span>Nuevas / redacción</span>
-        </div>
-        <div class="if-preview-stat if-preview-stat-calm">
-          <strong>${causas.filter(c => c.categoria === 'terminada').length}</strong>
-          <span>Terminadas</span>
-        </div>
-      </div>
-
-      <section class="if-preview-card">
-        <div class="if-preview-head">
-          <div>
-            <div class="if-kicker">Contenido</div>
-            <h3>Campos seleccionados</h3>
-          </div>
-          <span class="if-selection-summary">${camposLabels.length}</span>
-        </div>
-        <div class="if-preview-fields">
-          ${camposLabels.length
-            ? camposLabels.map(l => `<span class="if-preview-chip">${escapeHtml(l)}</span>`).join('')
-            : '<span class="if-preview-empty">No se seleccionaron campos adicionales.</span>'}
-        </div>
-      </section>
-
-      ${causas.length === 0 ? '<div class="if-empty"><span class="if-empty-check">✓</span><span>No hay causas que coincidan con el filtro elegido</span></div>' : ''}
-
-      <div class="if-preview-actions">
-        <button class="btn primary" id="informe-generar-pdf" ${causas.length === 0 ? 'disabled' : ''}>Generar PDF</button>
-        <button class="btn ghost" id="informe-volver">Volver a configurar</button>
-      </div>
-    </div>`;
-}
-function wireInformeFinalPreview(container) {
-  container.querySelector('#informe-volver').addEventListener('click', () => {
-    informeFinalEtapa = 'configurar';
-    renderInformeFinal();
-  });
-  const genBtn = container.querySelector('#informe-generar-pdf');
-  if (genBtn) genBtn.addEventListener('click', () => {
-    genBtn.disabled = true;
-    const original = genBtn.textContent;
-    genBtn.textContent = 'Generando…';
-    try {
-      const causas = ordenarCausasInforme(informeFinalCausasFiltradas());
-      const pdf = generarInformeFinalPdf(causas, informeFinalCampos);
-      pdf.save('informe-final-practica.pdf');
-      toast('Informe generado');
-    } catch (e) {
-      toast('No se pudo generar el informe: ' + e.message);
-    } finally {
-      genBtn.disabled = false;
-      genBtn.textContent = original;
-    }
-  });
-}
-
-// Construye, para una causa y el set de campos activados, los mismos
-// bloques kv/list/table que usa la ficha individual, filtrando lo que no
-// tenga contenido real (nunca se muestran campos vacíos).
-function construirBloqueCausaInforme(c, campos) {
-  const filas = [];
-  const add = (campo, label, valor) => {
-    if (!campos[campo]) return;
-    if (valor === null || valor === undefined) return;
-    const str = String(valor).trim();
-    if (!str) return;
-    filas.push([label, str]);
-  };
-
-  add('rit', 'RIT / ROL', rolCompletoTexto(c));
-  add('saj', 'Código SAJ', c.folio);
-  add('tribunal', 'Tribunal', tribunalTexto(c));
-  add('caratulado', 'Caratulado', caratuladoTexto(c));
-  add('procedimiento', 'Procedimiento', c.subcategoria);
-  add('tipoJuicio', 'Tipo de juicio', (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') ? c.tipoJuicio : null);
-  add('materia', 'Materia', c.materia);
-  add('patrocinado', 'Parte patrocinada', patrocinadoEfectivo(c));
-  add('carpeta', 'Carpeta', CATEGORIA_LABEL[c.categoria] || c.categoria);
-  add('etapa', 'Etapa procesal', c.etapa);
-  add('estadoActual', 'Estado actual', c.estado);
-  add('resumen', 'Resumen de la causa', c.resumen);
-  add('fechaIngreso', 'Fecha de ingreso', c.fechaIngreso ? fmtFechaSolo(c.fechaIngreso) : null);
-  add('tutor', 'Tutor', c.tutor);
-  add('baj', 'BAJ', c.bajEstado ? (BAJ_LABEL[c.bajEstado] || c.bajEstado) : null);
-  add('recurso', 'Recurso', c.recurso);
-  add('rolIngreso', 'ROL ingreso Corte', c.rolIngreso);
-  add('competencia', 'Competencia', c.competencia);
-  add('ultimaRevisionPjud', 'Última revisión PJUD', c.ultimaRevisionAt ? fmtFechaHora(c.ultimaRevisionAt) : null);
-  add('observacionesTraspaso', 'Observaciones de traspaso', c.observacionesTraspaso);
-
-  const tituloBloque = `Causa ROL/RIT N° ${c.rol || '(sin ROL)'}`;
-  const secciones = [{ title: tituloBloque, kind: 'kv', rows: [['Referencia', c.titulo], ...filas] }];
-
-  if (campos.gestionesPendientes || campos.gestionesEnEspera) {
-    const estados = [];
-    if (campos.gestionesPendientes) estados.push('Pendiente');
-    if (campos.gestionesEnEspera) estados.push('En espera');
-    const pendientes = (c.gestionesPendientes || []).filter(g => estados.includes(g.estado)).map(g => `${g.descripcion}${g.estado === 'En espera' ? ' (en espera)' : ''}`);
-    if (pendientes.length) secciones.push({ title: 'Gestiones pendientes por realizar', kind: 'list', items: pendientes });
-  }
-  if (campos.cronologia) {
-    const items = (c.cronologia || []).map(g => g.descripcion);
-    if (items.length) secciones.push({ title: 'Cronología jurídica', kind: 'list', items });
-  }
-  if (campos.instruccionesTutor) {
-    const items = (c.instrucciones || []).map(it => `${it.tutor ? it.tutor + ' — ' : ''}${it.instruccion} (${it.estado})`);
-    if (items.length) secciones.push({ title: 'Instrucciones del tutor', kind: 'list', items });
-  }
-  if (campos.proximosEventos || campos.audienciasFuturas) {
-    const hoy = todayISO();
-    let eventos = (c.agendaEventos || []).filter(e => e.fecha >= hoy && !['Realizado', 'Cancelado'].includes(e.estado));
-    if (campos.audienciasFuturas && !campos.proximosEventos) eventos = eventos.filter(e => e.tipo === 'Audiencia');
-    if (eventos.length) secciones.push({
-      title: campos.proximosEventos ? 'Próximos eventos' : 'Audiencias futuras',
-      kind: 'table', headers: ['Tipo', 'Fecha', 'Título'], widths: [0.2, 0.2, 0.6],
-      rows: eventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), eventoTituloEfectivo(e)])
-    });
-  }
-
-  return secciones.filter(s => (s.kind === 'kv' && s.rows.length) || (s.kind === 'list' && s.items.length) || (s.kind === 'table' && s.rows.length));
-}
-
-
-function generarInformeFinalPdf(causas, campos) {
-  const w = crearEscritorPdf();
-  const { pdf, margin, contentWidth, pageWidth, pageHeight } = w;
-  const usuario = (CURRENT_USER && (CURRENT_USER.nombre || CURRENT_USER.email)) || 'Postulante';
-
-  // ---------- Portada ----------
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(24); pdf.setTextColor(20);
-  pdf.text('Informe de práctica', pageWidth / 2, 110, { align: 'center' });
-
-  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.setTextColor(40);
-  pdf.text(usuario.toUpperCase(), pageWidth / 2, 128, { align: 'center' });
-
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(11); pdf.setTextColor(80);
-  pdf.text('Área Civil', pageWidth / 2, 140, { align: 'center' });
-  pdf.text('Práctica Juris', pageWidth / 2, 148, { align: 'center' });
-
-  pdf.setFontSize(9.5); pdf.setTextColor(120);
-  pdf.text(`Fecha de generación: ${fmtFechaHora(new Date().toISOString())}`, pageWidth / 2, 165, { align: 'center' });
-  pdf.text(`${causas.length} causa(s) incluida(s) en este informe`, pageWidth / 2, 172, { align: 'center' });
-
-  w.newPage();
-
-  // ---------- Bloques por causa ----------
-  causas.forEach((c, idx) => {
-    const secciones = construirBloqueCausaInforme(c, campos);
-    if (secciones.length === 0) return;
-
-    // Evita dejar un título de causa solo al final de la página.
-    w.ensure(22);
-    if (idx > 0) w.y += 4;
-
-    secciones.forEach(sec => w.drawSection(sec));
-
-    // separador visual sutil entre causas
-    w.ensure(6);
-    pdf.setDrawColor(210); pdf.setLineWidth(0.3);
-    pdf.line(margin, w.y, margin + contentWidth, w.y);
-    w.y += 8;
-  });
-
-  w.finalizarPaginacion();
-  return pdf;
-}
-
 
 function renderRevisionPjud() {
   const causas = CAUSAS.filter(c => c.categoria === 'tramitacion' || c.categoria === 'nueva')
@@ -9800,17 +11503,36 @@ function detailHtml(c) {
           <div class="rf-summary-head">
             <div>
               <div class="rf-summary-kicker">Documentos</div>
-              <div class="rf-summary-title">Carpeta de Google Drive</div>
+              <div class="rf-summary-title">Carpetas de documentación</div>
             </div>
           </div>
-          <div class="rf-summary-body">
-            <div class="drive-box rf-drive-box">
-              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Esta causa aún no tiene una carpeta de Google Drive vinculada.'}</div>
-              ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir carpeta</button>` : ''}
-              <div class="drive-edit-row">
-                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de la carpeta de Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+          <div class="rf-summary-body rf-folder-links">
+            <div class="rf-folder-link-block">
+              <div class="rf-folder-link-head">
+                <div>
+                  <span class="rf-folder-link-kicker">Personal / apoyo</span>
+                  <strong>Carpeta en Google Drive</strong>
+                </div>
+                ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir</button>` : ''}
               </div>
+              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Sin enlace registrado.'}</div>
+              <div class="drive-edit-row">
+                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de Google Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+              </div>
+            </div>
 
+            <div class="rf-folder-link-block">
+              <div class="rf-folder-link-head">
+                <div>
+                  <span class="rf-folder-link-kicker">Institucional</span>
+                  <strong>Carpeta CAJ Virtual</strong>
+                </div>
+                ${c.cajVirtualFolderUrl ? `<button class="btn small" id="btn-open-caj-virtual" type="button">Abrir</button>` : ''}
+              </div>
+              <div class="drive-url ${c.cajVirtualFolderUrl ? '' : 'empty'}" id="caj-virtual-url-display">${c.cajVirtualFolderUrl ? escapeHtml(c.cajVirtualFolderUrl) : 'Sin enlace registrado.'}</div>
+              <div class="drive-edit-row">
+                <input type="text" id="rf-caj-virtual-url" placeholder="Pega aquí el enlace de la carpeta virtual CAJ…" value="${escapeHtml(c.cajVirtualFolderUrl || '')}">
+              </div>
             </div>
           </div>
         </section>
@@ -9922,16 +11644,24 @@ function detailHtml(c) {
             <span class="ct-contact-section-kicker">Identificación</span>
             <span class="ct-contact-section-title">Datos personales</span>
           </div>
+          ${(() => {
+            const partesF9 = partesPatrocinadoF9(c);
+            return `
           <div class="ct-contact-grid ct-contact-grid-2">
             <div class="field ct-contact-field">
-              <div class="k">Nombre</div>
-              <input type="text" class="ct-input" value="${escapeHtml(patrocinadoEfectivo(c) || '')}" disabled>
+              <div class="k">Apellidos</div>
+              <input type="text" class="ct-input" id="ct-patrocinado-apellidos" value="${escapeHtml(partesF9.apellidos)}" placeholder="Apellidos del patrocinado">
+            </div>
+            <div class="field ct-contact-field">
+              <div class="k">Nombres</div>
+              <input type="text" class="ct-input" id="ct-patrocinado-nombres" value="${escapeHtml(partesF9.nombres)}" placeholder="Nombres del patrocinado">
             </div>
             <div class="field ct-contact-field">
               <div class="k">RUT</div>
               <input type="text" class="ct-input" id="ct-rut" value="${escapeHtml(c.rut || '')}">
             </div>
-          </div>
+          </div>`;
+          })()}
         </div>
 
         <div class="ct-contact-section">
@@ -10008,11 +11738,24 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content" data-tab="exportar">
-    <div class="export-toolbar">
-      <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
-      <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
+    <div class="ex-shell">
+      <section class="ex-card">
+        <div class="ex-head">
+          <div>
+            <div class="ex-kicker">Documento de apoyo</div>
+            <h3>Exportar ficha de causa</h3>
+            <p>Vista previa de la ficha consolidada. Puedes imprimirla o descargarla en PDF.</p>
+          </div>
+          <div class="export-toolbar">
+            <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
+            <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
+          </div>
+        </div>
+        <div class="ex-preview-frame">
+          <div id="ficha-print-area">${fichaHtml(c)}</div>
+        </div>
+      </section>
     </div>
-    <div id="ficha-print-area">${fichaHtml(c)}</div>
   </div>
   `;
 }
@@ -10163,6 +11906,7 @@ function wireDetailEvents(c) {
       estado: panel.querySelector('#rf-estado').value.trim() || null,
       resumen: panel.querySelector('#rf-resumen').value.trim() || null,
       driveFolderUrl: panel.querySelector('#rf-drive-url').value.trim() || null,
+      cajVirtualFolderUrl: panel.querySelector('#rf-caj-virtual-url').value.trim() || null,
       observacionesTraspaso: panel.querySelector('#rf-traspaso').value.trim() || null
     };
     try {
@@ -10190,6 +11934,8 @@ function wireDetailEvents(c) {
   const saveContacto = panel.querySelector('#save-contacto');
   if (saveContacto) saveContacto.addEventListener('click', async () => {
     const patch = {
+      patrocinadoApellidos: panel.querySelector('#ct-patrocinado-apellidos')?.value.trim() || null,
+      patrocinadoNombres: panel.querySelector('#ct-patrocinado-nombres')?.value.trim() || null,
       rut: panel.querySelector('#ct-rut').value.trim() || null,
       correo: panel.querySelector('#ct-correo').value.trim() || null,
       correoAlt: panel.querySelector('#ct-correoAlt').value.trim() || null,
@@ -10215,6 +11961,8 @@ function wireDetailEvents(c) {
   // ---------- Editar (incluye título, carpeta, tipo de juicio, SAJ, ROL Corte y Drive) ----------
   const btnOpenDriveEdit = panel.querySelector('#btn-open-drive-edit');
   if (btnOpenDriveEdit) btnOpenDriveEdit.addEventListener('click', () => window.open(c.driveFolderUrl, '_blank', 'noopener,noreferrer'));
+  const btnOpenCajVirtual = panel.querySelector('#btn-open-caj-virtual');
+  if (btnOpenCajVirtual) btnOpenCajVirtual.addEventListener('click', () => window.open(c.cajVirtualFolderUrl, '_blank', 'noopener,noreferrer'));
 
   const btnActualizarRevision = panel.querySelector('#btn-actualizar-revision');
   if (btnActualizarRevision) btnActualizarRevision.addEventListener('click', async () => {
@@ -10243,7 +11991,7 @@ function wireDetailEvents(c) {
     btnPdf.textContent = 'Generando…';
     try {
       const data = buildFichaData(c);
-      const pdf = renderFichaPdf(data);
+      const pdf = await renderFichaPdf(data);
       const nombreArchivo = `ficha-${(c.rol || c.titulo || 'causa').replace(/[^\w-]+/g, '_')}.pdf`;
       pdf.save(nombreArchivo);
     } catch (e) {
@@ -11143,7 +12891,59 @@ function wireMobileMenu() {
 // WIRING GENERAL
 // ============================================================================
 function wireTopLevelUI() {
-  document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value; render(); });
+  const globalSearch = document.getElementById('search');
+  if (globalSearch) {
+    // El buscador global no es un campo de login. Algunos navegadores/gestores
+    // de contraseñas intentan rellenarlo con el correo de la sesión aun cuando
+    // autocomplete="off". Además de marcarlo explícitamente como buscador,
+    // neutralizamos ese valor si coincide EXACTAMENTE con el correo de la cuenta.
+    globalSearch.setAttribute('type', 'search');
+    globalSearch.setAttribute('autocomplete', 'off');
+    globalSearch.setAttribute('autocapitalize', 'off');
+    globalSearch.setAttribute('spellcheck', 'false');
+    globalSearch.setAttribute('inputmode', 'search');
+    globalSearch.setAttribute('name', 'practicajuris-global-search-query');
+    globalSearch.setAttribute('data-lpignore', 'true');
+    globalSearch.setAttribute('data-1p-ignore', 'true');
+
+    const esCorreoAutofillCuenta = (valor) => {
+      const correo = String(CURRENT_USER?.email || '').trim().toLowerCase();
+      return !!correo && String(valor || '').trim().toLowerCase() === correo;
+    };
+
+    const limpiarAutofillCorreo = () => {
+      if (!esCorreoAutofillCuenta(globalSearch.value)) return false;
+      globalSearch.value = '';
+      if (searchTerm && esCorreoAutofillCuenta(searchTerm)) searchTerm = '';
+      return true;
+    };
+
+    // Se repite durante los primeros segundos porque Chrome puede aplicar el
+    // autofill después de que el módulo JS ya terminó de inicializarse.
+    limpiarAutofillCorreo();
+    [50, 150, 400, 1000, 2000, 3500].forEach(ms => {
+      setTimeout(() => {
+        if (limpiarAutofillCorreo()) render();
+      }, ms);
+    });
+
+    globalSearch.addEventListener('focus', () => {
+      if (limpiarAutofillCorreo()) render();
+    });
+
+    globalSearch.addEventListener('input', (e) => {
+      // Si el propio autofill dispara "input", no dejamos que el correo pase
+      // a searchTerm; ese era el motivo por el que la lista quedaba vacía.
+      if (esCorreoAutofillCuenta(e.target.value)) {
+        e.target.value = '';
+        searchTerm = '';
+        render();
+        return;
+      }
+      searchTerm = e.target.value;
+      render();
+    });
+  }
 
   document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
     card.addEventListener('click', () => {
@@ -11211,12 +13011,11 @@ export async function initApp() {
   // (una llamada manual a getSession() y este listener) decidan por su cuenta
   // qué pantalla mostrar y terminen pisándose.
   //
-  // USER_UPDATED (disparado por auth.updateUser, p. ej. al cambiar la
-  // contraseña desde Administración de cuenta) y TOKEN_REFRESHED (disparado
-  // automáticamente al recuperar el foco de la pestaña) NO deben volver a
-  // ejecutar onSessionReady()/loadAll() -- eso recargaría toda la lista de
-  // causas innecesariamente. Solo se actualizan los datos visibles de la
-  // cuenta.
+  // USER_UPDATED, TOKEN_REFRESHED y los SIGNED_IN repetidos que Supabase
+  // puede emitir al recuperar el foco de una pestaña con una sesión ya activa
+  // NO deben volver a ejecutar onSessionReady()/loadAll(); eso produciría una
+  // recarga visual innecesaria. Solo el SIGNED_IN de un login real continúa
+  // por los gates de entrada.
   //
   // MFA_CHALLENGE_VERIFIED se maneja aparte (ver más abajo): puede venir de
   // 2 escenarios distintos -- completar el desafío de login (ahí sí hay que
@@ -11231,7 +13030,22 @@ export async function initApp() {
   // verificarLegalYEntrar() controla la versión legal vigente.
   onAuthStateChange((event, session) => {
     if (session) {
-      if (event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
+      const appYaActivaMismoUsuario =
+        CURRENT_USER?.id === session.user.id &&
+        document.getElementById('app-root')?.hidden === false;
+
+      // Supabase puede volver a emitir SIGNED_IN al recuperar el foco de la
+      // pestaña/ventana aunque la usuaria ya lleve rato dentro de la app.
+      // Ese evento NO es un nuevo login. Si lo tratamos como tal, vuelve a
+      // pasar por los gates y termina ejecutando loadAll(), provocando el
+      // parpadeo visible al regresar desde otra pestaña.
+      //
+      // USER_UPDATED y TOKEN_REFRESHED tampoco requieren recargar la app.
+      if (
+        event === 'USER_UPDATED' ||
+        event === 'TOKEN_REFRESHED' ||
+        (event === 'SIGNED_IN' && appYaActivaMismoUsuario)
+      ) {
         if (!CURRENT_USER) CURRENT_USER = { id: null, email: null, nombre: null };
         CURRENT_USER.id = session.user.id;
         CURRENT_USER.email = session.user.email;

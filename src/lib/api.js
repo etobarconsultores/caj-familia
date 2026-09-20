@@ -22,8 +22,11 @@ function causaFromDb(row) {
     subcategoria: row.subcategoria,
     tipoJuicio: row.tipo_juicio,
     patrocinadoTipo: row.patrocinado_tipo,
+    origenCarpeta: row.origen_carpeta,
     rit: row.rit,
     competencia: row.competencia,
+    corteNombre: row.corte_nombre,
+    parteCorte: row.parte_corte,
     rol: row.rol,
     rolIngreso: row.rol_ingreso,
     folio: row.folio,
@@ -36,6 +39,8 @@ function causaFromDb(row) {
     rolCA: row.rol_ca,
     tutor: row.tutor,
     patrocinado: row.patrocinado,
+    patrocinadoApellidos: row.patrocinado_apellidos,
+    patrocinadoNombres: row.patrocinado_nombres,
     rut: row.rut,
     correo: row.correo,
     correoAlt: row.correo_alt,
@@ -57,6 +62,7 @@ function causaFromDb(row) {
     notifEstado: row.notif_estado,
     notifNombre: row.notif_nombre,
     driveFolderUrl: row.drive_folder_url,
+    cajVirtualFolderUrl: row.caj_virtual_folder_url,
     ultimaRevisionAt: row.ultima_revision_at,
     tipoTribunal: row.tipo_tribunal,
     numeroTribunal: row.numero_tribunal,
@@ -104,6 +110,7 @@ function causaFromDb(row) {
       })
       .map(e => ({
         id: e.id, causaId: e.causa_id, tipo: e.tipo, titulo: e.titulo, descripcion: e.descripcion,
+        tipoAudiencia: e.tipo_audiencia,
         fecha: e.fecha, horaInicio: e.hora_inicio, horaTermino: e.hora_termino,
         modalidad: e.modalidad, ubicacion: e.ubicacion, enlace: e.enlace,
         estado: e.estado, prioridad: e.prioridad, observaciones: e.observaciones,
@@ -150,17 +157,19 @@ function causaPatchToDb(patch) {
   const map = {
     titulo: 'titulo', categoria: 'categoria', subcategoria: 'subcategoria',
     tipoJuicio: 'tipo_juicio', rit: 'rit', competencia: 'competencia',
-    patrocinadoTipo: 'patrocinado_tipo',
+    corteNombre: 'corte_nombre', parteCorte: 'parte_corte',
+    patrocinadoTipo: 'patrocinado_tipo', origenCarpeta: 'origen_carpeta',
     rol: 'rol', rolIngreso: 'rol_ingreso', folio: 'folio', tribunal: 'tribunal',
     materia: 'materia', submateria: 'submateria', parte: 'parte', representacion: 'representacion',
     recurso: 'recurso', rolCA: 'rol_ca', tutor: 'tutor',
-    patrocinado: 'patrocinado', rut: 'rut', correo: 'correo', correoAlt: 'correo_alt',
+    patrocinado: 'patrocinado', patrocinadoApellidos: 'patrocinado_apellidos', patrocinadoNombres: 'patrocinado_nombres',
+    rut: 'rut', correo: 'correo', correoAlt: 'correo_alt',
     telefono: 'telefono', telefonoAlt: 'telefono_alt', nota: 'nota',
     prioridad: 'prioridad', etapa: 'etapa', plazo: 'plazo', clave: 'clave', estado: 'estado',
     objetivoApelacion: 'objetivo_apelacion', resumen: 'resumen', comentarios: 'comentarios',
     fechaIngreso: 'fecha_ingreso', fechaAudiencia: 'fecha_audiencia', hora: 'hora_audiencia',
     modalidad: 'modalidad',
-    notifEstado: 'notif_estado', notifNombre: 'notif_nombre', driveFolderUrl: 'drive_folder_url',
+    notifEstado: 'notif_estado', notifNombre: 'notif_nombre', driveFolderUrl: 'drive_folder_url', cajVirtualFolderUrl: 'caj_virtual_folder_url',
     ultimaRevisionAt: 'ultima_revision_at',
     tipoTribunal: 'tipo_tribunal', numeroTribunal: 'numero_tribunal', ciudadTribunal: 'ciudad_tribunal',
     contraparteNombre: 'contraparte_nombre',
@@ -844,6 +853,8 @@ function revisionSalaFromDb(r) {
     id: r.id, causaId: r.causa_id, fecha: r.fecha, hora: r.hora,
     resultado: r.resultado, observacion: r.observacion,
     fechaAlegato: r.fecha_alegato, sala: r.sala, numeroTabla: r.numero_tabla,
+    alegada: r.alegada === true,
+    fechaAlegada: r.fecha_alegada || null,
     createdAt: r.created_at
   };
 }
@@ -851,7 +862,8 @@ function revisionSalaFromDb(r) {
 function revisionSalaPatchToDb(patch) {
   const map = {
     fecha: 'fecha', hora: 'hora', resultado: 'resultado', observacion: 'observacion',
-    fechaAlegato: 'fecha_alegato', sala: 'sala', numeroTabla: 'numero_tabla'
+    fechaAlegato: 'fecha_alegato', sala: 'sala', numeroTabla: 'numero_tabla',
+    alegada: 'alegada', fechaAlegada: 'fecha_alegada'
   };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
@@ -884,6 +896,77 @@ export async function updateRevisionSala(id, patch) {
 
 export async function deleteRevisionSala(id) {
   const { error } = await supabase.from('revisiones_sala').delete().eq('id', id);
+  if (error) throw error;
+}
+
+
+// ============================================================================
+// Alegatos como oyente — registro manual para Formulario N°10.
+// No pertenecen necesariamente a causas tramitadas por la postulante.
+// ============================================================================
+function alegatoOyenteFromDb(r) {
+  return {
+    id: r.id,
+    practicaId: r.practica_id,
+    nicRol: r.nic_rol || null,
+    corte: r.corte || null,
+    materia: r.materia || null,
+    fecha: r.fecha || null,
+    participacion: r.participacion || 'Oyente',
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+export async function fetchAlegatosOyente(userId, practicaId) {
+  if (!practicaId) return [];
+  const { data, error } = await supabase
+    .from('alegatos_oyente')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('practica_id', practicaId)
+    .order('fecha', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(alegatoOyenteFromDb);
+}
+
+export async function createAlegatoOyente(userId, practicaId, patch) {
+  const { data, error } = await supabase
+    .from('alegatos_oyente')
+    .insert({
+      user_id: userId,
+      practica_id: practicaId,
+      nic_rol: patch.nicRol || null,
+      corte: patch.corte || null,
+      materia: patch.materia || null,
+      fecha: patch.fecha || null,
+      participacion: 'Oyente'
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return alegatoOyenteFromDb(data);
+}
+
+export async function updateAlegatoOyente(id, patch) {
+  const cambios = {};
+  if (patch.nicRol !== undefined) cambios.nic_rol = patch.nicRol || null;
+  if (patch.corte !== undefined) cambios.corte = patch.corte || null;
+  if (patch.materia !== undefined) cambios.materia = patch.materia || null;
+  if (patch.fecha !== undefined) cambios.fecha = patch.fecha || null;
+  cambios.updated_at = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('alegatos_oyente')
+    .update(cambios)
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return alegatoOyenteFromDb(data);
+}
+
+export async function deleteAlegatoOyente(id) {
+  const { error } = await supabase.from('alegatos_oyente').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -1126,7 +1209,7 @@ export async function updateProfileDatos(userId, { nombreCompleto, telefono, rec
 export async function fetchPracticaUsuaria(userId) {
   const { data, error } = await supabase
     .from('practica_usuaria')
-    .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino, cajs(nombre)')
+    .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino, postulante_rut, abogado_jefe, modalidad_permanencia, dias_permanencia, permanencia_hora_inicio, permanencia_hora_termino, asistencia_completada, revision_intermedia_1, revision_intermedia_2, apercibimiento, apercibimiento_fecha, honorarios_costas, honorarios_costas_monto, fecha_entrega_carpetas_revision, fecha_entrega_informe_final, fecha_entrega_preinforme_tutor, fecha_comunicacion_propuesta_evaluacion, fecha_recepcion_direccion_regional, fecha_recepcion_unidad_practicas, justificacion_calificacion_aplica, justificacion_calificacion_tipo, justificacion_calificacion_causas, cajs(nombre)')
     .eq('user_id', userId)
     .order('fecha_inicio', { ascending: false })
     .limit(1)
@@ -1138,19 +1221,47 @@ export async function fetchPracticaUsuaria(userId) {
     cajAsignado: data.caj_asignado || data.cajs?.nombre || null,
     direccionCaj: data.direccion_caj || null,
     fechaInicio: data.fecha_inicio,
-    fechaTermino: data.fecha_termino
+    fechaTermino: data.fecha_termino,
+    postulanteRut: data.postulante_rut || null,
+    abogadoJefe: data.abogado_jefe || null,
+    modalidadPermanencia: data.modalidad_permanencia || null,
+    diasPermanencia: Array.isArray(data.dias_permanencia) ? data.dias_permanencia : [],
+    permanenciaHoraInicio: data.permanencia_hora_inicio ? String(data.permanencia_hora_inicio).slice(0, 5) : null,
+    permanenciaHoraTermino: data.permanencia_hora_termino ? String(data.permanencia_hora_termino).slice(0, 5) : null,
+    asistenciaCompletada: data.asistencia_completada === true,
+    revisionIntermedia1: data.revision_intermedia_1 || null,
+    revisionIntermedia2: data.revision_intermedia_2 || null,
+    apercibimiento: data.apercibimiento === null || data.apercibimiento === undefined ? null : data.apercibimiento === true,
+    apercibimientoFecha: data.apercibimiento_fecha || null,
+    honorariosCostas: data.honorarios_costas === null || data.honorarios_costas === undefined ? null : data.honorarios_costas === true,
+    honorariosCostasMonto: data.honorarios_costas_monto === null || data.honorarios_costas_monto === undefined ? null : Number(data.honorarios_costas_monto),
+    fechaEntregaCarpetasRevision: data.fecha_entrega_carpetas_revision || null,
+    fechaEntregaInformeFinal: data.fecha_entrega_informe_final || null,
+    fechaEntregaPreinformeTutor: data.fecha_entrega_preinforme_tutor || null,
+    fechaComunicacionPropuestaEvaluacion: data.fecha_comunicacion_propuesta_evaluacion || null,
+    fechaRecepcionDireccionRegional: data.fecha_recepcion_direccion_regional || null,
+    fechaRecepcionUnidadPracticas: data.fecha_recepcion_unidad_practicas || null,
+    justificacionCalificacionAplica: data.justificacion_calificacion_aplica === null || data.justificacion_calificacion_aplica === undefined ? null : data.justificacion_calificacion_aplica === true,
+    justificacionCalificacionTipo: data.justificacion_calificacion_tipo || null,
+    justificacionCalificacionCausas: Array.isArray(data.justificacion_calificacion_causas) ? data.justificacion_calificacion_causas : []
   };
 }
 
 // Crea la primera práctica de una usuaria o actualiza la vigente. El CAJ se
 // guarda como texto propio de la asignación para que cada cuenta pueda indicar
 // libremente su centro (Lo Prado, Cerro Navia, Lo Espejo, etc.).
-export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, direccionCaj, fechaInicio, fechaTermino }) {
+export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, direccionCaj, fechaInicio, fechaTermino, postulanteRut, abogadoJefe, modalidadPermanencia, diasPermanencia, permanenciaHoraInicio, permanenciaHoraTermino }) {
   const patch = {
     caj_asignado: cajAsignado,
     direccion_caj: direccionCaj || null,
     fecha_inicio: fechaInicio,
-    fecha_termino: fechaTermino
+    fecha_termino: fechaTermino,
+    postulante_rut: postulanteRut || null,
+    abogado_jefe: abogadoJefe || null,
+    modalidad_permanencia: modalidadPermanencia || null,
+    dias_permanencia: Array.isArray(diasPermanencia) ? diasPermanencia : [],
+    permanencia_hora_inicio: permanenciaHoraInicio || null,
+    permanencia_hora_termino: permanenciaHoraTermino || null
   };
 
   let query;
@@ -1160,13 +1271,13 @@ export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, dir
       .update(patch)
       .eq('id', practicaId)
       .eq('user_id', userId)
-      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino')
+      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino, postulante_rut, abogado_jefe, modalidad_permanencia, dias_permanencia, permanencia_hora_inicio, permanencia_hora_termino')
       .single();
   } else {
     query = supabase
       .from('practica_usuaria')
       .insert({ user_id: userId, caj_id: null, ...patch })
-      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino')
+      .select('id, caj_asignado, direccion_caj, fecha_inicio, fecha_termino, postulante_rut, abogado_jefe, modalidad_permanencia, dias_permanencia, permanencia_hora_inicio, permanencia_hora_termino')
       .single();
   }
 
@@ -1177,8 +1288,120 @@ export async function savePracticaUsuaria(userId, { practicaId, cajAsignado, dir
     cajAsignado: data.caj_asignado || null,
     direccionCaj: data.direccion_caj || null,
     fechaInicio: data.fecha_inicio,
-    fechaTermino: data.fecha_termino
+    fechaTermino: data.fecha_termino,
+    postulanteRut: data.postulante_rut || null,
+    abogadoJefe: data.abogado_jefe || null,
+    modalidadPermanencia: data.modalidad_permanencia || null,
+    diasPermanencia: Array.isArray(data.dias_permanencia) ? data.dias_permanencia : [],
+    permanenciaHoraInicio: data.permanencia_hora_inicio ? String(data.permanencia_hora_inicio).slice(0, 5) : null,
+    permanenciaHoraTermino: data.permanencia_hora_termino ? String(data.permanencia_hora_termino).slice(0, 5) : null
   };
+}
+
+
+// Cierre de práctica / Formulario N°10.
+// Actualiza únicamente los campos expresamente incluidos en el patch para no
+// sobrescribir los datos generales de práctica.
+export async function updatePracticaCierre(userId, practicaId, patch = {}) {
+  const map = {
+    asistenciaCompletada: 'asistencia_completada',
+    revisionIntermedia1: 'revision_intermedia_1',
+    revisionIntermedia2: 'revision_intermedia_2',
+    apercibimiento: 'apercibimiento',
+    apercibimientoFecha: 'apercibimiento_fecha',
+    honorariosCostas: 'honorarios_costas',
+    honorariosCostasMonto: 'honorarios_costas_monto',
+    fechaEntregaCarpetasRevision: 'fecha_entrega_carpetas_revision',
+    fechaEntregaInformeFinal: 'fecha_entrega_informe_final',
+    fechaEntregaPreinformeTutor: 'fecha_entrega_preinforme_tutor',
+    fechaComunicacionPropuestaEvaluacion: 'fecha_comunicacion_propuesta_evaluacion',
+    fechaRecepcionDireccionRegional: 'fecha_recepcion_direccion_regional',
+    fechaRecepcionUnidadPracticas: 'fecha_recepcion_unidad_practicas',
+    justificacionCalificacionAplica: 'justificacion_calificacion_aplica',
+    justificacionCalificacionTipo: 'justificacion_calificacion_tipo',
+    justificacionCalificacionCausas: 'justificacion_calificacion_causas'
+  };
+  const dbPatch = {};
+  Object.entries(patch).forEach(([k, v]) => {
+    if (map[k]) dbPatch[map[k]] = v === undefined ? null : v;
+  });
+  if (!Object.keys(dbPatch).length) return null;
+
+  const { data, error } = await supabase
+    .from('practica_usuaria')
+    .update(dbPatch)
+    .eq('id', practicaId)
+    .eq('user_id', userId)
+    .select('asistencia_completada, revision_intermedia_1, revision_intermedia_2, apercibimiento, apercibimiento_fecha, honorarios_costas, honorarios_costas_monto, fecha_entrega_carpetas_revision, fecha_entrega_informe_final, fecha_entrega_preinforme_tutor, fecha_comunicacion_propuesta_evaluacion, fecha_recepcion_direccion_regional, fecha_recepcion_unidad_practicas, justificacion_calificacion_aplica, justificacion_calificacion_tipo, justificacion_calificacion_causas')
+    .single();
+
+  if (error) throw error;
+  return {
+    asistenciaCompletada: data.asistencia_completada === true,
+    revisionIntermedia1: data.revision_intermedia_1 || null,
+    revisionIntermedia2: data.revision_intermedia_2 || null,
+    apercibimiento: data.apercibimiento === null || data.apercibimiento === undefined ? null : data.apercibimiento === true,
+    apercibimientoFecha: data.apercibimiento_fecha || null,
+    honorariosCostas: data.honorarios_costas === null || data.honorarios_costas === undefined ? null : data.honorarios_costas === true,
+    honorariosCostasMonto: data.honorarios_costas_monto === null || data.honorarios_costas_monto === undefined ? null : Number(data.honorarios_costas_monto),
+    fechaEntregaCarpetasRevision: data.fecha_entrega_carpetas_revision || null,
+    fechaEntregaInformeFinal: data.fecha_entrega_informe_final || null,
+    fechaEntregaPreinformeTutor: data.fecha_entrega_preinforme_tutor || null,
+    fechaComunicacionPropuestaEvaluacion: data.fecha_comunicacion_propuesta_evaluacion || null,
+    fechaRecepcionDireccionRegional: data.fecha_recepcion_direccion_regional || null,
+    fechaRecepcionUnidadPracticas: data.fecha_recepcion_unidad_practicas || null,
+    justificacionCalificacionAplica: data.justificacion_calificacion_aplica === null || data.justificacion_calificacion_aplica === undefined ? null : data.justificacion_calificacion_aplica === true,
+    justificacionCalificacionTipo: data.justificacion_calificacion_tipo || null,
+    justificacionCalificacionCausas: Array.isArray(data.justificacion_calificacion_causas) ? data.justificacion_calificacion_causas : []
+  };
+}
+
+
+// ============================================================================
+// Asistencia de práctica — una fila por fecha solo cuando existe una edición
+// explícita. Si no hay fila, la UI puede mostrar la X automática derivada de
+// la jornada definida sin llenar la base con cientos de registros.
+// ============================================================================
+function asistenciaPracticaFromDb(row) {
+  return {
+    id: row.id,
+    practicaId: row.practica_id,
+    fecha: row.fecha,
+    estado: row.estado || '',
+    recuperado: row.recuperado === true,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export async function fetchPracticaAsistencia(userId, practicaId) {
+  if (!practicaId) return [];
+  const { data, error } = await supabase
+    .from('practica_asistencia')
+    .select('id, practica_id, fecha, estado, recuperado, created_at, updated_at')
+    .eq('user_id', userId)
+    .eq('practica_id', practicaId)
+    .order('fecha', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(asistenciaPracticaFromDb);
+}
+
+export async function upsertPracticaAsistencia(userId, practicaId, { fecha, estado, recuperado = false }) {
+  const row = {
+    user_id: userId,
+    practica_id: practicaId,
+    fecha,
+    estado: estado || null,
+    recuperado: recuperado === true,
+    updated_at: new Date().toISOString()
+  };
+  const { data, error } = await supabase
+    .from('practica_asistencia')
+    .upsert(row, { onConflict: 'practica_id,fecha' })
+    .select('id, practica_id, fecha, estado, recuperado, created_at, updated_at')
+    .single();
+  if (error) throw error;
+  return asistenciaPracticaFromDb(data);
 }
 
 
