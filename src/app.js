@@ -7,7 +7,6 @@ import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import { generarFormulario10Docx } from './lib/formulario10Docx.js';
 import { generarFormulario9Docx } from './lib/formulario9Docx.js';
 import { generarInformePracticaDocx } from './lib/informePracticaDocx.js';
-import { generarTraspasoCausasXlsx } from './lib/traspasoCausasXlsx.js';
 
 // ============================================================================
 // Estado
@@ -191,10 +190,15 @@ function priorClass(p) {
 // Nuevas (redacción) / Terminadas se pintan siempre con estos 8, en este
 // orden, tengan o no causas cargadas (ver renderFolders).
 const ORDEN_TIPOS_JUICIO = [
-  'Juicio Ejecutivo', 'Juicio Ordinario', 'Juicio Sumario',
-  'Juicio monitorio', 'Recurso de protección', 'Recurso de amparo',
-  'Voluntario', 'Extrajudicial',
-  'Gestión preparatoria', 'Interdicción', 'Interdictos posesorios'
+  'Transacción',
+  'Ordinario',
+  'Protección',
+  'Adopción susceptibilidad',
+  'Adopción',
+  'Voluntario',
+  'Violencia intrafamiliar',
+  'Ley de identidad de género',
+  'Ley 21,331 - Salud Mental'
 ];
 
 function subcatClass(c) {
@@ -2217,7 +2221,9 @@ async function loadAll() {
 const CAT_META = {
   tramitacion: { label: 'En tramitación' },
   nueva: { label: 'Nuevas (redacción)' },
-  terminada: { label: 'Terminadas' }
+  terminada: { label: 'Terminadas' },
+  reingreso: { label: 'Reingresos' },
+  desistida: { label: 'Desistidas' }
 };
 
 function renderSidebarTabs() {
@@ -2584,7 +2590,7 @@ function render() {
       ? `<div class="section-title">${label} <span class="n">${filtered.length}</span></div><div class="case-grid">${filtered.map(caseCardHtml).join('')}</div>`
       : `<div class="section-title">${label}</div><div class="empty-msg">No hay causas que coincidan con este filtro.</div>`;
   } else if (currentCat === 'todas') {
-    const groups = [['tramitacion', 'En tramitación'], ['nueva', 'Nuevas (redacción)'], ['terminada', 'Terminadas']];
+    const groups = [['tramitacion', 'En tramitación'], ['nueva', 'Nuevas (redacción)'], ['terminada', 'Terminadas'], ['reingreso', 'Reingresos'], ['desistida', 'Desistidas']];
     let html = '';
     groups.forEach(([key, label]) => {
       const items = filtered.filter(c => c.categoria === key);
@@ -3555,7 +3561,7 @@ function instruccionFormHtml(it) {
   </div>`;
 }
 
-const CATEGORIA_LABEL = { tramitacion: 'En tramitación', nueva: 'Nueva (redacción)', terminada: 'Terminada' };
+const CATEGORIA_LABEL = { tramitacion: 'En tramitación', nueva: 'Nueva (redacción)', terminada: 'Terminada', reingreso: 'Reingreso', desistida: 'Desistida' };
 
 const BAJ_OPCIONES = [
   ['acompanado', 'Acompañado'],
@@ -3687,11 +3693,7 @@ function buildFichaData(c) {
     rows: proximosEventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.horaInicio || '', eventoTituloEfectivo(e), e.estado])
   });
 
-  const carpetasDocumentacion = [
-    c.driveFolderUrl ? ['Carpeta en Google Drive', c.driveFolderUrl] : null,
-    c.cajVirtualFolderUrl ? ['Carpeta CAJ Virtual', c.cajVirtualFolderUrl] : null
-  ].filter(Boolean);
-  if (carpetasDocumentacion.length) sections.push({ title: 'Documentación', kind: 'links', rows: carpetasDocumentacion });
+  if (c.driveFolderUrl) sections.push({ title: 'Documentación', kind: 'link', label: 'Carpeta de Google Drive', url: c.driveFolderUrl });
 
   return {
     brand: 'Práctica Juris · Gestión de Causas',
@@ -3716,10 +3718,6 @@ function renderFichaHtml(data) {
       const tbody = sec.rows.map(r => `<tr>${r.map(cell => `<td>${escapeHtml(String(cell || ''))}</td>`).join('')}</tr>`).join('');
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
     }
-    if (sec.kind === 'links') {
-      const rows = sec.rows.map(([label, url]) => `<tr><td class="ficha-k">${escapeHtml(label)}</td><td class="ficha-v"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></td></tr>`).join('');
-      return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody>${rows}</tbody></table></div>`;
-    }
     if (sec.kind === 'link') {
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody><tr><td class="ficha-k">${escapeHtml(sec.label)}</td><td class="ficha-v"><a href="${escapeHtml(sec.url)}" target="_blank" rel="noopener">${escapeHtml(sec.url)}</a></td></tr></tbody></table></div>`;
     }
@@ -3729,10 +3727,6 @@ function renderFichaHtml(data) {
   return `
   <div class="ficha-doc">
     <div class="ficha-header">
-      <div class="ficha-brand-row">
-        <img src="/assets/branding/practica-juris-logo-completo.png" alt="Práctica Juris" class="ficha-brand-logo" draggable="false">
-        <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="ficha-brand-isotipo" draggable="false">
-      </div>
       <div class="ficha-brand">${escapeHtml(data.brand)}</div>
       <h2>${escapeHtml(data.titulo)}</h2>
       <div class="ficha-meta">${escapeHtml(data.meta)}</div>
@@ -3763,7 +3757,6 @@ function estimateSectionHeight(sec) {
   if (sec.kind === 'kv') return 12 + sec.rows.length * 9;
   if (sec.kind === 'list') return 12 + sec.items.length * 7;
   if (sec.kind === 'table') return 12 + 8 + sec.rows.length * 6.5;
-  if (sec.kind === 'links') return 12 + (sec.rows?.length || 1) * 9;
   if (sec.kind === 'link') return 12 + 9;
   return 20;
 }
@@ -3865,7 +3858,6 @@ function crearEscritorPdf() {
     if (sec.kind === 'kv') drawKvRows(sec.rows);
     else if (sec.kind === 'list') drawList(sec.items);
     else if (sec.kind === 'table') drawTable(sec.headers, sec.widths, sec.rows);
-    else if (sec.kind === 'links') drawKvRows(sec.rows || []);
     else if (sec.kind === 'link') drawKvRows([[sec.label, sec.url]]);
   }
 
@@ -3886,37 +3878,11 @@ function crearEscritorPdf() {
   };
 }
 
-async function cargarImagenDataUrl(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`No se pudo cargar ${url}`);
-  const blob = await resp.blob();
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error('No se pudo leer la imagen.'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function renderFichaPdf(data) {
+function renderFichaPdf(data) {
   const w = crearEscritorPdf();
   const { pdf, margin, contentWidth } = w;
 
-  // Encabezado del documento (solo primera página). Las imágenes son de la
-  // propia marca de la aplicación; si por cualquier motivo no cargan, el PDF
-  // sigue generándose con el encabezado textual.
-  try {
-    const [logo, isotipo] = await Promise.all([
-      cargarImagenDataUrl('/assets/branding/practica-juris-logo-completo.png'),
-      cargarImagenDataUrl('/assets/branding/practica-juris-isotipo.png')
-    ]);
-    pdf.addImage(logo, 'PNG', margin, w.y - 4, 46, 13);
-    pdf.addImage(isotipo, 'PNG', margin + contentWidth - 13, w.y - 4, 13, 13);
-    w.y += 16;
-  } catch (_) {
-    // Fallback silencioso: mantener el texto de marca.
-  }
-
+  // Encabezado del documento (solo primera página)
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(110);
   pdf.text(data.brand, margin, w.y); w.y += 7;
 
@@ -4064,10 +4030,10 @@ function agendaCausaResumenHtml(c) {
   const semanaCount = activos.filter(e => e.fecha && e.fecha >= hoy && e.fecha <= limiteISO).length;
   const audiencias = proximos.filter(e => e.tipo === 'Audiencia').length;
   return `<div class="ca-agenda-stats">
-    <div class="ca-agenda-stat ca-agenda-stat-next"><b>${proximos.length}</b><span>Próximos</span></div>
-    <div class="ca-agenda-stat ca-agenda-stat-today"><b>${hoyCount}</b><span>Hoy</span></div>
-    <div class="ca-agenda-stat ca-agenda-stat-week"><b>${semanaCount}</b><span>7 días</span></div>
-    <div class="ca-agenda-stat ca-agenda-stat-hearing"><b>${audiencias}</b><span>Audiencias</span></div>
+    <div class="ca-agenda-stat"><b>${proximos.length}</b><span>Próximos</span></div>
+    <div class="ca-agenda-stat"><b>${hoyCount}</b><span>Hoy</span></div>
+    <div class="ca-agenda-stat"><b>${semanaCount}</b><span>7 días</span></div>
+    <div class="ca-agenda-stat"><b>${audiencias}</b><span>Audiencias</span></div>
   </div>`;
 }
 
@@ -4249,35 +4215,46 @@ function wireAgendaListButtons(c, panel, openForm, listWrap) {
 // ============================================================================
 // Tribunales que no llevan número ordinal (Corte Suprema, y "Otro" si no se
 // especifica número).
-const TRIBUNAL_SIN_NUMERO = ['Corte Suprema'];
+const TRIBUNAL_SIN_NUMERO = [];
 
-// 30 Juzgados Civiles de Santiago — único listado válido para el nuevo
-// desplegable "Tribunal" cuando Tipo de tribunal = Juzgado Civil. El valor
-// interno es solo el número (compatible con numeroTribunal ya existente).
-function opcionesTribunalCivilHtml(numeroSeleccionado) {
-  let html = '<option value="">Sin definir</option>';
-  for (let i = 1; i <= 30; i++) {
-    html += `<option value="${i}" ${String(numeroSeleccionado) === String(i) ? 'selected' : ''}>${i}° Juzgado Civil de Santiago</option>`;
-  }
-  return html;
+const TRIBUNALES_FAMILIA = [
+  { nombre: '1° Juzgado de Familia de Santiago', numero: '1', ciudad: 'Santiago' },
+  { nombre: '2° Juzgado de Familia de Santiago', numero: '2', ciudad: 'Santiago' },
+  { nombre: '3° Juzgado de Familia de Santiago', numero: '3', ciudad: 'Santiago' },
+  { nombre: '4° Juzgado de Familia de Santiago', numero: '4', ciudad: 'Santiago' },
+  { nombre: '1° Juzgado de Familia de San Miguel', numero: '1', ciudad: 'San Miguel' },
+  { nombre: '2° Juzgado de Familia de San Miguel', numero: '2', ciudad: 'San Miguel' },
+  { nombre: 'Juzgado de Familia de Pudahuel', numero: null, ciudad: 'Pudahuel' },
+  { nombre: 'Juzgado de Familia de Colina', numero: null, ciudad: 'Colina' },
+  { nombre: 'Juzgado de Familia de Puente Alto', numero: null, ciudad: 'Puente Alto' },
+  { nombre: 'Juzgado de Familia de San Bernardo', numero: null, ciudad: 'San Bernardo' },
+  { nombre: 'Juzgado de Familia de Peñaflor', numero: null, ciudad: 'Peñaflor' },
+  { nombre: 'Juzgado de Familia de Talagante', numero: null, ciudad: 'Talagante' },
+  { nombre: 'Juzgado de Familia de Melipilla', numero: null, ciudad: 'Melipilla' },
+  { nombre: 'Juzgado de Familia de Buin', numero: null, ciudad: 'Buin' }
+];
+
+function opcionesTribunalFamiliaHtml(seleccionado) {
+  return '<option value="">Sin definir</option>' +
+    TRIBUNALES_FAMILIA.map(t => `<option value="${escapeHtml(t.nombre)}" ${seleccionado === t.nombre ? 'selected' : ''}>${escapeHtml(t.nombre)}</option>`).join('');
 }
 
-// Precarga del select civil desde una causa existente: solo si el número
-// guardado está en 1-30 Y la ciudad guardada es (razonablemente) "Santiago"
-// — si no calza exactamente, el select parte en "Sin definir" sin alterar
-// el dato ya guardado (tribunalTexto lo sigue mostrando igual).
-function numeroTribunalCivilPrecargado(c) {
-  const n = parseInt(c.numeroTribunal, 10);
-  const ciudadEsSantiago = (c.ciudadTribunal || '').trim().toLowerCase() === 'santiago';
-  return (ciudadEsSantiago && n >= 1 && n <= 30) ? String(n) : '';
+function tribunalFamiliaPrecargado(c) {
+  const texto = tribunalTexto(c);
+  return TRIBUNALES_FAMILIA.some(t => t.nombre === texto) ? texto : '';
 }
 
-// Fuente única para el texto del tribunal en toda la aplicación: se
-// construye siempre desde los campos normalizados de la causa; si aún no
-// se han completado (causas antiguas sin migrar manualmente), cae de
-// respaldo al texto libre histórico c.tribunal.
+function partesTribunalFamilia(nombre) {
+  return TRIBUNALES_FAMILIA.find(t => t.nombre === nombre) || null;
+}
+
 function tribunalTexto(c) {
   if (!c) return '';
+  if (c.tipoTribunal === 'Juzgado de Familia') {
+    const numero = c.numeroTribunal ? `${c.numeroTribunal}° ` : '';
+    const ciudad = c.ciudadTribunal ? ` de ${c.ciudadTribunal}` : '';
+    return `${numero}Juzgado de Familia${ciudad}`.trim();
+  }
   if (c.tipoTribunal) {
     const necesitaNumero = !TRIBUNAL_SIN_NUMERO.includes(c.tipoTribunal);
     const numero = necesitaNumero && c.numeroTribunal ? `${c.numeroTribunal}° ` : '';
@@ -4345,14 +4322,14 @@ function partesAbreviadas(c) {
 // tabla nueva cuando tiene datos, o arma el mismo par de siempre a partir
 // de las columnas antiguas cuando la causa aún no tiene intervinientes.
 function tieneRolProcesalDefinido(c) {
-  return intervinientesEfectivos(c).some(i => i.tipoParte === 'Demandante' || i.tipoParte === 'Demandado/a');
+  return intervinientesEfectivos(c).some(i => i.tipoParte === 'Demandante' || i.tipoParte === 'Demandado');
 }
 
 function caratuladoTexto(c) {
   const lista = intervinientesEfectivos(c);
   if (tieneRolProcesalDefinido(c)) {
     const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
-    const primerDemandado = lista.find(i => i.tipoParte === 'Demandado/a');
+    const primerDemandado = lista.find(i => i.tipoParte === 'Demandado');
     const dte = nombreCorto(primerDemandante ? primerDemandante.nombre : null);
     const ddo = nombreCorto(primerDemandado ? primerDemandado.nombre : null);
     if (dte && ddo) return `${dte} / ${ddo}`;
@@ -4371,130 +4348,124 @@ function procedimientoCanonico(valorGuardado) {
   return ORDEN_TIPOS_JUICIO.find(p => normalizarProcedimiento(p) === norm) || null;
 }
 
-const TIPO_JUICIO_POR_PROCEDIMIENTO = {
-  'Juicio Ordinario': ['Mayor Cuantía', 'Menor Cuantía', 'Mínima Cuantía', 'Otro'],
-  'Juicio Ejecutivo': ['Obligación de Dar', 'Obligación de Hacer', 'Obligación de no Hacer', 'Otro']
+const MATERIAS_FAMILIA = [
+  'Alimentos',
+  'Cuidado Personal',
+  'Divorcio',
+  'Filiación',
+  'RDR',
+  'VIF',
+  'Vulneración de derechos',
+  'Infracción a la Ley penal',
+  'Patria potestad',
+  'Guardador',
+  'Autorización',
+  'Declaración de susceptibilidad',
+  'Adopción',
+  'Violencia de género',
+  'Salud Mental',
+  'Otros asuntos'
+];
+
+const SUBMATERIAS_POR_MATERIA = {
+  'Alimentos': [
+    'Alimentos menores, fijación', 'Alimentos menores, aumento', 'Alimentos menores, rebaja',
+    'Alimentos menores, cesación', 'Alimentos menores, cumplimiento',
+    'Alimentos mayores, fijación', 'Alimentos mayores, aumento', 'Alimentos mayores, rebaja',
+    'Alimentos mayores, cesación', 'Alimentos mayores, cumplimiento',
+    'Alimentos mayores y menores, fijación', 'Alimentos mayores y menores, aumento',
+    'Alimentos mayores y menores, rebaja', 'Alimentos mayores y menores, cesación',
+    'Alimentos mayores y menores, cumplimiento'
+  ],
+  'Cuidado Personal': [
+    'Cuidado personal provisorio, fijación', 'Cuidado personal provisorio, declaración',
+    'Cuidado personal provisorio, modificación', 'Cuidado personal provisorio, otros',
+    'Cuidado personal definitivo, fijación', 'Cuidado personal definitivo, declaración',
+    'Cuidado personal definitivo, modificación', 'Cuidado personal definitivo, otros',
+    'Cuidado personal exclusivo, fijación', 'Cuidado personal exclusivo, declaración',
+    'Cuidado personal exclusivo, modificación', 'Cuidado personal exclusivo, otros',
+    'Cuidado personal compartido, fijación', 'Cuidado personal compartido, declaración',
+    'Cuidado personal compartido, modificación', 'Cuidado personal compartido, otros'
+  ],
+  'Divorcio': [
+    'Divorcio de mutuo acuerdo', 'Divorcio unilateral por cese de convivencia',
+    'Compensación económica', 'Divorcio culposo o por culpa', 'Separación matrimonial',
+    'Nulidad matrimonial'
+  ],
+  'Filiación': [
+    'Maternidad, impugnación', 'Maternidad, reconocimiento', 'Maternidad, impugnación y reconocimiento',
+    'Paternidad, reclamación matrimonial', 'Paternidad, reclamación no matrimonial',
+    'Paternidad, impugnación', 'Paternidad, reconocimiento', 'Paternidad, impugnación y reconocimiento',
+    'Paternidad, simple desconocimiento', 'Paternidad, nulidad de reconocimiento'
+  ],
+  'RDR': [
+    'Relación Directa y Regular, fijación', 'Relación Directa y Regular, modificación',
+    'Relación Directa y Regular, suspensión', 'Relación Directa y Regular, restricción',
+    'Relación Directa y Regular, cumplimiento / apremios', 'Relación Directa y Regular, otros'
+  ],
+  'VIF': [
+    'VIF en contra de la mujer', 'VIF en contra de adultos mayores', 'VIF en contra de NNA',
+    'VIF en contra de personas en situación de discapacidad',
+    'Medidas cautelares o de protección asociadas a VIF'
+  ],
+  'Vulneración de derechos': [
+    'Maltrato físico o psicológico', 'Abuso sexual', 'Omisión, negligencia o abandono',
+    'Explotación laboral o mendicidad', 'Consumo problemático de drogas o alcohol',
+    'Amenaza o vulneración por violencia intrafamiliar (VIF)', 'Situación de calle / vagancia',
+    'Vulneración de derechos de NNA',
+    'Derivación a programas de apoyo psicosocial / Red Mejor Niñez o Sename',
+    'Control o revisión de medidas cautelares/protectoras'
+  ],
+  'Infracción a la Ley penal': ['Medida de protección por actos de connotación o infracción penal'],
+  'Patria potestad': [
+    'Patria potestad (emancipación judicial)', 'Patria potestad, solicitud',
+    'Patria potestad, renuncia', 'Patria potestad, suspensión', 'Patria potestad, otros'
+  ],
+  'Guardador': [
+    'Guardador menores de edad, nombramiento', 'Guardador menores de edad, remoción', 'Designación de curador'
+  ],
+  'Autorización': [
+    'Autorización salida del país', 'Autorización para enajenar bienes raíces',
+    'Autorización de trabajo NNA', 'Autorizaciones, otros', 'Matrimonio, disenso para contraer'
+  ],
+  'Declaración de susceptibilidad': [
+    'Inhabilidad física o moral', 'Falta de atención', 'Entrega voluntaria', 'Vulneración grave de derechos'
+  ],
+  'Adopción': [
+    'Adopción propiamente tal (o solicitada por cónyuges/solteros)', 'Adopción por integración'
+  ],
+  'Violencia de género': [
+    'Violencia física', 'Violencia psicológica o emocional', 'Violencia económica o patrimonial', 'Violencia sexual'
+  ],
+  'Salud Mental': ['Protección salud mental voluntaria', 'Protección salud mental forzada'],
+  'Otros asuntos': [
+    'Nulidad matrimonial', 'Separación judicial de bienes', 'Separación judicial de bienes mutuo acuerdo',
+    'Declaración de bien familiar', 'Desafectación de bien familiar',
+    'Entrega de menor y/o especies del menor / Costo de crianza', 'Secuestro internacional de menores',
+    'Otros asuntos de tramitación ordinaria', 'Convivencia, notificación cese',
+    'Separación judicial de mutuo acuerdo', 'Otros asuntos voluntarios'
+  ]
 };
-function opcionesTipoJuicioParaProcedimiento(procedimientoCanon) {
-  return TIPO_JUICIO_POR_PROCEDIMIENTO[procedimientoCanon] || null;
-}
 
-const MATERIA_POR_PROCEDIMIENTO = {
-  'Juicio Ordinario': [
-    'Acción Cambiaria Ordinaria, Letra', 'Acción Cambiaria Ordinaria, Pagaré',
-    'Acción de Rescisión por Lesión Enorme', 'Acción de Simulación', 'Acción Hipotecaria',
-    'Acción Ordinaria de Cobro de Cheque', 'Acción Ordinaria de Desposeimiento',
-    'Acción Pauliana, Revocatorias', 'Cobro de Mutuo de Dinero', 'Cobro de Pesos',
-    'Cumplimiento de Contrato', 'Derecho y Cobro de Pensiones, Jubilar',
-    'Indemnización de Perjuicios', 'Indemnización de Perjuicios Transporte Aéreo',
-    'Indemnización de Perjuicios Transporte Terrestre', 'Nulidad de Acto Administrativo',
-    'Nulidad de Contrato', 'Nulidad de Expropiación', 'Nulidad de Testamento',
-    'Otros Ordinarios', 'Peteción de Herencia',
-    'Prescripción Exrinción de Acciones, Adquisición de Derechos y Otros',
-    'Procedimiento Cuantía Inferior Art. 749 C.P.C. Hacienda',
-    'Procedimiento Cuantía Superior Art. 749 C.P.C. Hacienda', 'Reforma de Testamento',
-    'Reivindicación', 'Reliquidación de Pensiones', 'Resolución de Contrato', 'Violencia de Genero'
-  ],
-  'Juicio Sumario': [
-    'Acción de Cerramiento', 'Acciones Contempladas en la Ley que Regula la Competencia',
-    'Acciones Revocatorias Concursales', 'Amparo de Aguas',
-    'Arrendamiento Bienes Inmuebles, Menor a 4 U.T.M', 'Arrendamiento de Bienes Muebles, CPC',
-    'Arrendamiento Devolución de Garantía', 'Cobro de Honorarios', 'Cobro de Rentas, Monitorio',
-    'Cobro Pequeño Derecho de Autor', 'Cobro Rentas Bienes Raíces Urbanos, Arrendamiento',
-    'Cobro Servicios Según D.L. 964 y Ley 18.101, Arrendamiento', 'Comodato', 'Comodato Precario',
-    'Depósito Necesario', 'Derecho Real, Conservación Medioambiental',
-    'Derechos Aprovechamiento, C. Aguas', 'Desahucio Contrato Bienes Raíces Urbanos, Arrendamiento',
-    'Impugnación del Acuerdo de Renegociación', 'Indemnización de Perjuicios, Arrendamiento',
-    'Indemnización Ley de Propiedad Intelectual', 'Indemnización Perjuicios Art. 169 Ley Tránsito',
-    'Indemnización Perjuicios Art. 9 Ley 18.287', 'Infracciones a la Ley de Pesca y Acuicultura',
-    'Jactancia', 'Otros Sumarios', 'Pesos, Cobro Según Art. 680 N° 7 CPC',
-    'Precario, inc. 2° Art. 2.195 C.C', 'Predios Rústicos, Arrendamiento',
-    'Procedimiento Arrendamiento, Reconveción de Pago', 'Procedimiento Art. 680 N° 8 C.P.C., Cuentas',
-    'Procedimiento de Demarcación', 'Reclamación Art. 341 Ley 20.720',
-    'Reclamación de Acto Administrativo', 'Reclamación de Multa Administrativa',
-    'Restitución por Expiración Tiempo Estipulado Arrendamiento',
-    'Restitución por Extinción Derecho Arrendador', 'Sanitario Código Reclamación de Multas Art. 171',
-    'Sentencia Penal Condenatoria', 'Servidumbre Legales', 'Servidumbre Naturales',
-    'Terminación Inmediata por no Pago Rentas o Reconvención, Arrandamiento',
-    'Transgresión a la Ética Profesional'
-  ],
-  'Juicio monitorio': ['Cobro de rentas', 'Comodato precario', 'Precario'],
-  'Gestión preparatoria': [
-    'Citación confesión de deuda', 'Citación Reconocimiento de Firma',
-    'Citación y Confesión de Deuda, Reconocimiento de Firma', 'Gestión de Avaluación',
-    'Gestión de Confrontación', 'Notificación de Desposeimiento', 'Notificación de Factura',
-    'Notificación de Protesto, Letra', 'Notificación de Protesto, Pagaré',
-    'Notificación protesto de cheque', 'Notificación Título Ejecutivo Herederos'
-  ],
-  'Juicio Ejecutivo': [
-    'Acción de Desposeimiento', 'Acción Según Ley de Bancos Hipotecario', 'Cobro de Cheque',
-    'Cobro de Facturas', 'Cobro de Gastos Comunes', 'Cobro de Letra de Cambio', 'Cobro de Mutuo',
-    'Cobro de Pagaré', 'Cobro Ejecutivo de Sentencia Judicial', 'Cumplimiento Obligación de Dar',
-    'Cumplimiento Obligación de Hacer', 'Cumplimiento Obligación de No Hacer',
-    'Ejecutivo según Ley CORVI', 'Otros Ejecutivos'
-  ],
-  'Voluntario': [
-    'Aprobación de escrituras de partición', 'Autorización Cambio de Nombre',
-    'Autorización inscripción fuera de plazo legal Defunción', 'Autorización para arrendar Bienes Raíces',
-    'Autorización para Cesión de Derechos', 'Autorización para contraer segundas nupcias',
-    'Autorización para Donar o insinuación', 'Autorización para enajenar Bienes Raíces',
-    'Autorización para gravar Bienes Raíces', 'Declaración de Herencia yacente', 'Extravío de Título',
-    'Inscripciones en Registro Vehiculos Motorizados', 'Inventario solemne', 'Muerte Presunta',
-    'Nombramiento de Curador', 'Otros Voluntarios', 'Pago por consignación (art. 1600 CC)',
-    'Posesión efectiva', 'Reclamo negativa del Conservador de Bienes Raíces',
-    'Reclamo negativa Registro Civil', 'Rectificación Partidas de nacimiento',
-    'Registro Civil autorización nombramiento curador especial'
-  ],
-  'Interdicción': ['Discipación', 'Interdicción por Demencia c/certificado COMPIN', 'Rehabilitación del disipador'],
-  'Interdictos posesorios': [
-    'Amparo, querella', 'Obra nueva, denuncia', 'Obra ruinosa, denuncia',
-    'Oposición a Reconstitución de Inscripción Ley 16665', 'Otros interdictos posesorios',
-    'Reestablecimiento, querella', 'Restitución, querella'
-  ],
-  'Recurso de protección': [
-    'Salud', 'Administrativo', 'Autotutela (Corte de suministros básicos)',
-    'Educación (Sanción Universidad)', 'Educación (Ley 21.128 aula segura)',
-    'Extranjería (Negativa a solicitud de refugio)', 'Extranjería (Omisión visa temporal)',
-    'Extranjería (Omisión permanencia definitiva)', 'Grupos intermedios (Suspensión y expulsión de bomberos)',
-    'Honra (Funa por RR.SS (redes sociales)', 'Honra (Publicación deuda con pagaré no protestado en Liq. Concursal)',
-    'Honra (Publicación deuda con pagaré no protestado)', 'Jurisdiccional (Reclamo de ilegalidad)',
-    'Jurisdiccional (Publicación de datos personales SAF)', 'Jurisdiccional (Resolución judicial)',
-    'Laboral (No renovación de contrata)', 'Laboral (Municipalidad descuenta licencias médicas rechazadas)',
-    'Laboral (Funcionarios en cargos de exclusiva confianza)', 'Laboral (Término anticipado de contrata)',
-    'Propiedad', 'Otras protecciones'
-  ],
-  'Recurso de amparo': ['Amparo Art. 21 Constitución Política', 'Amparo económico']
-};
+const ETAPAS_FAMILIA = [
+  'En redacción',
+  'Presentación de la demanda',
+  'Notificación y contestación',
+  'Audiencia preparatoria',
+  'Audiencia de juicio',
+  'Sentencia',
+  'Recursos'
+];
 
-const ETAPA_JUICIO_ORDINARIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación', 'Réplica y Dúplica', 'Llamado a conciliación', 'Término probatorio', 'Observaciones a la prueba', 'Citación a oír sentencia', 'Sentencia', 'Cumplimiento Incidental', 'Recursos'];
-const ETAPA_JUICIO_SUMARIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación y conciliación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos'];
-const ETAPA_JUICIO_MONITORIO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Contestación y conciliación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos', 'Lanzamiento'];
-const ETAPA_GESTION_PREPARATORIA = ['En redacción', 'Presentación de la solicitud', 'Notificación', 'Audiencia o comparecencia', 'Resolución del Tribunal'];
-const ETAPA_JUICIO_EJECUTIVO = ['En redacción', 'Presentación de la demanda', 'Notificación y Emplazamiento', 'Excepciones', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Embargo', 'Bases de remate', 'Remate', 'Recursos'];
-const ETAPA_VOLUNTARIO_INTERDICCION = ['En redacción', 'Presentación de la solicitud', 'Audiencia', 'Informes / Oficios', 'Testigos', 'Citación a oír sentencia', 'Sentencia', 'Publicación', 'Inscripción'];
-const ETAPA_INTERDICTOS_POSESORIOS = ['En redacción', 'Presentación de la querella', 'Notificación', 'Audiencia', 'Contestación', 'Término probatorio', 'Citación a oír sentencia', 'Sentencia', 'Recursos', 'Cumplimiento Incidental'];
-const ETAPA_RECURSO_PROTECCION_AMPARO = ['En redacción', 'Presentación recurso', 'Examen de admisibilidad', 'Recurso', 'Alegatos', 'Sentencia', 'Recurso'];
+function opcionesTipoJuicioParaProcedimiento() { return MATERIAS_FAMILIA; }
+function opcionesMateriaParaProcedimiento(materiaSeleccionada) { return SUBMATERIAS_POR_MATERIA[materiaSeleccionada] || []; }
+function opcionesEtapaParaProcedimiento() { return ETAPAS_FAMILIA; }
 
-const ETAPA_POR_PROCEDIMIENTO = {
-  'Juicio Ordinario': ETAPA_JUICIO_ORDINARIO,
-  'Juicio Sumario': ETAPA_JUICIO_SUMARIO,
-  'Juicio monitorio': ETAPA_JUICIO_MONITORIO,
-  'Gestión preparatoria': ETAPA_GESTION_PREPARATORIA,
-  'Juicio Ejecutivo': ETAPA_JUICIO_EJECUTIVO,
-  'Voluntario': ETAPA_VOLUNTARIO_INTERDICCION,
-  'Interdicción': ETAPA_VOLUNTARIO_INTERDICCION,
-  'Interdictos posesorios': ETAPA_INTERDICTOS_POSESORIOS,
-  'Recurso de protección': ETAPA_RECURSO_PROTECCION_AMPARO,
-  'Recurso de amparo': ETAPA_RECURSO_PROTECCION_AMPARO
-};
-function opcionesMateriaParaProcedimiento(procedimientoCanon) { return MATERIA_POR_PROCEDIMIENTO[procedimientoCanon] || null; }
-function opcionesEtapaParaProcedimiento(procedimientoCanon) { return ETAPA_POR_PROCEDIMIENTO[procedimientoCanon] || null; }
-
-const RIT_PREFIJOS_VALIDOS = ['C', 'V', 'E', 'A', 'F', 'I'];
+const RIT_PREFIJOS_VALIDOS = ['A', 'C', 'E', 'F', 'V', 'P', 'T', 'Z', 'X', 'I', 'M', 'W', 'R', 'S', 'O'];
 function ritYRolEfectivos(c) {
   if (c.rit) return { rit: c.rit, rol: c.rol || '' };
   const rol = c.rol || '';
-  const m = rol.match(/^([CVEAFI])-(.+)$/);
+  const m = rol.match(/^([ACEFVPTZXIMWRSO])-(.+)$/);
   if (m && RIT_PREFIJOS_VALIDOS.includes(m[1])) return { rit: m[1], rol: m[2] };
   return { rit: null, rol };
 }
@@ -4512,7 +4483,7 @@ function tituloAutomatico(c) {
   if (c.materia) componentes.push(c.materia);
   const lista = intervinientesEfectivos(c);
   const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
-  const primerDemandado = lista.find(i => i.tipoParte === 'Demandado/a');
+  const primerDemandado = lista.find(i => i.tipoParte === 'Demandado');
   const apDte = nombreCorto(primerDemandante ? primerDemandante.nombre : null);
   const apDdo = nombreCorto(primerDemandado ? primerDemandado.nombre : null);
   if (apDte) componentes.push(apDte);
@@ -4525,7 +4496,7 @@ function emptyCausa() {
     id: null, folio: null, categoria: 'nueva', origenCarpeta: null, subcategoria: null, tipoJuicio: null,
     materia: null, etapa: null, bajEstado: null, recurso: null, rolIngreso: null, competencia: null, corteNombre: null, parteCorte: null,
     rit: null, rol: null, tipoTribunal: null, numeroTribunal: null, ciudadTribunal: null, tribunal: null,
-    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null, cajVirtualFolderUrl: null,
+    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null,
     intervinientes: [], demandanteNombre: null, demandadoNombre: null, parteRepresentada: null,
     patrocinado: null, patrocinadoTipo: null, contraparteNombre: null, titulo: null
   };
@@ -4629,15 +4600,15 @@ function nombrePatrocinadoDesdeIntervinientes(tipoParte, lista) {
 // sentidos solo para los 2 casos compatibles.
 function parteRepresentadaLegacyDesdeTipo(tipoParte) {
   if (tipoParte === 'Demandante') return 'Demandante';
-  if (tipoParte === 'Demandado/a') return 'Demandado';
+  if (tipoParte === 'Demandado') return 'Demandado';
   return null;
 }
 function tipoPatrocinadoDesdeLegacy(parteRepresentada) {
   if (parteRepresentada === 'Demandante') return 'Demandante';
-  if (parteRepresentada === 'Demandado') return 'Demandado/a';
+  if (parteRepresentada === 'Demandado') return 'Demandado';
   return '';
 }
-// Fuente principal: patrocinado_tipo (admite los 7 tipos). Si una causa
+// Fuente principal: patrocinado_tipo (admite las calidades procesales de Familia). Si una causa
 // histórica no lo tiene, cae a parte_representada solo para los 2 tipos
 // que esa columna antigua siempre pudo representar.
 function tipoPatrocinadoEfectivo(c) {
@@ -4649,9 +4620,9 @@ const JURISDICCION_CORTE_OPCIONES = ['C.A de Santiago', 'C.A de San Miguel', 'C.
 
 function antecedentesFormHtml(c) {
   const procedimientoCanon = procedimientoCanonico(c.subcategoria) || (c.subcategoria || null);
-  const opcionesTipoJuicio = opcionesTipoJuicioParaProcedimiento(procedimientoCanon);
-  const opcionesMateria = opcionesMateriaParaProcedimiento(procedimientoCanon);
-  const opcionesEtapa = opcionesEtapaParaProcedimiento(procedimientoCanon);
+  const opcionesTipoJuicio = MATERIAS_FAMILIA;
+  const opcionesMateria = SUBMATERIAS_POR_MATERIA[c.tipoJuicio] || [];
+  const opcionesEtapa = ETAPAS_FAMILIA;
   const { rit, rol } = ritYRolEfectivos(c);
   const lista = intervinientesEfectivos(c);
 
@@ -4674,6 +4645,8 @@ function antecedentesFormHtml(c) {
               <option value="tramitacion" ${c.categoria === 'tramitacion' ? 'selected' : ''}>En tramitación</option>
               <option value="nueva" ${c.categoria === 'nueva' ? 'selected' : ''}>Nueva (redacción)</option>
               <option value="terminada" ${c.categoria === 'terminada' ? 'selected' : ''}>Terminada</option>
+              <option value="reingreso" ${c.categoria === 'reingreso' ? 'selected' : ''}>Reingresos</option>
+              <option value="desistida" ${c.categoria === 'desistida' ? 'selected' : ''}>Desistidas</option>
             </select>
           </div>
           <div>
@@ -4690,8 +4663,8 @@ function antecedentesFormHtml(c) {
         <div class="form-grid4">
           <div><label>Tutor</label><select id="af-tutor">${tutorOptionsHtml(c.tutor)}</select></div>
           <div><label>Procedimiento</label><select id="af-procedimiento">${procedimientoOptionsHtml(procedimientoCanon)}</select></div>
-          <div id="af-tipojuicio-wrap"><label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
-          <div id="af-materia-wrap"><label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
+          <div id="af-tipojuicio-wrap"><label>Materia</label>${campoTipoJuicioHtml(opcionesTipoJuicio, c.tipoJuicio)}</div>
+          <div id="af-materia-wrap"><label>Sub Materia</label>${campoDependienteHtml('af-materia', opcionesMateria, c.materia)}</div>
         </div>
         <div class="form-grid4">
           <div><label>BAJ</label><select id="af-baj"><option value="">Sin definir</option>${BAJ_OPCIONES.map(([v, l]) => `<option value="${v}" ${c.bajEstado === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -4705,12 +4678,13 @@ function antecedentesFormHtml(c) {
           <div class="af-section-kicker">Competencia</div>
           <div class="af-section-title">Tribunal y tramitación</div>
         </div>
+        <div class="af-section-note" id="af-tribunal-preview">Se mostrará como: <strong>${escapeHtml(tribunalTexto(c) || 'Sin definir')}</strong></div>
       </div>
       <div class="af-section-body">
         <div class="form-grid4">
           <div><label>RIT</label><select id="af-rit"><option value="">Sin definir</option>${RIT_PREFIJOS_VALIDOS.map(p => `<option value="${p}" ${rit === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
           <div><label>ROL</label><input type="text" id="af-rol" value="${escapeHtml(rol || '')}" placeholder="Ej: 15250-2026"></div>
-          <div><label>Tribunal</label><select id="af-tribunal-civil">${opcionesTribunalCivilHtml(numeroTribunalCivilPrecargado(c))}</select></div>
+          <div><label>Tribunal</label><select id="af-tribunal-familia">${opcionesTribunalFamiliaHtml(tribunalFamiliaPrecargado(c))}</select></div>
           <div id="af-etapa-wrap"><label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapa, c.etapa)}</div>
         </div>
       </div>
@@ -4769,6 +4743,10 @@ function antecedentesFormHtml(c) {
           </div>
         </div>
         `}
+        <div class="af-preview-strip">
+          <div id="af-caratulado-preview"><span>Caratulado</span><strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
+          <div id="af-titulo-preview"><span>Título generado</span><strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
+        </div>
       </div>
     </section>
 
@@ -4810,7 +4788,8 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
   const procedimiento = panel.querySelector('#af-procedimiento').value || null;
   const ritSel = panel.querySelector('#af-rit').value || null;
   const rolInput = panel.querySelector('#af-rol').value.trim() || null;
-  const numeroCivil = panel.querySelector('#af-tribunal-civil').value || null;
+  const tribunalFamiliaNombre = panel.querySelector('#af-tribunal-familia').value || null;
+  const tribunalFamilia = partesTribunalFamilia(tribunalFamiliaNombre);
   const tipoPatrocinadoSel = panel.querySelector('#af-patrocinado-tipo').value || null;
   const patrocinadoInterviniente = tipoPatrocinadoSel
     ? estadoIntervinientes.find(i => i.tipoParte === tipoPatrocinadoSel)
@@ -4834,9 +4813,9 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
     materia: materiaEl ? (materiaEl.value.trim ? materiaEl.value.trim() || null : materiaEl.value || null) : null,
     bajEstado: panel.querySelector('#af-baj').value || null,
     rit: ritSel, rol: rolInput,
-    tipoTribunal: numeroCivil ? 'Juzgado Civil' : null,
-    numeroTribunal: numeroCivil || null,
-    ciudadTribunal: numeroCivil ? 'Santiago' : null,
+    tipoTribunal: tribunalFamilia ? 'Juzgado de Familia' : null,
+    numeroTribunal: tribunalFamilia?.numero || null,
+    ciudadTribunal: tribunalFamilia?.ciudad || null,
     etapa: etapaEl ? (etapaEl.value.trim ? etapaEl.value.trim() || null : etapaEl.value || null) : null,
     intervinientes: estadoIntervinientes.filter(i => i.nombre && i.tipoParte),
     patrocinado: patrocinadoNombre,
@@ -4910,6 +4889,12 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   function refreshPreviews() {
     sincronizarPatrocinadoNuevaCausa();
     const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
+    const tribunalPreview = form.querySelector('#af-tribunal-preview');
+    if (tribunalPreview) tribunalPreview.innerHTML = `Se mostrará como: <strong>${escapeHtml(tribunalTexto(snap) || 'Sin definir')}</strong>`;
+    const caratuladoPreview = form.querySelector('#af-caratulado-preview');
+    if (caratuladoPreview) caratuladoPreview.innerHTML = `Caratulado: <strong>${escapeHtml(caratuladoTexto(snap) || 'Sin definir')}</strong>`;
+    const tituloPreview = form.querySelector('#af-titulo-preview');
+    if (tituloPreview) tituloPreview.innerHTML = `Título generado: <strong>${escapeHtml(tituloAutomatico(snap) || 'Sin definir')}</strong>`;
     const patrocinadoPreview = form.querySelector('#af-patrocinado-nombre-preview');
     if (patrocinadoPreview && !esNuevaCausa) patrocinadoPreview.textContent = snap.patrocinado || 'Sin definir';
   }
@@ -4920,28 +4905,32 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     refreshPreviews();
   }
 
-  // Procedimiento -> recalcula Tipo de juicio / Materia / Etapa Procesal
-  // dependientes (se reinician al cambiar de procedimiento, ya que un
-  // valor de otro procedimiento no tiene sentido en el nuevo catálogo).
-  form.querySelector('#af-procedimiento').addEventListener('change', () => {
-    const canon = form.querySelector('#af-procedimiento').value || null;
-    form.querySelector('#af-tipojuicio-wrap').innerHTML = `<label>Tipo de juicio</label>${campoTipoJuicioHtml(opcionesTipoJuicioParaProcedimiento(canon), null)}`;
-    form.querySelector('#af-materia-wrap').innerHTML = `<label>Materia</label>${campoDependienteHtml('af-materia', opcionesMateriaParaProcedimiento(canon), null)}`;
-    form.querySelector('#af-etapa-wrap').innerHTML = `<label>Etapa Procesal</label>${campoDependienteHtml('af-etapa', opcionesEtapaParaProcedimiento(canon), null)}`;
-    wireCamposDependientesInput();
-    refreshPreviews();
-  });
+  // En Familia, Procedimiento es independiente de Materia.
+  form.querySelector('#af-procedimiento').addEventListener('change', refreshPreviews);
 
-  function wireCamposDependientesInput() {
-    ['#af-tipojuicio', '#af-materia', '#af-etapa'].forEach(sel => {
+  // Materia -> recalcula únicamente Sub Materia.
+  function wireMateriaFamilia() {
+    const materiaSel = form.querySelector('#af-tipojuicio');
+    if (!materiaSel) return;
+    materiaSel.addEventListener('change', () => {
+      const materia = materiaSel.value || null;
+      form.querySelector('#af-materia-wrap').innerHTML = `<label>Sub Materia</label>${campoDependienteHtml('af-materia', SUBMATERIAS_POR_MATERIA[materia] || [], null)}`;
+      wireSubmateriaEtapaInputs();
+      refreshPreviews();
+    });
+  }
+
+  function wireSubmateriaEtapaInputs() {
+    ['#af-materia', '#af-etapa'].forEach(sel => {
       const el = form.querySelector(sel);
       if (el) el.addEventListener('input', refreshPreviews);
     });
   }
-  wireCamposDependientesInput();
+  wireMateriaFamilia();
+  wireSubmateriaEtapaInputs();
 
   // Tribunal / RIT / ROL — todo en vivo hacia la vista previa.
-  ['#af-rit', '#af-rol', '#af-tribunal-civil'].forEach(sel => {
+  ['#af-rit', '#af-rol', '#af-tribunal-familia'].forEach(sel => {
     const el = form.querySelector(sel);
     if (el) el.addEventListener('input', refreshPreviews);
   });
@@ -5055,14 +5044,14 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   });
 }
 
-const TIPOS_PARTE = ['Demandante', 'Demandado/a', 'Solicitante', 'Solicitado', 'Requirente', 'Requerido', 'Tercero'];
+const TIPOS_PARTE = ['Demandante', 'Demandado', 'Solicitante', 'Solicitado', 'Requirente', 'Requerido', 'Víctima', 'Denunciante', 'Niño', 'Niña', 'Adolescente', 'Tercero'];
 
 function intervinientesEfectivos(c) {
   const reales = (c.intervinientes || []).slice().sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
   if (reales.length) return reales;
   const respaldo = [];
   if (c.demandanteNombre) respaldo.push({ id: null, tipoParte: 'Demandante', nombre: c.demandanteNombre, orden: 0 });
-  if (c.demandadoNombre) respaldo.push({ id: null, tipoParte: 'Demandado/a', nombre: c.demandadoNombre, orden: 1 });
+  if (c.demandadoNombre) respaldo.push({ id: null, tipoParte: 'Demandado', nombre: c.demandadoNombre, orden: 1 });
   return respaldo;
 }
 
@@ -5803,44 +5792,34 @@ function receptoresFiltradosPorBusqueda() {
 }
 
 function receptorCardHtml(r) {
-  const iniciales = String(r.nombreCompleto || '')
-    .trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase() || 'R';
-  return `<article class="receptor-card radm-receptor-card" data-receptor-id="${r.id}">
-    <div class="radm-receptor-main">
-      <label class="radm-receptor-select">
+  return `<div class="receptor-card" data-receptor-id="${r.id}">
+    <div class="receptor-card-top">
+      <label style="display:flex; align-items:center; gap:8px; flex:1; cursor:pointer;">
         <input type="checkbox" class="receptor-check" data-id="${r.id}" ${receptoresSeleccionados.has(r.id) ? 'checked' : ''}>
-        <span class="radm-receptor-avatar">${escapeHtml(iniciales)}</span>
+        <strong>${escapeHtml(r.nombreCompleto)}</strong>
       </label>
-      <div class="radm-receptor-info">
-        <div class="radm-receptor-name-row">
-          <strong>${escapeHtml(r.nombreCompleto)}</strong>
-          <span class="radm-status ${r.activo ? 'active' : 'inactive'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
-        </div>
-        <div class="radm-receptor-meta">
-          ${r.telefono ? `<span>Tel. ${escapeHtml(r.telefono)}</span>` : ''}
-          ${r.correo ? `<span>${escapeHtml(r.correo)}</span>` : ''}
-          ${r.jurisdiccion ? `<span>${escapeHtml(r.jurisdiccion)}</span>` : ''}
-        </div>
-        ${r.domicilio ? `<div class="radm-receptor-address">${escapeHtml(r.domicilio)}</div>` : ''}
-        ${r.fuenteOficial ? `<div class="radm-receptor-source">Fuente: ${escapeHtml(r.fuenteOficial)}</div>` : ''}
-      </div>
+      <span class="stamp evento-estado-${r.activo ? 'calm-estado' : 'noprior'}">${r.activo ? 'Activo' : 'Inactivo'}</span>
     </div>
-    <div class="radm-receptor-actions">
-      <button class="btn small" data-action="edit-receptor" data-id="${r.id}">Editar</button>
-      <button class="btn small ghost" data-action="toggle-receptor" data-id="${r.id}">${r.activo ? 'Marcar inactivo' : 'Marcar activo'}</button>
-      <button class="btn small danger" data-action="delete-receptor" data-id="${r.id}">Eliminar</button>
+    <div class="gestion-meta">
+      ${r.telefono ? `<span>${escapeHtml(r.telefono)}</span>` : ''}
+      ${r.correo ? `<span>${escapeHtml(r.correo)}</span>` : ''}
+      ${r.jurisdiccion ? `<span>${escapeHtml(r.jurisdiccion)}</span>` : ''}
     </div>
-  </article>`;
+    ${r.domicilio ? `<div class="gestion-meta">${escapeHtml(r.domicilio)}</div>` : ''}
+    ${r.fuenteOficial ? `<div class="ficha-empty" style="color:var(--ink-faint);">Fuente: ${escapeHtml(r.fuenteOficial)}</div>` : ''}
+    <div class="gestion-actions">
+      <button data-action="edit-receptor" data-id="${r.id}">Editar</button>
+      <button data-action="toggle-receptor" data-id="${r.id}">${r.activo ? 'Marcar inactivo' : 'Marcar activo'}</button>
+      <button data-action="delete-receptor" data-id="${r.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
+    </div>
+  </div>`;
 }
 
 function receptorFormHtml(r) {
   const e = r || {};
   return `
-  <div class="agenda-form radm-form-card">
-    <div class="radm-form-head">
-      <div class="radm-kicker">${r ? 'Edición' : 'Nuevo registro'}</div>
-      <h3>${r ? 'Editar receptor' : 'Nuevo receptor'}</h3>
-    </div>
+  <div class="agenda-form">
+    <div class="subhead" style="margin-top:0;">${r ? 'Editar receptor' : 'Nuevo receptor'}</div>
     <div><label>Nombre completo</label><input type="text" id="rf-nombre" value="${escapeHtml(e.nombreCompleto || '')}"></div>
     <div class="form-grid2">
       <div><label>Teléfono</label><input type="text" id="rf-telefono" value="${escapeHtml(e.telefono || '')}"></div>
@@ -5896,14 +5875,8 @@ function renderReceptoresTab() {
 
   const activos = receptoresFiltrados.filter(r => r.activo);
   const inactivos = receptoresFiltrados.filter(r => !r.activo);
-  let html = `<div class="radm-section-toolbar">
-    <div>
-      <div class="radm-section-kicker">Catálogo</div>
-      <strong>Receptores registrados</strong>
-    </div>
-    <button class="btn small primary" id="add-receptor">+ Nuevo receptor</button>
-  </div>
-  <div id="receptor-form-wrap" class="agenda-form-wrap radm-form-wrap" hidden></div>`;
+  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-receptor">+ Nuevo receptor</button></div>
+  <div id="receptor-form-wrap" class="agenda-form-wrap" hidden></div>`;
   if (RECEPTORES.length === 0) {
     html += `<div class="empty-msg">Aún no hay receptores en el catálogo. Agrega uno manualmente o usa "Importar PDF / CSV".</div>`;
   } else if (receptoresFiltrados.length === 0) {
@@ -6046,45 +6019,21 @@ async function eliminarReceptoresConVerificacion(ids) {
 
 // ---------- Sub-vista: turnos ----------
 function turnoRowHtml(t) {
-  const nombre = t.receptor ? t.receptor.nombreCompleto : 'Receptor eliminado';
-  const iniciales = String(nombre || '')
-    .trim().split(/\s+/).filter(Boolean).slice(0, 2).map(p => p[0]).join('').toUpperCase() || 'T';
-  return `<article class="radm-turn-card" data-turno-id="${t.id}">
-    <div class="radm-turn-card-top">
-      <label class="radm-turn-select">
-        <input type="checkbox" class="turno-check" data-id="${t.id}" ${turnosSeleccionados.has(t.id) ? 'checked' : ''}>
-        <span class="radm-turn-avatar">${escapeHtml(iniciales)}</span>
-      </label>
-      <div class="radm-turn-card-main">
-        <strong>${escapeHtml(nombre)}</strong>
-        <span class="radm-turn-period">${escapeHtml(fmtFechaSolo(t.fechaInicio))} — ${escapeHtml(fmtFechaSolo(t.fechaFin))}</span>
-      </div>
-      <span class="radm-turn-chip">Turno</span>
-    </div>
-    <div class="radm-turn-details">
-      <div>
-        <span class="radm-detail-label">Jurisdicción</span>
-        <span class="radm-detail-value">${escapeHtml(t.jurisdiccion || 'Sin definir')}</span>
-      </div>
-      <div>
-        <span class="radm-detail-label">Fuente</span>
-        <span class="radm-detail-value">${escapeHtml(t.fuenteOficial || 'Sin fuente registrada')}</span>
-      </div>
-    </div>
-    <div class="radm-turn-card-actions">
-      <button class="btn small danger" data-action="delete-turno" data-id="${t.id}">Eliminar turno</button>
-    </div>
-  </article>`;
+  return `<div class="pjud-row" data-turno-id="${t.id}" style="grid-template-columns:auto 1.6fr 1fr 1fr 1fr auto;">
+    <div><input type="checkbox" class="turno-check" data-id="${t.id}" ${turnosSeleccionados.has(t.id) ? 'checked' : ''}></div>
+    <div>${escapeHtml(t.receptor ? t.receptor.nombreCompleto : 'Receptor eliminado')}</div>
+    <div>${escapeHtml(fmtFechaSolo(t.fechaInicio))} — ${escapeHtml(fmtFechaSolo(t.fechaFin))}</div>
+    <div>${escapeHtml(t.jurisdiccion || '—')}</div>
+    <div>${escapeHtml(t.fuenteOficial || '—')}</div>
+    <div><button class="btn small" data-action="delete-turno" data-id="${t.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button></div>
+  </div>`;
 }
 
 function turnoFormHtml() {
   const opciones = RECEPTORES.filter(r => r.activo).map(r => `<option value="${r.id}">${escapeHtml(r.nombreCompleto)}</option>`).join('');
   return `
-  <div class="agenda-form radm-form-card">
-    <div class="radm-form-head">
-      <div class="radm-kicker">Nuevo registro</div>
-      <h3>Nuevo turno</h3>
-    </div>
+  <div class="agenda-form">
+    <div class="subhead" style="margin-top:0;">Nuevo turno</div>
     <div><label>Receptor</label><select id="tf-receptor"><option value="">— Selecciona —</option>${opciones}</select></div>
     <div class="form-grid2">
       <div><label>Fecha inicio</label><input type="date" id="tf-inicio"></div>
@@ -6110,23 +6059,15 @@ function detectarSuperposicion(receptorId, fechaInicio, fechaFin, excluirId) {
 function renderTurnosTab() {
   turnosSeleccionados.forEach(id => { if (!TURNOS.find(t => t.id === id)) turnosSeleccionados.delete(id); });
 
-  let html = `<div class="radm-section-toolbar">
-    <div>
-      <div class="radm-section-kicker">Turnos</div>
-      <strong>Períodos registrados</strong>
-    </div>
-    <div class="radm-toolbar-actions">
-      <button class="btn small primary" id="add-turno">+ Nuevo turno</button>
-      <button class="btn small" id="importar-turno-excel">Importar turno mensual (Excel)</button>
-    </div>
-  </div>
-  <div id="turno-form-wrap" class="agenda-form-wrap radm-form-wrap" hidden></div>`;
+  let html = `<div class="agenda-toolbar"><button class="btn small primary" id="add-turno">+ Nuevo turno</button> <button class="btn small" id="importar-turno-excel">Importar turno mensual (Excel)</button></div>
+  <div id="turno-form-wrap" class="agenda-form-wrap" hidden></div>`;
   if (TURNOS.length === 0) {
     html += `<div class="empty-msg">Aún no hay turnos cargados. Agrega uno manualmente o importa el archivo Excel de turnos.</div>`;
   } else {
     html += bulkSelectBarHtml(turnosSeleccionados, TURNOS.length, 'turnos');
     const ordenados = TURNOS.slice().sort((a, b) => b.fechaInicio.localeCompare(a.fechaInicio));
-    html += `<div class="radm-turn-grid">
+    html += `<div class="pjud-table">
+      <div class="pjud-row pjud-head" style="grid-template-columns:auto 1.6fr 1fr 1fr 1fr auto;"><div></div><div>Receptor</div><div>Período</div><div>Jurisdicción</div><div>Fuente</div><div></div></div>
       ${ordenados.map(turnoRowHtml).join('')}
     </div>`;
   }
@@ -6218,77 +6159,34 @@ const FUENTE_CONTACTO_URL = 'https://cortesantiago.cl/listado-receptores-judicia
 
 function renderImportarTab() {
   return `
-  <div class="radm-import-layout">
-    <section class="radm-import-hero">
-      <div>
-        <div class="radm-section-kicker">Carga asistida</div>
-        <h3>Importar información de receptores</h3>
-        <p>Centraliza aquí las cargas desde fuentes oficiales. La aplicación detecta el tipo de archivo y siempre muestra una vista previa antes de guardar.</p>
-      </div>
-      <span class="radm-import-badge">PDF · Excel · CSV</span>
-    </section>
-
-    <div class="radm-import-options">
-      <article class="radm-import-option">
-        <div class="radm-import-option-icon">01</div>
-        <div>
-          <span class="radm-import-option-type">Catálogo de receptores</span>
-          <strong>Listado oficial</strong>
-          <p>PDF, Excel o CSV con nombres, tribunal, correos, teléfonos y dirección.</p>
-        </div>
-      </article>
-      <article class="radm-import-option">
-        <div class="radm-import-option-icon">02</div>
-        <div>
-          <span class="radm-import-option-type">Turnos mensuales</span>
-          <strong>Períodos de turno</strong>
-          <p>PDF oficial o archivo de turnos para asociar receptor, período y jurisdicción.</p>
-        </div>
-      </article>
+  <div class="import-box">
+    <p style="font-size:12.5px; color:var(--ink-dim);">
+      Sube el PDF oficial de la Corte de Apelaciones de Santiago (listado de receptores o turno mensual),
+      un archivo Excel (.xlsx/.xls) del listado oficial de receptores, o un archivo CSV/TXT. La aplicación
+      intenta detectar automáticamente el tipo de documento — siempre puedes corregirlo manualmente. Nada
+      se guarda sin tu confirmación en la vista previa.
+    </p>
+    <p style="font-size:11.5px; color:var(--ink-faint);">
+      Excel de la base maestra de receptores: se reconocen las columnas
+      <code>Nombre</code>, <code>Corte</code>, <code>Tribunal</code>, <code>Correo Principal</code>,
+      <code>Correo Alternativo</code>, <code>Teléfono 1</code>, <code>Teléfono 2</code>, <code>Teléfono 3</code>
+      y <code>Dirección</code>. Cada campo se guarda por separado, en su propia columna. Un Excel siempre se trata como
+      listado de receptores — nunca crea turnos.
+    </p>
+    <p style="font-size:11.5px; color:var(--ink-faint);">
+      Formato CSV/TXT alternativo (columnas): <code>nombre,telefono,correo,domicilio,jurisdiccion,fecha_inicio,fecha_fin</code>
+      (fechas en AAAA-MM-DD).
+    </p>
+    <p style="font-size:11.5px; color:var(--ink-faint);">
+      Fuentes oficiales de referencia: <a href="${FUENTE_TURNOS_URL}" target="_blank" rel="noopener">turnos de receptores (PJUD)</a> ·
+      <a href="${FUENTE_CONTACTO_URL}" target="_blank" rel="noopener">datos de contacto (Corte de Santiago)</a>.
+    </p>
+    <div class="import-dropzone" id="import-dropzone">
+      <input type="file" id="import-file" accept=".pdf,.csv,.txt,.xlsx,.xls" hidden>
+      <div>Arrastra aquí el PDF, Excel o CSV, o <button class="btn small" id="import-browse" type="button">elegir archivo</button></div>
     </div>
-
-    <section class="radm-upload-card">
-      <div class="radm-upload-title">
-        <div>
-          <div class="radm-section-kicker">Archivo</div>
-          <strong>Selecciona el documento a procesar</strong>
-        </div>
-        <span class="radm-upload-security">Vista previa antes de guardar</span>
-      </div>
-
-      <div class="import-dropzone radm-dropzone" id="import-dropzone">
-        <input type="file" id="import-file" accept=".pdf,.csv,.txt,.xlsx,.xls" hidden>
-        <div class="radm-dropzone-icon">⇧</div>
-        <strong>Arrastra el archivo aquí</strong>
-        <span>o selecciónalo desde tu equipo</span>
-        <button class="btn primary" id="import-browse" type="button">Elegir archivo</button>
-        <small>PDF · XLSX · XLS · CSV · TXT</small>
-      </div>
-      <div id="import-status" class="radm-import-status"></div>
-      <div id="import-preview-wrap" class="radm-import-preview"></div>
-    </section>
-
-    <section class="radm-import-help">
-      <div class="radm-import-help-head">
-        <div class="radm-section-kicker">Referencia</div>
-        <strong>Formatos reconocidos</strong>
-      </div>
-      <div class="radm-import-help-grid">
-        <div class="radm-help-card">
-          <span>Excel catálogo</span>
-          <p>Nombre, Corte, Tribunal, Correo Principal, Correo Alternativo, Teléfono 1, Teléfono 2, Teléfono 3 y Dirección.</p>
-        </div>
-        <div class="radm-help-card">
-          <span>CSV / TXT</span>
-          <p><code>nombre, telefono, correo, domicilio, jurisdiccion, fecha_inicio, fecha_fin</code></p>
-        </div>
-      </div>
-      <div class="radm-source-links">
-        <span>Fuentes oficiales:</span>
-        <a href="${FUENTE_TURNOS_URL}" target="_blank" rel="noopener">Turnos de receptores (PJUD)</a>
-        <a href="${FUENTE_CONTACTO_URL}" target="_blank" rel="noopener">Datos de contacto (Corte de Santiago)</a>
-      </div>
-    </section>
+    <div id="import-status" style="font-size:12px; color:var(--ink-faint); margin-top:8px;"></div>
+    <div id="import-preview-wrap" style="margin-top:16px;"></div>
   </div>`;
 }
 
@@ -8745,32 +8643,13 @@ function renderReceptoresAdmin() {
   else if (receptoresAdminTab === 'turnos') bodyHtml = renderTurnosTab();
   else bodyHtml = renderImportarTab();
 
-  const receptoresActivos = RECEPTORES.filter(r => r.activo).length;
-  const receptoresInactivos = RECEPTORES.length - receptoresActivos;
-
   container.innerHTML = `
-    <div class="radm-shell">
-      <section class="radm-hero">
-        <div>
-          <div class="radm-kicker">Herramientas administrativas</div>
-          <h2>Administración de receptores</h2>
-          <p>Gestiona el catálogo de receptores judiciales, sus períodos de turno y las importaciones de fuentes oficiales.</p>
-        </div>
-        <span class="radm-admin-badge">Solo administrador</span>
-      </section>
-
-      <div class="radm-stats">
-        <div class="radm-stat radm-stat-total"><span class="radm-stat-num">${RECEPTORES.length}</span><span class="radm-stat-label">Receptores</span></div>
-        <div class="radm-stat radm-stat-active"><span class="radm-stat-num">${receptoresActivos}</span><span class="radm-stat-label">Activos</span></div>
-        <div class="radm-stat radm-stat-inactive"><span class="radm-stat-num">${receptoresInactivos}</span><span class="radm-stat-label">Inactivos</span></div>
-        <div class="radm-stat radm-stat-turns"><span class="radm-stat-num">${TURNOS.length}</span><span class="radm-stat-label">Turnos registrados</span></div>
-      </div>
-
-      <section class="radm-card">
-        <div class="radm-tabs">${tabs.map(([k, l]) => `<button class="radm-tab ${receptoresAdminTab === k ? 'active' : ''}" data-radm-tab="${k}">${l}</button>`).join('')}</div>
-        <div class="radm-body">${bodyHtml}</div>
-      </section>
+    <div class="section-title">Administración de receptores</div>
+    <div style="color:var(--ink-dim); font-size:12.5px; margin:-6px 0 18px;">
+      Catálogo de receptores judiciales y sus periodos de turno (Región Metropolitana, área civil, encargos con beneficio de asistencia judicial). Independiente de Encargo receptor, que solo consulta esta información.
     </div>
+    <div class="agenda-viewtabs">${tabs.map(([k, l]) => `<button class="btn small ${receptoresAdminTab === k ? 'primary' : ''}" data-radm-tab="${k}">${l}</button>`).join('')}</div>
+    <div>${bodyHtml}</div>
   `;
 
   container.querySelectorAll('[data-radm-tab]').forEach(btn => {
@@ -9635,16 +9514,14 @@ function informeFinalDocumentoCard({
   titulo,
   estado,
   datosHtml,
-  contenidoExtra = '',
-  kicker = 'Formato institucional',
-  buttonLabel = 'Generar documento'
+  contenidoExtra = ''
 }) {
   return `
     <article class="if-inst-card" data-if-doc="${escapeHtml(numero)}">
       <div class="if-inst-card-head">
         <div class="if-inst-doc-id">${escapeHtml(numero)}</div>
         <div class="if-inst-card-title">
-          <div class="if-kicker">${escapeHtml(kicker)}</div>
+          <div class="if-kicker">Formato institucional</div>
           <h3>${escapeHtml(titulo)}</h3>
         </div>
         <span class="if-inst-status ${estado.clase}">${escapeHtml(estado.label)}</span>
@@ -9670,7 +9547,7 @@ function informeFinalDocumentoCard({
 
       <div class="if-inst-card-foot if-inst-card-foot-actions">
         <button class="btn primary if-inst-generate" type="button" disabled title="Completa los datos requeridos para generar el documento">
-          ${escapeHtml(buttonLabel)}
+          Generar documento
         </button>
       </div>
     </article>`;
@@ -9813,205 +9690,9 @@ function actualizarResumenFormulario10SinRecarga() {
   }
 }
 
-
-function claveUsuarioTraspaso(c) {
-  const rut = String(c?.rut || '').replace(/[^0-9kK]/g, '').toUpperCase();
-  if (rut) return `rut:${rut}`;
-  const nombre = String(patrocinadoEfectivo(c) || c?.patrocinado || '').trim().toLowerCase();
-  return nombre ? `nombre:${nombre}` : `causa:${c?.id || ''}`;
-}
-
-function estadoNotificacionTraspaso(c) {
-  const personas = (c?.notificacionPersonas || []).filter(p => String(p?.estadoNotificacion || '').trim());
-  if (!personas.length) return c?.notifEstado || '';
-  if (personas.length === 1) return personas[0].estadoNotificacion || '';
-  return personas
-    .map(p => `${p.nombre ? `${p.nombre}: ` : ''}${p.estadoNotificacion || ''}`.trim())
-    .filter(Boolean)
-    .join(' · ');
-}
-
-function receptorEncargadoTraspaso(c) {
-  const activos = (ENCARGOS || [])
-    .filter(e =>
-      String(e?.causaId || '') === String(c?.id || '') &&
-      e?.estadoGestion !== 'Realizado' &&
-      String(e?.receptorTurnoNombre || '').trim()
-    )
-    .slice()
-    .sort((a, b) => {
-      const fa = a?.fechaConfirmacionReceptor || a?.fechaEncargo || '';
-      const fb = b?.fechaConfirmacionReceptor || b?.fechaEncargo || '';
-      return fb.localeCompare(fa);
-    });
-  return activos[0]?.receptorTurnoNombre || '';
-}
-
-function resumenTraspasoCausasVigentes() {
-  const causasVigentes = (CAUSAS || []).filter(c => c.categoria !== 'terminada');
-  const usuarios = new Set(causasVigentes.map(claveUsuarioTraspaso));
-  const hoy = todayISO();
-  const audienciasPendientes = causasVigentes.reduce((total, c) => total + (c.agendaEventos || []).filter(e =>
-    e.tipo === 'Audiencia' &&
-    isEventoActivo(e) &&
-    !!e.fecha &&
-    e.fecha >= hoy
-  ).length, 0);
-  const apelaciones = causasVigentes.filter(c => !!(c.recurso || c.rolIngreso || c.corteNombre || c.parteCorte)).length;
-  return { causasVigentes, usuarios: usuarios.size, audienciasPendientes, apelaciones };
-}
-
-function construirDatosTraspaso(causasVigentes, credencialesPorCausa = new Map()) {
-  const causasOrdenadas = causasVigentes.slice().sort((a, b) =>
-    String(a.fechaIngreso || '').localeCompare(String(b.fechaIngreso || '')) ||
-    String(rolCompletoTexto(a) || '').localeCompare(String(rolCompletoTexto(b) || ''))
-  );
-
-  const numeroPorCausa = new Map();
-  const causas = causasOrdenadas.map((c, idx) => {
-    const numero = idx + 1;
-    numeroPorCausa.set(String(c.id), numero);
-    const gestionActiva = pickActiveGestion(c);
-    const ultima = (c.cronologia || [])[0] || null;
-    return {
-      numero,
-      fechaIngreso: c.fechaIngreso || '',
-      tutor: c.tutor || '',
-      rut: c.rut || '',
-      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
-      tipoParte: c.patrocinadoTipo || c.parteRepresentada || '',
-      procedimiento: c.subcategoria || '',
-      materia: c.materia || '',
-      saj: c.folio || '',
-      caratulado: caratuladoTexto(c) || '',
-      rol: rolCompletoTexto(c) || '',
-      tribunal: tribunalTexto(c) || '',
-      etapa: c.etapa || '',
-      queSigue: gestionActiva?.descripcion || '',
-      ultimaGestion: ultima?.descripcion || '',
-      fechaUltimaGestion: ultima?.fecha || '',
-      estadoNotificacion: estadoNotificacionTraspaso(c),
-      receptor: receptorEncargadoTraspaso(c),
-      observaciones: c.observacionesTraspaso || ''
-    };
-  });
-
-  const usuariosMap = new Map();
-  causasOrdenadas.forEach(c => {
-    const key = claveUsuarioTraspaso(c);
-    const existente = usuariosMap.get(key) || {
-      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
-      rut: c.rut || '',
-      telefono: '',
-      telefonoAlt: '',
-      correo: '',
-      correoAlt: '',
-      clavePjud: '',
-      claveUnica: '',
-      observaciones: ''
-    };
-    existente.telefono ||= c.telefono || '';
-    existente.telefonoAlt ||= c.telefonoAlt || '';
-    existente.correo ||= c.correo || '';
-    existente.correoAlt ||= c.correoAlt || '';
-    existente.observaciones ||= c.nota || '';
-    const cred = credencialesPorCausa.get(String(c.id)) || {};
-    existente.clavePjud ||= cred.clavePjud || '';
-    existente.claveUnica ||= cred.claveUnica || '';
-    usuariosMap.set(key, existente);
-  });
-  const usuarios = Array.from(usuariosMap.values()).map((u, idx) => ({ numero: idx + 1, ...u }));
-
-  const hoy = todayISO();
-  const audiencias = [];
-  causasOrdenadas.forEach(c => {
-    (c.agendaEventos || []).forEach(e => {
-      if (e.tipo !== 'Audiencia' || !isEventoActivo(e) || !e.fecha || e.fecha < hoy) return;
-      audiencias.push({
-        rol: rolCompletoTexto(c) || '',
-        caratulado: caratuladoTexto(c) || '',
-        tribunal: tribunalTexto(c) || '',
-        materia: c.materia || c.subcategoria || '',
-        fecha: e.fecha || '',
-        hora: e.horaInicio || '',
-        tipoEvento: e.tipoAudiencia || 'Audiencia',
-        modalidad: e.modalidad || '',
-        link: e.enlace || '',
-        quePreparar: e.descripcion || e.titulo || '',
-        observaciones: e.observaciones || ''
-      });
-    });
-  });
-  audiencias.sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
-  audiencias.forEach((a, idx) => { a.numero = idx + 1; });
-
-  const apelaciones = causasOrdenadas
-    .filter(c => !!(c.recurso || c.rolIngreso || c.corteNombre || c.parteCorte))
-    .map(c => ({
-      numero: numeroPorCausa.get(String(c.id)) || '',
-      rut: c.rut || '',
-      patrocinado: patrocinadoEfectivo(c) || c.patrocinado || '',
-      materia: c.materia || c.subcategoria || '',
-      saj: c.folio || '',
-      caratulado: caratuladoTexto(c) || '',
-      rol: rolCompletoTexto(c) || '',
-      tribunal: tribunalTexto(c) || '',
-      recurso: c.recurso || '',
-      rolCorte: c.rolIngreso || c.rolCA || '',
-      jurisdiccion: c.corteNombre || c.competencia || '',
-      parte: c.parteCorte || ''
-    }));
-
-  return { causas, usuarios, audiencias, apelaciones };
-}
-
-async function obtenerCredencialesTraspaso(causasVigentes) {
-  const estados = new Map();
-  let hayCredenciales = false;
-
-  for (const c of causasVigentes) {
-    const estado = await api.credentialsStatus(c.id);
-    estados.set(String(c.id), estado || {});
-    if (estado?.claveWebGuardada || estado?.claveUnicaGuardada) hayCredenciales = true;
-  }
-
-  const resultado = new Map();
-  if (!hayCredenciales) return resultado;
-
-  const estadoPin = await api.pinStatus();
-  if (!estadoPin?.pinConfigurado) {
-    throw new Error('Hay credenciales guardadas, pero no existe un PIN de seguridad configurado.');
-  }
-
-  let pin = window.prompt('Ingresa tu PIN de seguridad de 4 dígitos para incluir las claves en el Excel de traspaso:');
-  if (pin === null) return null;
-  if (!/^\d{4}$/.test(pin)) throw new Error('El PIN debe tener exactamente 4 dígitos.');
-
-  try {
-    for (const c of causasVigentes) {
-      const estado = estados.get(String(c.id)) || {};
-      const cred = { clavePjud: '', claveUnica: '' };
-      if (estado.claveWebGuardada) {
-        const revelada = await api.credentialsReveal(c.id, 'claveWeb', pin);
-        cred.clavePjud = revelada?.valor || '';
-      }
-      if (estado.claveUnicaGuardada) {
-        const revelada = await api.credentialsReveal(c.id, 'claveUnica', pin);
-        cred.claveUnica = revelada?.valor || '';
-      }
-      resultado.set(String(c.id), cred);
-    }
-  } finally {
-    pin = '';
-  }
-
-  return resultado;
-}
-
 function renderInformeFinal() {
   const container = document.getElementById('list-container');
   const d = informeFinalDiagnosticoDatos();
-  const traspasoResumen = resumenTraspasoCausasVigentes();
 
   const pendInforme = [];
   if (!d.nombre) pendInforme.push('Nombre del postulante');
@@ -10120,26 +9801,13 @@ function renderInformeFinal() {
     informeFinalDatoFila('Justificación calificación', d.justificacionRespondida ? (d.justificacionAplica ? `${d.justificacionTipo === 'deficiente' ? 'Deficiente' : 'Sobresaliente'} · ${d.justificacionCausas.length} causa(s)` : 'No corresponde') : '', d.justificacionCompleta)
   ].join('');
 
-  const estadoTraspaso = informeFinalEstadoDocumento({
-    disponibles: traspasoResumen.causasVigentes.length > 0 ? 1 : 0,
-    total: 1
-  });
-  if (estadoTraspaso.porcentaje === 100) estadoTraspaso.label = 'Listo para generar';
-
-  const traspasoDatos = [
-    informeFinalDatoFila('Causas vigentes', traspasoResumen.causasVigentes.length, traspasoResumen.causasVigentes.length > 0),
-    informeFinalDatoFila('Usuarios incluidos', traspasoResumen.usuarios, traspasoResumen.causasVigentes.length > 0),
-    informeFinalDatoFila('Audiencias pendientes', traspasoResumen.audienciasPendientes, true),
-    informeFinalDatoFila('Causas con apelaciones', traspasoResumen.apelaciones, true)
-  ].join('');
-
   container.innerHTML = `
     <div class="if-shell if-inst-shell">
       <section class="if-hero if-inst-hero">
         <div>
           <div class="if-kicker">Cierre de práctica</div>
           <h2>Informe Final</h2>
-          <p>Generación de documentos de cierre y traspaso de la práctica profesional.</p>
+          <p>Generación de documentos sobre los formatos oficiales de la Corporación de Asistencia Judicial.</p>
         </div>
         <div class="if-inst-hero-badge">
           <span class="if-inst-lock">▣</span>
@@ -10410,16 +10078,7 @@ function renderInformeFinal() {
               </section>
             </div>
           `
-        })}
-
-        ${informeFinalDocumentoCard({
-          numero: 'TR',
-          titulo: 'Traspaso de causas vigentes',
-          estado: estadoTraspaso,
-          datosHtml: traspasoDatos,
-          kicker: 'Documento de traspaso',
-          buttonLabel: 'Generar Excel'
-        })}
+        })}"
       </div>
 
 
@@ -10859,48 +10518,6 @@ function renderInformeFinal() {
       } finally {
         btnGenerarFormulario10.textContent = textoOriginal;
         btnGenerarFormulario10.disabled = informeFinalDiagnosticoDatos().asistenciaCompletada !== true || estadoF10.porcentaje !== 100;
-      }
-    });
-  }
-
-  const cardTraspaso = document.querySelector('.if-inst-card[data-if-doc="TR"]');
-  const btnGenerarTraspaso = cardTraspaso?.querySelector('.if-inst-generate');
-  if (btnGenerarTraspaso) {
-    btnGenerarTraspaso.disabled = traspasoResumen.causasVigentes.length === 0;
-    btnGenerarTraspaso.title = traspasoResumen.causasVigentes.length
-      ? 'Generar Excel de traspaso con las causas vigentes'
-      : 'No hay causas vigentes para traspasar';
-
-    btnGenerarTraspaso.addEventListener('click', async () => {
-      if (btnGenerarTraspaso.disabled) return;
-      const textoOriginal = btnGenerarTraspaso.textContent;
-      btnGenerarTraspaso.disabled = true;
-      btnGenerarTraspaso.textContent = 'Generando Excel…';
-
-      let credenciales = null;
-      try {
-        const resumenActual = resumenTraspasoCausasVigentes();
-        if (!resumenActual.causasVigentes.length) {
-          toast('No hay causas vigentes para traspasar.');
-          return;
-        }
-
-        credenciales = await obtenerCredencialesTraspaso(resumenActual.causasVigentes);
-        if (credenciales === null) {
-          toast('Generación cancelada');
-          return;
-        }
-
-        const datos = construirDatosTraspaso(resumenActual.causasVigentes, credenciales);
-        await generarTraspasoCausasXlsx(datos);
-        toast('Excel de traspaso generado');
-      } catch (err) {
-        console.error('No se pudo generar el Excel de traspaso:', err);
-        toast('No se pudo generar el Excel de traspaso: ' + err.message);
-      } finally {
-        if (credenciales?.clear) credenciales.clear();
-        btnGenerarTraspaso.textContent = textoOriginal;
-        btnGenerarTraspaso.disabled = resumenTraspasoCausasVigentes().causasVigentes.length === 0;
       }
     });
   }
@@ -11503,36 +11120,17 @@ function detailHtml(c) {
           <div class="rf-summary-head">
             <div>
               <div class="rf-summary-kicker">Documentos</div>
-              <div class="rf-summary-title">Carpetas de documentación</div>
+              <div class="rf-summary-title">Carpeta de Google Drive</div>
             </div>
           </div>
-          <div class="rf-summary-body rf-folder-links">
-            <div class="rf-folder-link-block">
-              <div class="rf-folder-link-head">
-                <div>
-                  <span class="rf-folder-link-kicker">Personal / apoyo</span>
-                  <strong>Carpeta en Google Drive</strong>
-                </div>
-                ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir</button>` : ''}
-              </div>
-              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Sin enlace registrado.'}</div>
+          <div class="rf-summary-body">
+            <div class="drive-box rf-drive-box">
+              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Esta causa aún no tiene una carpeta de Google Drive vinculada.'}</div>
+              ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir carpeta</button>` : ''}
               <div class="drive-edit-row">
-                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de Google Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de la carpeta de Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
               </div>
-            </div>
 
-            <div class="rf-folder-link-block">
-              <div class="rf-folder-link-head">
-                <div>
-                  <span class="rf-folder-link-kicker">Institucional</span>
-                  <strong>Carpeta CAJ Virtual</strong>
-                </div>
-                ${c.cajVirtualFolderUrl ? `<button class="btn small" id="btn-open-caj-virtual" type="button">Abrir</button>` : ''}
-              </div>
-              <div class="drive-url ${c.cajVirtualFolderUrl ? '' : 'empty'}" id="caj-virtual-url-display">${c.cajVirtualFolderUrl ? escapeHtml(c.cajVirtualFolderUrl) : 'Sin enlace registrado.'}</div>
-              <div class="drive-edit-row">
-                <input type="text" id="rf-caj-virtual-url" placeholder="Pega aquí el enlace de la carpeta virtual CAJ…" value="${escapeHtml(c.cajVirtualFolderUrl || '')}">
-              </div>
             </div>
           </div>
         </section>
@@ -11738,24 +11336,11 @@ function detailHtml(c) {
   </div>
 
   <div class="dtab-content" data-tab="exportar">
-    <div class="ex-shell">
-      <section class="ex-card">
-        <div class="ex-head">
-          <div>
-            <div class="ex-kicker">Documento de apoyo</div>
-            <h3>Exportar ficha de causa</h3>
-            <p>Vista previa de la ficha consolidada. Puedes imprimirla o descargarla en PDF.</p>
-          </div>
-          <div class="export-toolbar">
-            <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
-            <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
-          </div>
-        </div>
-        <div class="ex-preview-frame">
-          <div id="ficha-print-area">${fichaHtml(c)}</div>
-        </div>
-      </section>
+    <div class="export-toolbar">
+      <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
+      <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
     </div>
+    <div id="ficha-print-area">${fichaHtml(c)}</div>
   </div>
   `;
 }
@@ -11906,7 +11491,6 @@ function wireDetailEvents(c) {
       estado: panel.querySelector('#rf-estado').value.trim() || null,
       resumen: panel.querySelector('#rf-resumen').value.trim() || null,
       driveFolderUrl: panel.querySelector('#rf-drive-url').value.trim() || null,
-      cajVirtualFolderUrl: panel.querySelector('#rf-caj-virtual-url').value.trim() || null,
       observacionesTraspaso: panel.querySelector('#rf-traspaso').value.trim() || null
     };
     try {
@@ -11961,8 +11545,6 @@ function wireDetailEvents(c) {
   // ---------- Editar (incluye título, carpeta, tipo de juicio, SAJ, ROL Corte y Drive) ----------
   const btnOpenDriveEdit = panel.querySelector('#btn-open-drive-edit');
   if (btnOpenDriveEdit) btnOpenDriveEdit.addEventListener('click', () => window.open(c.driveFolderUrl, '_blank', 'noopener,noreferrer'));
-  const btnOpenCajVirtual = panel.querySelector('#btn-open-caj-virtual');
-  if (btnOpenCajVirtual) btnOpenCajVirtual.addEventListener('click', () => window.open(c.cajVirtualFolderUrl, '_blank', 'noopener,noreferrer'));
 
   const btnActualizarRevision = panel.querySelector('#btn-actualizar-revision');
   if (btnActualizarRevision) btnActualizarRevision.addEventListener('click', async () => {
@@ -11991,7 +11573,7 @@ function wireDetailEvents(c) {
     btnPdf.textContent = 'Generando…';
     try {
       const data = buildFichaData(c);
-      const pdf = await renderFichaPdf(data);
+      const pdf = renderFichaPdf(data);
       const nombreArchivo = `ficha-${(c.rol || c.titulo || 'causa').replace(/[^\w-]+/g, '_')}.pdf`;
       pdf.save(nombreArchivo);
     } catch (e) {
@@ -12891,59 +12473,7 @@ function wireMobileMenu() {
 // WIRING GENERAL
 // ============================================================================
 function wireTopLevelUI() {
-  const globalSearch = document.getElementById('search');
-  if (globalSearch) {
-    // El buscador global no es un campo de login. Algunos navegadores/gestores
-    // de contraseñas intentan rellenarlo con el correo de la sesión aun cuando
-    // autocomplete="off". Además de marcarlo explícitamente como buscador,
-    // neutralizamos ese valor si coincide EXACTAMENTE con el correo de la cuenta.
-    globalSearch.setAttribute('type', 'search');
-    globalSearch.setAttribute('autocomplete', 'off');
-    globalSearch.setAttribute('autocapitalize', 'off');
-    globalSearch.setAttribute('spellcheck', 'false');
-    globalSearch.setAttribute('inputmode', 'search');
-    globalSearch.setAttribute('name', 'practicajuris-global-search-query');
-    globalSearch.setAttribute('data-lpignore', 'true');
-    globalSearch.setAttribute('data-1p-ignore', 'true');
-
-    const esCorreoAutofillCuenta = (valor) => {
-      const correo = String(CURRENT_USER?.email || '').trim().toLowerCase();
-      return !!correo && String(valor || '').trim().toLowerCase() === correo;
-    };
-
-    const limpiarAutofillCorreo = () => {
-      if (!esCorreoAutofillCuenta(globalSearch.value)) return false;
-      globalSearch.value = '';
-      if (searchTerm && esCorreoAutofillCuenta(searchTerm)) searchTerm = '';
-      return true;
-    };
-
-    // Se repite durante los primeros segundos porque Chrome puede aplicar el
-    // autofill después de que el módulo JS ya terminó de inicializarse.
-    limpiarAutofillCorreo();
-    [50, 150, 400, 1000, 2000, 3500].forEach(ms => {
-      setTimeout(() => {
-        if (limpiarAutofillCorreo()) render();
-      }, ms);
-    });
-
-    globalSearch.addEventListener('focus', () => {
-      if (limpiarAutofillCorreo()) render();
-    });
-
-    globalSearch.addEventListener('input', (e) => {
-      // Si el propio autofill dispara "input", no dejamos que el correo pase
-      // a searchTerm; ese era el motivo por el que la lista quedaba vacía.
-      if (esCorreoAutofillCuenta(e.target.value)) {
-        e.target.value = '';
-        searchTerm = '';
-        render();
-        return;
-      }
-      searchTerm = e.target.value;
-      render();
-    });
-  }
+  document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value; render(); });
 
   document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
     card.addEventListener('click', () => {
