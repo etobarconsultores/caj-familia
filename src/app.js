@@ -157,6 +157,19 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
 
+function limpiarAutorrellenoBuscador() {
+  const input = document.getElementById('search');
+  if (!input) return false;
+  const valor = String(input.value || '').trim();
+  const correo = String(CURRENT_USER?.email || '').trim();
+  if (correo && valor && valor.toLowerCase() === correo.toLowerCase()) {
+    input.value = '';
+    searchTerm = '';
+    return true;
+  }
+  return false;
+}
+
 function etiquetaCajPractica(cajAsignado) {
   const caj = String(cajAsignado || '').trim();
   return caj ? `CAJ ${caj} · Área Civil` : 'CAJ · Área Civil';
@@ -1967,6 +1980,9 @@ function cerrarPantallaLegalGate() {
 
 async function onSessionReady(session) {
   CURRENT_USER = { id: session.user.id, email: session.user.email, nombre: session.user.user_metadata?.nombre_completo || null, telefono: null, recoveryEmail: null, recoveryPhone: null, avatarUrl: null, role: session.user.app_metadata?.role || null };
+  limpiarAutorrellenoBuscador();
+  setTimeout(() => { if (limpiarAutorrellenoBuscador()) render(); }, 100);
+  setTimeout(() => { if (limpiarAutorrellenoBuscador()) render(); }, 700);
   try {
     const { data: profile } = await supabase.from('profiles').select('nombre_completo, telefono, recovery_email, recovery_phone').eq('id', CURRENT_USER.id).single();
     if (profile?.nombre_completo) CURRENT_USER.nombre = profile.nombre_completo;
@@ -3607,8 +3623,9 @@ function buildFichaData(c) {
 
   const sections = [];
 
+  const tituloFicha = tituloAutomatico(c) || c.titulo;
   const generales = kv([
-    ['Título / referencia', c.titulo],
+    ['Título / referencia', tituloFicha],
     ['RIT / ROL', rolCompletoTexto(c)],
     ['Caratulado', caratuladoTexto(c)],
     ['Tribunal', tribunalTexto(c)],
@@ -3616,9 +3633,9 @@ function buildFichaData(c) {
     ['ROL ingreso Corte', c.rolIngreso],
     ['Carpeta', CATEGORIA_LABEL[c.categoria] || c.categoria],
     ['Procedimiento', c.subcategoria],
-    ['Tipo de juicio', (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') ? c.tipoJuicio : null],
+    ['Materia', (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') ? c.tipoJuicio : null],
+    ['Sub Materia', c.materia],
     ['Etapa Procesal', c.etapa],
-    ['Materia', c.materia],
     ['Patrocinado', patrocinadoEfectivo(c)],
     ['Tutor', c.tutor],
     ['Fecha ingreso causa', fmtFechaSolo(c.fechaIngreso)],
@@ -3693,11 +3710,15 @@ function buildFichaData(c) {
     rows: proximosEventos.map(e => [e.tipo, fmtFechaSolo(e.fecha), e.horaInicio || '', eventoTituloEfectivo(e), e.estado])
   });
 
-  if (c.driveFolderUrl) sections.push({ title: 'Documentación', kind: 'link', label: 'Carpeta de Google Drive', url: c.driveFolderUrl });
+  const carpetasDocumentacion = [
+    c.driveFolderUrl ? ['Carpeta en Google Drive', c.driveFolderUrl] : null,
+    c.cajVirtualFolderUrl ? ['Carpeta CAJ Virtual', c.cajVirtualFolderUrl] : null
+  ].filter(Boolean);
+  if (carpetasDocumentacion.length) sections.push({ title: 'Documentación', kind: 'links', rows: carpetasDocumentacion });
 
   return {
     brand: 'Práctica Juris · Gestión de Causas',
-    titulo: c.titulo || 'Ficha de causa',
+    titulo: tituloFicha || 'Ficha de causa',
     meta: `Generado el ${fmtFechaHora(now.toISOString())} por ${usuario}`,
     sections
   };
@@ -3718,6 +3739,10 @@ function renderFichaHtml(data) {
       const tbody = sec.rows.map(r => `<tr>${r.map(cell => `<td>${escapeHtml(String(cell || ''))}</td>`).join('')}</tr>`).join('');
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
     }
+    if (sec.kind === 'links') {
+      const rows = sec.rows.map(([label, url]) => `<tr><td class="ficha-k">${escapeHtml(label)}</td><td class="ficha-v"><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></td></tr>`).join('');
+      return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody>${rows}</tbody></table></div>`;
+    }
     if (sec.kind === 'link') {
       return `<div class="ficha-section"><h3>${escapeHtml(sec.title)}</h3><table class="ficha-table"><tbody><tr><td class="ficha-k">${escapeHtml(sec.label)}</td><td class="ficha-v"><a href="${escapeHtml(sec.url)}" target="_blank" rel="noopener">${escapeHtml(sec.url)}</a></td></tr></tbody></table></div>`;
     }
@@ -3727,6 +3752,10 @@ function renderFichaHtml(data) {
   return `
   <div class="ficha-doc">
     <div class="ficha-header">
+      <div class="ficha-brand-row">
+        <img src="/assets/branding/practica-juris-logo-completo.png" alt="Práctica Juris" class="ficha-brand-logo" draggable="false">
+        <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="ficha-brand-isotipo" draggable="false">
+      </div>
       <div class="ficha-brand">${escapeHtml(data.brand)}</div>
       <h2>${escapeHtml(data.titulo)}</h2>
       <div class="ficha-meta">${escapeHtml(data.meta)}</div>
@@ -3858,6 +3887,7 @@ function crearEscritorPdf() {
     if (sec.kind === 'kv') drawKvRows(sec.rows);
     else if (sec.kind === 'list') drawList(sec.items);
     else if (sec.kind === 'table') drawTable(sec.headers, sec.widths, sec.rows);
+    else if (sec.kind === 'links') drawKvRows(sec.rows || []);
     else if (sec.kind === 'link') drawKvRows([[sec.label, sec.url]]);
   }
 
@@ -3878,11 +3908,36 @@ function crearEscritorPdf() {
   };
 }
 
-function renderFichaPdf(data) {
+async function cargarImagenDataUrl(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`No se pudo cargar ${url}`);
+  const blob = await resp.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function renderFichaPdf(data) {
   const w = crearEscritorPdf();
   const { pdf, margin, contentWidth } = w;
 
-  // Encabezado del documento (solo primera página)
+  // Identidad visual de Práctica Juris, igual que en CAJ Civil. Si las
+  // imágenes no cargan, el PDF continúa normalmente con la marca textual.
+  try {
+    const [logo, isotipo] = await Promise.all([
+      cargarImagenDataUrl('/assets/branding/practica-juris-logo-completo.png'),
+      cargarImagenDataUrl('/assets/branding/practica-juris-isotipo.png')
+    ]);
+    pdf.addImage(logo, 'PNG', margin, w.y - 4, 46, 13);
+    pdf.addImage(isotipo, 'PNG', margin + contentWidth - 13, w.y - 4, 13, 13);
+    w.y += 16;
+  } catch (_) {
+    // Fallback silencioso: mantener el texto de marca.
+  }
+
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(110);
   pdf.text(data.brand, margin, w.y); w.y += 7;
 
@@ -3902,7 +3957,6 @@ function renderFichaPdf(data) {
   w.finalizarPaginacion();
   return pdf;
 }
-
 
 
 function headerSubline(c) {
@@ -4030,10 +4084,10 @@ function agendaCausaResumenHtml(c) {
   const semanaCount = activos.filter(e => e.fecha && e.fecha >= hoy && e.fecha <= limiteISO).length;
   const audiencias = proximos.filter(e => e.tipo === 'Audiencia').length;
   return `<div class="ca-agenda-stats">
-    <div class="ca-agenda-stat"><b>${proximos.length}</b><span>Próximos</span></div>
-    <div class="ca-agenda-stat"><b>${hoyCount}</b><span>Hoy</span></div>
-    <div class="ca-agenda-stat"><b>${semanaCount}</b><span>7 días</span></div>
-    <div class="ca-agenda-stat"><b>${audiencias}</b><span>Audiencias</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-next"><b>${proximos.length}</b><span>Próximos</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-today"><b>${hoyCount}</b><span>Hoy</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-week"><b>${semanaCount}</b><span>7 días</span></div>
+    <div class="ca-agenda-stat ca-agenda-stat-hearing"><b>${audiencias}</b><span>Audiencias</span></div>
   </div>`;
 }
 
@@ -4529,7 +4583,8 @@ function tituloAutomatico(c) {
   const componentes = [];
   const rolTexto = rolCompletoTexto(c);
   if (rolTexto) componentes.push(`ROL ${rolTexto}`);
-  if (c.tipoJuicio && c.tipoJuicio !== 'No Aplica') componentes.push(c.tipoJuicio);
+  // En Familia, el título usa la Sub Materia; omitir la Materia evita
+  // redundancias como "Alimentos / Alimentos menores, fijación".
   if (c.materia) componentes.push(c.materia);
   const lista = intervinientesEfectivos(c);
   const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
@@ -4546,7 +4601,7 @@ function emptyCausa() {
     id: null, folio: null, categoria: 'nueva', origenCarpeta: null, subcategoria: null, tipoJuicio: null,
     materia: null, etapa: null, bajEstado: null, recurso: null, rolIngreso: null, competencia: null, corteNombre: null, parteCorte: null,
     rit: null, rol: null, tipoTribunal: null, numeroTribunal: null, ciudadTribunal: null, tribunal: null,
-    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null,
+    fechaIngreso: new Date().toISOString().slice(0, 10), tutor: null, cajVirtualFolderUrl: null,
     intervinientes: [], demandanteNombre: null, demandadoNombre: null, parteRepresentada: null,
     patrocinado: null, patrocinadoTipo: null, contraparteNombre: null, titulo: null
   };
@@ -11106,7 +11161,7 @@ function detailHtml(c) {
       <div class="detail-title-row">
         <div>
           <div class="detail-eyebrow">Expediente jurídico</div>
-          <h2>${escapeHtml(c.titulo)}</h2>
+          <h2>${escapeHtml(tituloAutomatico(c) || c.titulo || 'Sin título')}</h2>
         </div>
         <button class="close-x" id="detail-close" aria-label="Cerrar">&times;</button>
       </div>
@@ -11137,7 +11192,6 @@ function detailHtml(c) {
     <div class="dtab" data-tab="notificacion">Notificación</div>
     <div class="dtab" data-tab="oficios">Oficios</div>
     <div class="dtab" data-tab="contacto">Contacto</div>
-    <div class="dtab" data-tab="encargo-receptor">Encargo receptor</div>
     <div class="dtab" data-tab="exportar">Exportar ficha</div>
   </div>
 
@@ -11185,17 +11239,36 @@ function detailHtml(c) {
           <div class="rf-summary-head">
             <div>
               <div class="rf-summary-kicker">Documentos</div>
-              <div class="rf-summary-title">Carpeta de Google Drive</div>
+              <div class="rf-summary-title">Carpetas de documentación</div>
             </div>
           </div>
-          <div class="rf-summary-body">
-            <div class="drive-box rf-drive-box">
-              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Esta causa aún no tiene una carpeta de Google Drive vinculada.'}</div>
-              ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir carpeta</button>` : ''}
-              <div class="drive-edit-row">
-                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de la carpeta de Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+          <div class="rf-summary-body rf-folder-links">
+            <div class="rf-folder-link-block">
+              <div class="rf-folder-link-head">
+                <div>
+                  <span class="rf-folder-link-kicker">Personal / apoyo</span>
+                  <strong>Carpeta en Google Drive</strong>
+                </div>
+                ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir</button>` : ''}
               </div>
+              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Sin enlace registrado.'}</div>
+              <div class="drive-edit-row">
+                <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de Google Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
+              </div>
+            </div>
 
+            <div class="rf-folder-link-block">
+              <div class="rf-folder-link-head">
+                <div>
+                  <span class="rf-folder-link-kicker">Institucional</span>
+                  <strong>Carpeta CAJ Virtual</strong>
+                </div>
+                ${c.cajVirtualFolderUrl ? `<button class="btn small" id="btn-open-caj-virtual" type="button">Abrir</button>` : ''}
+              </div>
+              <div class="drive-url ${c.cajVirtualFolderUrl ? '' : 'empty'}" id="caj-virtual-url-display">${c.cajVirtualFolderUrl ? escapeHtml(c.cajVirtualFolderUrl) : 'Sin enlace registrado.'}</div>
+              <div class="drive-edit-row">
+                <input type="text" id="rf-caj-virtual-url" placeholder="Pega aquí el enlace de la carpeta virtual CAJ…" value="${escapeHtml(c.cajVirtualFolderUrl || '')}">
+              </div>
             </div>
           </div>
         </section>
@@ -11386,26 +11459,27 @@ function detailHtml(c) {
     ${antecedentesFormHtml(c)}
   </div>
 
-  <div class="dtab-content" data-tab="encargo-receptor">
-    <div class="er-shell">
-      <div class="er-header">
-        <div>
-          <div class="er-kicker">Diligencias</div>
-          <h3>Encargo receptor</h3>
-        </div>
-        <button class="btn small primary" id="add-encargo-receptor">+ Nuevo encargo</button>
-      </div>
-      <div id="encargo-receptor-form-wrap" class="agenda-form-wrap er-form-wrap" hidden></div>
-      <div id="encargo-receptor-list-wrap">${encargosDeCausaListHtml(c)}</div>
-    </div>
-  </div>
+
 
   <div class="dtab-content" data-tab="exportar">
-    <div class="export-toolbar">
-      <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
-      <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
+    <div class="ex-shell">
+      <section class="ex-card">
+        <div class="ex-head">
+          <div>
+            <div class="ex-kicker">Documento de apoyo</div>
+            <h3>Exportar ficha de causa</h3>
+            <p>Vista previa de la ficha consolidada. Puedes imprimirla o descargarla en PDF.</p>
+          </div>
+          <div class="export-toolbar">
+            <button class="btn small primary" id="btn-print-ficha">Imprimir</button>
+            <button class="btn small" id="btn-pdf-ficha">Descargar PDF</button>
+          </div>
+        </div>
+        <div class="ex-preview-frame">
+          <div id="ficha-print-area">${fichaHtml(c)}</div>
+        </div>
+      </section>
     </div>
-    <div id="ficha-print-area">${fichaHtml(c)}</div>
   </div>
   `;
 }
@@ -11556,6 +11630,7 @@ function wireDetailEvents(c) {
       estado: panel.querySelector('#rf-estado').value.trim() || null,
       resumen: panel.querySelector('#rf-resumen').value.trim() || null,
       driveFolderUrl: panel.querySelector('#rf-drive-url').value.trim() || null,
+      cajVirtualFolderUrl: panel.querySelector('#rf-caj-virtual-url').value.trim() || null,
       observacionesTraspaso: panel.querySelector('#rf-traspaso').value.trim() || null
     };
     try {
@@ -11604,12 +11679,11 @@ function wireDetailEvents(c) {
   // ---------- Agenda (eventos de la causa) ----------
   wireAgendaTab(c, panel);
 
-  // ---------- Encargo receptor (uno o varios por causa) ----------
-  wireEncargoReceptorTab(c, panel);
-
   // ---------- Editar (incluye título, carpeta, tipo de juicio, SAJ, ROL Corte y Drive) ----------
   const btnOpenDriveEdit = panel.querySelector('#btn-open-drive-edit');
   if (btnOpenDriveEdit) btnOpenDriveEdit.addEventListener('click', () => window.open(c.driveFolderUrl, '_blank', 'noopener,noreferrer'));
+  const btnOpenCajVirtual = panel.querySelector('#btn-open-caj-virtual');
+  if (btnOpenCajVirtual) btnOpenCajVirtual.addEventListener('click', () => window.open(c.cajVirtualFolderUrl, '_blank', 'noopener,noreferrer'));
 
   const btnActualizarRevision = panel.querySelector('#btn-actualizar-revision');
   if (btnActualizarRevision) btnActualizarRevision.addEventListener('click', async () => {
@@ -11638,7 +11712,7 @@ function wireDetailEvents(c) {
     btnPdf.textContent = 'Generando…';
     try {
       const data = buildFichaData(c);
-      const pdf = renderFichaPdf(data);
+      const pdf = await renderFichaPdf(data);
       const nombreArchivo = `ficha-${(c.rol || c.titulo || 'causa').replace(/[^\w-]+/g, '_')}.pdf`;
       pdf.save(nombreArchivo);
     } catch (e) {
@@ -12538,7 +12612,33 @@ function wireMobileMenu() {
 // WIRING GENERAL
 // ============================================================================
 function wireTopLevelUI() {
-  document.getElementById('search').addEventListener('input', (e) => { searchTerm = e.target.value; render(); });
+  const searchInput = document.getElementById('search');
+  if (searchInput) {
+    // Chrome/gestores de contraseñas pueden ignorar autocomplete=off e insertar
+    // el correo de inicio de sesión en este campo. El buscador nunca debe
+    // adoptar ese valor automáticamente.
+    searchInput.value = '';
+    searchTerm = '';
+    searchInput.setAttribute('autocomplete', 'new-password');
+    searchInput.addEventListener('input', (e) => {
+      const valor = e.target.value;
+      const correo = String(CURRENT_USER?.email || '').trim();
+      if (correo && String(valor || '').trim().toLowerCase() === correo.toLowerCase()) {
+        e.target.value = '';
+        searchTerm = '';
+        render();
+        return;
+      }
+      searchTerm = valor;
+      render();
+    });
+    searchInput.addEventListener('focus', () => {
+      if (limpiarAutorrellenoBuscador()) render();
+    });
+    [0, 100, 500, 1500].forEach(ms => {
+      setTimeout(() => { if (limpiarAutorrellenoBuscador()) render(); }, ms);
+    });
+  }
 
   document.querySelectorAll('.stat-card[data-filter]').forEach(card => {
     card.addEventListener('click', () => {
