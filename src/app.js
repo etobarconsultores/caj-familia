@@ -172,7 +172,7 @@ function limpiarAutorrellenoBuscador() {
 
 function etiquetaCajPractica(cajAsignado) {
   const caj = String(cajAsignado || '').trim();
-  return caj ? `CAJ ${caj} · Área Civil` : 'CAJ · Área Civil';
+  return caj ? `CAJ ${caj} · Área Familia` : 'CAJ · Área Familia';
 }
 
 function actualizarEtiquetaCajPractica(cajAsignado = CURRENT_PRACTICA?.cajAsignado) {
@@ -2021,7 +2021,7 @@ async function onSessionReady(session) {
 
   // La identificación de la CAJ en el sidebar se obtiene de los datos de
   // práctica de cada usuaria. Si aún no ha completado esa información, se
-  // muestra únicamente "CAJ · Área Civil".
+  // muestra únicamente "CAJ · Área Familia".
   if (PRACTICA_TABLAS_DISPONIBLES) {
     try {
       CURRENT_PRACTICA = await api.fetchPracticaUsuaria(CURRENT_USER.id);
@@ -2195,27 +2195,26 @@ function procesarRetornoGoogleCalendar() {
 async function loadAll() {
   document.getElementById('list-container').innerHTML = '<div class="loading-note">Cargando causas…</div>';
 
+  // Familia no utiliza Encargo receptor, catálogo de receptores ni turnos.
+  // Evitamos consultar esos módulos propios de Civil durante la carga inicial.
   const resultados = await Promise.allSettled([
     api.fetchCausas(),
-    api.fetchEncargos(),
-    api.fetchReceptores(),
-    api.fetchTurnos(),
     api.fetchRevisionesSala(),
     api.fetchAlegatosOyente(CURRENT_USER.id, CURRENT_PRACTICA?.id || null),
     api.fetchTutoresPractica(CURRENT_USER.id),
     api.googleGetStatus()
   ]);
-  const [rCausas, rEncargos, rReceptores, rTurnos, rRevisionesSala, rAlegatosOyente, rTutoresPractica, rGoogleStatus] = resultados;
-  const nombres = ['causas', 'encargos', 'receptores', 'turnos', 'revisiones de sala', 'alegatos como oyente', 'tutores de práctica', 'estado de Google Calendar'];
+  const [rCausas, rRevisionesSala, rAlegatosOyente, rTutoresPractica, rGoogleStatus] = resultados;
+  const nombres = ['causas', 'revisiones de sala', 'alegatos como oyente', 'tutores de práctica', 'estado de Google Calendar'];
 
   resultados.forEach((r, i) => {
     if (r.status === 'rejected') console.error(`No se pudo cargar "${nombres[i]}":`, r.reason);
   });
 
   CAUSAS = rCausas.status === 'fulfilled' ? rCausas.value : [];
-  ENCARGOS = rEncargos.status === 'fulfilled' ? rEncargos.value : [];
-  RECEPTORES = rReceptores.status === 'fulfilled' ? rReceptores.value : [];
-  TURNOS = rTurnos.status === 'fulfilled' ? rTurnos.value : [];
+  ENCARGOS = [];
+  RECEPTORES = [];
+  TURNOS = [];
   REVISIONES_SALA = rRevisionesSala.status === 'fulfilled' ? rRevisionesSala.value : [];
   ALEGATOS_OYENTE = rAlegatosOyente.status === 'fulfilled' ? rAlegatosOyente.value : [];
   TUTORES_PRACTICA = rTutoresPractica.status === 'fulfilled' ? rTutoresPractica.value : [];
@@ -2225,7 +2224,9 @@ async function loadAll() {
     document.getElementById('list-container').innerHTML = `<div class="empty-msg">No se pudieron cargar tus causas: ${escapeHtml(rCausas.reason?.message || 'error desconocido')}</div>`;
     return;
   }
-  if (resultados.slice(0, 7).some(r => r.status === 'rejected')) {
+  // Google Calendar se maneja por separado y no debe bloquear la carga de causas.
+  // Solo mostramos aviso si falla alguno de los datos secundarios propios de Familia.
+  if ([rRevisionesSala, rAlegatosOyente, rTutoresPractica].some(r => r.status === 'rejected')) {
     toast('Algunos datos secundarios no se pudieron cargar. Tus causas sí se cargaron correctamente.');
   }
   render();
