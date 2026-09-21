@@ -303,9 +303,27 @@ function switchAuthForm(which) {
   document.getElementById('form-login').hidden = which !== 'login';
   document.getElementById('form-register').hidden = which !== 'register';
   document.getElementById('form-forgot').hidden = which !== 'forgot';
-  const titles = { login: 'Iniciar sesión', register: 'Crear cuenta', forgot: 'Recuperar contraseña' };
-  document.getElementById('auth-title').textContent = titles[which];
+  const resetForm = document.getElementById('form-reset-password');
+  if (resetForm) resetForm.hidden = which !== 'reset';
+  const titles = {
+    login: 'Iniciar sesión',
+    register: 'Crear cuenta',
+    forgot: 'Recuperar contraseña',
+    reset: 'Crear nueva contraseña'
+  };
+  document.getElementById('auth-title').textContent = titles[which] || titles.login;
   document.getElementById('auth-switch').style.display = which === 'login' ? '' : 'none';
+}
+
+function mostrarRecuperacionContrasena() {
+  document.getElementById('loading-screen').hidden = true;
+  document.getElementById('app-root').hidden = true;
+  document.getElementById('auth-screen').hidden = false;
+  switchAuthForm('reset');
+  const errEl = document.getElementById('reset-password-error');
+  const okEl = document.getElementById('reset-password-success');
+  if (errEl) errEl.textContent = '';
+  if (okEl) okEl.textContent = '';
 }
 
 function wireAuthUI() {
@@ -372,6 +390,46 @@ function wireAuthUI() {
       errEl.textContent = traducirError(err.message);
     }
   });
+
+  const resetPasswordForm = document.getElementById('form-reset-password');
+  if (resetPasswordForm) {
+    resetPasswordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('reset-password-error');
+      const okEl = document.getElementById('reset-password-success');
+      const password = document.getElementById('reset-password').value;
+      const confirmacion = document.getElementById('reset-password-confirm').value;
+      errEl.textContent = '';
+      okEl.textContent = '';
+
+      if (password.length < 6) {
+        errEl.textContent = 'La nueva contraseña debe tener al menos 6 caracteres.';
+        return;
+      }
+      if (password !== confirmacion) {
+        errEl.textContent = 'Las contraseñas no coinciden.';
+        return;
+      }
+
+      const submitBtn = resetPasswordForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const { error } = await supabase.auth.updateUser({ password });
+        if (error) throw error;
+        okEl.textContent = 'Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.';
+        document.getElementById('reset-password').value = '';
+        document.getElementById('reset-password-confirm').value = '';
+        setTimeout(async () => {
+          try { await supabase.auth.signOut(); } catch (_) { /* no crítico */ }
+          switchAuthForm('login');
+        }, 1600);
+      } catch (err) {
+        errEl.textContent = traducirError(err.message);
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    });
+  }
 
   const avatarBtn = document.getElementById('avatar-btn');
   if (avatarBtn) {
@@ -12753,6 +12811,14 @@ export async function initApp() {
   // usuaria tiene uno inscrito y la sesión todavía no alcanzó aal2; después
   // verificarLegalYEntrar() controla la versión legal vigente.
   onAuthStateChange((event, session) => {
+    // Un enlace de recuperación crea una sesión temporal válida. No debe
+    // tratarse como un inicio de sesión normal: primero se exige definir la
+    // nueva contraseña. Supabase emite PASSWORD_RECOVERY para este flujo.
+    if (event === 'PASSWORD_RECOVERY' && session) {
+      mostrarRecuperacionContrasena();
+      return;
+    }
+
     if (session) {
       const appYaActivaMismoUsuario =
         CURRENT_USER?.id === session.user.id &&

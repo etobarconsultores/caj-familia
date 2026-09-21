@@ -80,6 +80,20 @@
       <button type="submit" class="btn primary">Enviar enlace de recuperación</button>
     </form>
 
+    <form class="auth-form" id="form-reset-password" hidden>
+      <div>
+        <label>Nueva contraseña</label>
+        <input type="password" id="reset-password" required minlength="6" autocomplete="new-password">
+      </div>
+      <div>
+        <label>Confirmar nueva contraseña</label>
+        <input type="password" id="reset-password-confirm" required minlength="6" autocomplete="new-password">
+      </div>
+      <div class="auth-error" id="reset-password-error"></div>
+      <div class="auth-success" id="reset-password-success"></div>
+      <button type="submit" class="btn primary">Guardar nueva contraseña</button>
+    </form>
+
     <div class="auth-switch" id="auth-switch">
       ¿No tienes cuenta? <a id="link-to-register">Regístrate</a><br>
       <a id="link-to-forgot" style="display:inline-block; margin-top:8px;">¿Olvidaste tu contraseña?</a>
