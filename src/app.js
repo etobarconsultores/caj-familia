@@ -2904,6 +2904,22 @@ function oficioPersonaEstadoMeta(persona) {
   return { clase: 'is-pending', etiqueta: `${pendientes} pendiente${pendientes === 1 ? '' : 's'}`, total, contestadas, pendientes };
 }
 
+function nombreOficioDesdeAntecedentes(c, parteOficio) {
+  if (!parteOficio) return '';
+  const equivalencias = {
+    'Demandado/a': 'Demandado',
+    'Solicitado': 'Solicitado',
+    'Requerido': 'Requerido',
+    'Tercero': 'Tercero'
+  };
+  const tipoParte = equivalencias[parteOficio] || parteOficio;
+  const persona = intervinientesEfectivos(c).find(i => i.tipoParte === tipoParte);
+  if (persona?.nombre) return persona.nombre;
+  if (tipoParte === 'Demandado' && c.demandadoNombre) return c.demandadoNombre;
+  if (tipoParte === 'Demandante' && c.demandanteNombre) return c.demandanteNombre;
+  return '';
+}
+
 function oficioPersonaBlockHtml(persona, idx) {
   const meta = oficioPersonaEstadoMeta(persona);
   const titulo = persona.nombre || `Persona ${idx + 1}`;
@@ -2923,7 +2939,7 @@ function oficioPersonaBlockHtml(persona, idx) {
     <div class="oficio-person-body agenda-form">
       <div class="oficio-person-fields">
         <div><label>Parte</label><select class="op-parte" data-idx="${idx}"><option value="">Sin definir</option>${OFICIO_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}"></div>
+        <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" name="oficio-persona-${idx}" autocomplete="off" value="${escapeHtml(persona.nombre || '')}" placeholder="Se completa desde Antecedentes" readonly></div>
       </div>
       <div class="oficio-inst-section">
         <div class="oficio-inst-head">
@@ -2977,10 +2993,18 @@ function oficiosTabHtml(c) {
 }
 
 function wireOficiosTab(c, panel) {
-  let estadoPersonas = (c.oficiosPersonas || []).map(p => ({
-    id: p.id, parte: p.parte, nombre: p.nombre,
-    instituciones: (p.instituciones || []).map(i => ({ id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta, fecha: i.fecha, folio: i.folio }))
-  }));
+  let estadoPersonas = (c.oficiosPersonas || []).map(p => {
+    const nombreDesdeAntecedentes = nombreOficioDesdeAntecedentes(c, p.parte);
+    const nombreGuardado = (p.nombre || '').trim();
+    const correoCuenta = (CURRENT_USER?.email || '').trim().toLowerCase();
+    const nombreSeguro = nombreGuardado && nombreGuardado.toLowerCase() !== correoCuenta ? nombreGuardado : '';
+    return {
+      id: p.id,
+      parte: p.parte,
+      nombre: nombreDesdeAntecedentes || nombreSeguro,
+      instituciones: (p.instituciones || []).map(i => ({ id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta, fecha: i.fecha, folio: i.folio }))
+    };
+  });
 
   function refrescar() {
     panel.querySelector('#oficio-personas-wrap').innerHTML = estadoPersonas.length
@@ -3000,8 +3024,13 @@ function wireOficiosTab(c, panel) {
   const wrap = panel.querySelector('#oficio-personas-wrap');
   if (wrap) {
     wrap.addEventListener('input', (e) => {
-      if (e.target.classList.contains('op-parte')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].parte = e.target.value; return; }
-      if (e.target.classList.contains('op-nombre')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].nombre = e.target.value.trim(); return; }
+      if (e.target.classList.contains('op-parte')) {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        estadoPersonas[idx].parte = e.target.value;
+        estadoPersonas[idx].nombre = nombreOficioDesdeAntecedentes(c, e.target.value);
+        refrescar();
+        return;
+      }
       const tr = e.target.closest('tr[data-p-idx]');
       if (!tr) return;
       const pi = parseInt(tr.dataset.pIdx, 10);
@@ -3354,10 +3383,10 @@ const GESTION_TIPOS = ['Tarea', 'Gestión'];
 const CATEGORIA_POR_TIPO_GESTION = {
   'Tarea': [
     'Revisión de causa', 'Consulta a tutor', 'Contactar a usuario', 'Contactar a testigos',
-    'Preparar escrito', 'Enviar a tutor para revisión', 'Otra tarea'
+    'Preparar escrito', 'Enviar a tutor para revisión', 'Preparar minuta AP', 'Preparar minuta AJ', 'Otra tarea'
   ],
   'Gestión': [
-    'Presentar escrito', 'Encargar notificación', 'Citar a usuario', 'Ir a tribunales',
+    'Presentar escrito', 'Citar a usuario', 'Ir a tribunales',
     'Tramitar oficio', 'Ir a CBR', 'Ir a otra institución', 'Otra Gestión'
   ]
 };
@@ -3990,9 +4019,7 @@ const AGENDA_TIPOS = [
 const AGENDA_TIPOS_FORM = ['Audiencia', 'Reunión con usuario', 'Reunión con tutor', 'Otro'];
 const MODALIDAD_OPCIONES = ['Presencial', 'Remota'];
 const TIPO_AUDIENCIA_OPCIONES = [
-  'Audiencia de conciliación', 'Audiencia de parientes', 'Audiencia de testigos',
-  'Audiencia de designación de perito', 'Audiencia de Contestación y Conciliación',
-  'Audiencia del discapacitado', 'Audiencia de reconocimiento deuda/firma'
+  'Audiencia preparatoria', 'Audiencia de Juicio', 'Otra'
 ];
 const AGENDA_ESTADOS = ['Pendiente', 'Confirmado', 'Realizado', 'Suspendido', 'Reprogramado', 'Cancelado'];
 // Opciones del formulario — sin 'Confirmado' (deja de ofrecerse como opción
