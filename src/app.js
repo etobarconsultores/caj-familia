@@ -198,7 +198,7 @@ const ORDEN_TIPOS_JUICIO = [
   'Voluntario',
   'Violencia intrafamiliar',
   'Ley de identidad de género',
-  'Ley 21,331 - Salud Mental'
+  'Ley 21.331 - Salud Mental'
 ];
 
 function subcatClass(c) {
@@ -4359,7 +4359,7 @@ const MATERIAS_POR_PROCEDIMIENTO = {
   'Adopción': ['Adopción'],
   'Violencia intrafamiliar': ['Violencia intrafamiliar', 'Violencia de género'],
   'Ley de identidad de género': ['Identidad de género'],
-  'Ley 21,331 - Salud Mental': ['Salud Mental']
+  'Ley 21.331 - Salud Mental': ['Salud Mental']
 };
 
 const SUBMATERIAS_POR_PROCEDIMIENTO_Y_MATERIA = {
@@ -4488,7 +4488,7 @@ const SUBMATERIAS_POR_PROCEDIMIENTO_Y_MATERIA = {
       'Término de matrimonio', 'Compensación económica por término de matrimonio'
     ]
   },
-  'Ley 21,331 - Salud Mental': {
+  'Ley 21.331 - Salud Mental': {
     'Salud Mental': ['Protección salud mental voluntaria', 'Protección salud mental forzada']
   }
 };
