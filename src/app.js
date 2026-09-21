@@ -4333,7 +4333,7 @@ function tituloSinRol(c) {
 // apellido paterno (heurística: penúltima palabra de un nombre chileno
 // típico); para instituciones conserva el nombre completo reconocible.
 const INSTITUCION_KEYWORDS = [
-  'municipalidad', 'banco', 'servicio', 'sociedad', 'spa', 'ltda', 's.a.', 'sa',
+  'municipalidad', 'banco', 'servicio', 'sociedad',
   'inmobiliaria', 'empresa', 'compañía', 'compania', 'cooperativa', 'fisco',
   'ministerio', 'universidad', 'corporación', 'corporacion', 'fundación', 'fundacion',
   'isapre', 'afp', 'clínica', 'clinica', 'hospital', 'tesorería', 'tesoreria',
@@ -4342,7 +4342,12 @@ const INSTITUCION_KEYWORDS = [
 
 function esNombreInstitucional(nombre) {
   const low = nombre.toLowerCase();
-  return INSTITUCION_KEYWORDS.some(kw => low.includes(kw)) || /\b(spa|ltda|s\.a\.)\b/i.test(nombre);
+  // Las abreviaturas societarias se buscan como términos completos. Antes
+  // "sa" se buscaba como fragmento y nombres como "Luisa" quedaban
+  // erróneamente clasificados como instituciones, impidiendo abreviar el
+  // caratulado al primer apellido.
+  const tieneAbreviaturaSocietaria = /(?:^|\s|[,.;(])(spa|ltda\.?|s\.?a\.?)(?=$|\s|[,.;)])/i.test(nombre);
+  return INSTITUCION_KEYWORDS.some(kw => low.includes(kw)) || tieneAbreviaturaSocietaria;
 }
 
 function nombreCorto(nombreCompleto) {
