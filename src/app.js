@@ -193,7 +193,7 @@ const ORDEN_TIPOS_JUICIO = [
   'Transacción',
   'Ordinario',
   'Protección',
-  'Adopción susceptibilidad',
+  'Adopción de Admisibilidad',
   'Adopción',
   'Voluntario',
   'Violencia intrafamiliar',
@@ -4345,106 +4345,152 @@ function normalizarProcedimiento(s) { return normalizarTexto(s || ''); }
 function procedimientoCanonico(valorGuardado) {
   const norm = normalizarProcedimiento(valorGuardado);
   if (!norm) return null;
+  // Compatibilidad con el nombre usado durante la primera adaptación de Familia.
+  if (norm === normalizarProcedimiento('Adopción susceptibilidad')) return 'Adopción de Admisibilidad';
   return ORDEN_TIPOS_JUICIO.find(p => normalizarProcedimiento(p) === norm) || null;
 }
 
-const MATERIAS_FAMILIA = [
-  'Alimentos',
-  'Cuidado Personal',
-  'Divorcio',
-  'Filiación',
-  'RDR',
-  'VIF',
-  'Vulneración de derechos',
-  'Infracción a la Ley penal',
-  'Patria potestad',
-  'Guardador',
-  'Autorización',
-  'Declaración de susceptibilidad',
-  'Adopción',
-  'Violencia de género',
-  'Salud Mental',
-  'Otros asuntos'
-];
+const MATERIAS_POR_PROCEDIMIENTO = {
+  'Transacción': ['Alimentos', 'Cuidado Personal', 'RDR', 'Otros asuntos'],
+  'Ordinario': ['Otros asuntos', 'Alimentos', 'Cuidado Personal', 'Divorcio', 'Filiación', 'RDR'],
+  'Voluntario': ['Patria potestad', 'Guardador', 'Autorización', 'Otros asuntos'],
+  'Protección': ['Vulneración de derechos', 'Infracción a la Ley penal'],
+  'Adopción de Admisibilidad': ['Declaración de susceptibilidad'],
+  'Adopción': ['Adopción'],
+  'Violencia intrafamiliar': ['Violencia intrafamiliar', 'Violencia de género'],
+  'Ley de identidad de género': ['Identidad de género'],
+  'Ley 21,331 - Salud Mental': ['Salud Mental']
+};
 
-const SUBMATERIAS_POR_MATERIA = {
-  'Alimentos': [
-    'Alimentos menores, fijación', 'Alimentos menores, aumento', 'Alimentos menores, rebaja',
-    'Alimentos menores, cesación', 'Alimentos menores, cumplimiento',
-    'Alimentos mayores, fijación', 'Alimentos mayores, aumento', 'Alimentos mayores, rebaja',
-    'Alimentos mayores, cesación', 'Alimentos mayores, cumplimiento',
-    'Alimentos mayores y menores, fijación', 'Alimentos mayores y menores, aumento',
-    'Alimentos mayores y menores, rebaja', 'Alimentos mayores y menores, cesación',
-    'Alimentos mayores y menores, cumplimiento'
-  ],
-  'Cuidado Personal': [
-    'Cuidado personal provisorio, fijación', 'Cuidado personal provisorio, declaración',
-    'Cuidado personal provisorio, modificación', 'Cuidado personal provisorio, otros',
-    'Cuidado personal definitivo, fijación', 'Cuidado personal definitivo, declaración',
-    'Cuidado personal definitivo, modificación', 'Cuidado personal definitivo, otros',
-    'Cuidado personal exclusivo, fijación', 'Cuidado personal exclusivo, declaración',
-    'Cuidado personal exclusivo, modificación', 'Cuidado personal exclusivo, otros',
-    'Cuidado personal compartido, fijación', 'Cuidado personal compartido, declaración',
-    'Cuidado personal compartido, modificación', 'Cuidado personal compartido, otros'
-  ],
-  'Divorcio': [
-    'Divorcio de mutuo acuerdo', 'Divorcio unilateral por cese de convivencia',
-    'Compensación económica', 'Divorcio culposo o por culpa', 'Separación matrimonial',
-    'Nulidad matrimonial'
-  ],
-  'Filiación': [
-    'Maternidad, impugnación', 'Maternidad, reconocimiento', 'Maternidad, impugnación y reconocimiento',
-    'Paternidad, reclamación matrimonial', 'Paternidad, reclamación no matrimonial',
-    'Paternidad, impugnación', 'Paternidad, reconocimiento', 'Paternidad, impugnación y reconocimiento',
-    'Paternidad, simple desconocimiento', 'Paternidad, nulidad de reconocimiento'
-  ],
-  'RDR': [
-    'Relación Directa y Regular, fijación', 'Relación Directa y Regular, modificación',
-    'Relación Directa y Regular, suspensión', 'Relación Directa y Regular, restricción',
-    'Relación Directa y Regular, cumplimiento / apremios', 'Relación Directa y Regular, otros'
-  ],
-  'VIF': [
-    'VIF en contra de la mujer', 'VIF en contra de adultos mayores', 'VIF en contra de NNA',
-    'VIF en contra de personas en situación de discapacidad',
-    'Medidas cautelares o de protección asociadas a VIF'
-  ],
-  'Vulneración de derechos': [
-    'Maltrato físico o psicológico', 'Abuso sexual', 'Omisión, negligencia o abandono',
-    'Explotación laboral o mendicidad', 'Consumo problemático de drogas o alcohol',
-    'Amenaza o vulneración por violencia intrafamiliar (VIF)', 'Situación de calle / vagancia',
-    'Vulneración de derechos de NNA',
-    'Derivación a programas de apoyo psicosocial / Red Mejor Niñez o Sename',
-    'Control o revisión de medidas cautelares/protectoras'
-  ],
-  'Infracción a la Ley penal': ['Medida de protección por actos de connotación o infracción penal'],
-  'Patria potestad': [
-    'Patria potestad (emancipación judicial)', 'Patria potestad, solicitud',
-    'Patria potestad, renuncia', 'Patria potestad, suspensión', 'Patria potestad, otros'
-  ],
-  'Guardador': [
-    'Guardador menores de edad, nombramiento', 'Guardador menores de edad, remoción', 'Designación de curador'
-  ],
-  'Autorización': [
-    'Autorización salida del país', 'Autorización para enajenar bienes raíces',
-    'Autorización de trabajo NNA', 'Autorizaciones, otros', 'Matrimonio, disenso para contraer'
-  ],
-  'Declaración de susceptibilidad': [
-    'Inhabilidad física o moral', 'Falta de atención', 'Entrega voluntaria', 'Vulneración grave de derechos'
-  ],
-  'Adopción': [
-    'Adopción propiamente tal (o solicitada por cónyuges/solteros)', 'Adopción por integración'
-  ],
-  'Violencia de género': [
-    'Violencia física', 'Violencia psicológica o emocional', 'Violencia económica o patrimonial', 'Violencia sexual'
-  ],
-  'Salud Mental': ['Protección salud mental voluntaria', 'Protección salud mental forzada'],
-  'Otros asuntos': [
-    'Nulidad matrimonial', 'Separación judicial de bienes', 'Separación judicial de bienes mutuo acuerdo',
-    'Declaración de bien familiar', 'Desafectación de bien familiar',
-    'Entrega de menor y/o especies del menor / Costo de crianza', 'Secuestro internacional de menores',
-    'Otros asuntos de tramitación ordinaria', 'Convivencia, notificación cese',
-    'Separación judicial de mutuo acuerdo', 'Otros asuntos voluntarios'
-  ]
+const SUBMATERIAS_POR_PROCEDIMIENTO_Y_MATERIA = {
+  'Transacción': {
+    'Alimentos': [
+      'Alimentos menores, fijación', 'Alimentos menores, aumento', 'Alimentos menores, rebaja',
+      'Alimentos menores, cesación', 'Alimentos menores, cumplimiento',
+      'Alimentos mayores, fijación', 'Alimentos mayores, aumento', 'Alimentos mayores, rebaja',
+      'Alimentos mayores, cesación', 'Alimentos mayores, cumplimiento',
+      'Alimentos mayores y menores, fijación', 'Alimentos mayores y menores, aumento',
+      'Alimentos mayores y menores, rebaja', 'Alimentos mayores y menores, cesación',
+      'Alimentos mayores y menores, cumplimiento'
+    ],
+    'Cuidado Personal': [
+      'Cuidado personal provisorio, fijación', 'Cuidado personal provisorio, declaración',
+      'Cuidado personal provisorio, modificación', 'Cuidado personal provisorio, otros',
+      'Cuidado personal definitivo, fijación', 'Cuidado personal definitivo, declaración',
+      'Cuidado personal definitivo, modificación', 'Cuidado personal definitivo, otros',
+      'Cuidado personal exclusivo, fijación', 'Cuidado personal exclusivo, declaración',
+      'Cuidado personal exclusivo, modificación', 'Cuidado personal exclusivo, otros',
+      'Cuidado personal compartido, fijación', 'Cuidado personal compartido, declaración',
+      'Cuidado personal compartido, modificación', 'Cuidado personal compartido, otros'
+    ],
+    'RDR': [
+      'Relación Directa y Regular, fijación', 'Relación Directa y Regular, modificación',
+      'Relación Directa y Regular, suspensión', 'Relación Directa y Regular, otros'
+    ],
+    'Otros asuntos': [
+      'Autorización salida del país', 'Matrimonio, disenso para contraer',
+      'Patria potestad (emancipación judicial)', 'Patria potestad, solicitud',
+      'Patria potestad, renuncia', 'Patria potestad, suspensión', 'Patria potestad, otros',
+      'Guardador menores de edad, nombramiento', 'Guardador menores de edad, remoción',
+      'Autorizaciones', 'Nulidad matrimonial', 'Separación judicial de bienes',
+      'Separación judicial de bienes mutuo acuerdo', 'Declaración de bien familiar'
+    ]
+  },
+  'Ordinario': {
+    'Otros asuntos': [
+      'Entrega de menor y/o especies del menor / Costo de crianza', 'Autorización salida del país',
+      'Separación judicial de bienes', 'Declaración de bien familiar', 'Desafectación de bien familiar',
+      'Secuestro internacional de menores', 'Otros asuntos de tramitación ordinaria'
+    ],
+    'Alimentos': [
+      'Alimentos menores, fijación', 'Alimentos menores, aumento', 'Alimentos menores, rebaja',
+      'Alimentos menores, cesación', 'Alimentos menores, cumplimiento',
+      'Alimentos mayores, fijación', 'Alimentos mayores, aumento', 'Alimentos mayores, rebaja',
+      'Alimentos mayores, cesación', 'Alimentos mayores, cumplimiento',
+      'Alimentos mayores y menores, fijación', 'Alimentos mayores y menores, aumento',
+      'Alimentos mayores y menores, rebaja', 'Alimentos mayores y menores, cesación',
+      'Alimentos mayores y menores, cumplimiento'
+    ],
+    'Cuidado Personal': [
+      'Cuidado personal provisorio, fijación', 'Cuidado personal provisorio, declaración',
+      'Cuidado personal provisorio, modificación', 'Cuidado personal provisorio, otros',
+      'Cuidado personal definitivo, fijación', 'Cuidado personal definitivo, declaración',
+      'Cuidado personal definitivo, modificación', 'Cuidado personal definitivo, otros',
+      'Cuidado personal exclusivo, fijación', 'Cuidado personal exclusivo, declaración',
+      'Cuidado personal exclusivo, modificación', 'Cuidado personal exclusivo, otros',
+      'Cuidado personal compartido, fijación', 'Cuidado personal compartido, declaración',
+      'Cuidado personal compartido, modificación', 'Cuidado personal compartido, otros'
+    ],
+    'Divorcio': [
+      'Divorcio de mutuo acuerdo', 'Divorcio unilateral por cese de convivencia',
+      'Compensación económica', 'Divorcio culposo o por culpa', 'Separación matrimonial',
+      'Nulidad matrimonial'
+    ],
+    'Filiación': [
+      'Maternidad, impugnación', 'Maternidad, reconocimiento', 'Maternidad, impugnación y reconocimiento',
+      'Paternidad, reclamación matrimonial', 'Paternidad, reclamación no matrimonial',
+      'Paternidad, impugnación', 'Paternidad, reconocimiento', 'Paternidad, impugnación y reconocimiento',
+      'Paternidad, simple desconocimiento', 'Paternidad, nulidad de reconocimiento'
+    ],
+    'RDR': [
+      'Relación Directa y Regular, fijación', 'Relación Directa y Regular, modificación',
+      'Relación Directa y Regular, suspensión', 'Relación Directa y Regular, restricción',
+      'Relación Directa y Regular, cumplimiento / apremios', 'Relación Directa y Regular, otros'
+    ]
+  },
+  'Voluntario': {
+    'Patria potestad': [
+      'Patria potestad (emancipación judicial)', 'Patria potestad, solicitud',
+      'Patria potestad, renuncia', 'Patria potestad, suspensión', 'Patria potestad, otros'
+    ],
+    'Guardador': ['Guardador menores de edad, nombramiento', 'Guardador menores de edad, remoción'],
+    'Autorización': ['Autorización para enajenar bienes raíces', 'Autorización de trabajo NNA', 'Autorizaciones, otros'],
+    'Otros asuntos': [
+      'Matrimonio, disenso para contraer', 'Convivencia, notificación cese',
+      'Separación judicial de mutuo acuerdo', 'Separación judicial de bienes',
+      'Separación judicial de bienes mutuo acuerdo', 'Designación de curador', 'Otros asuntos voluntarios'
+    ]
+  },
+  'Protección': {
+    'Vulneración de derechos': [
+      'Maltrato físico o psicológico', 'Abuso sexual', 'Omisión, negligencia o abandono',
+      'Explotación laboral o mendicidad', 'Consumo problemático de drogas o alcohol',
+      'Amenaza o vulneración por violencia intrafamiliar (VIF)', 'Situación de calle / vagancia'
+    ],
+    'Infracción a la Ley penal': [
+      'Medida de protección por actos de connotación o infracción penal',
+      'Vulneración de derechos de NNA',
+      'Derivación a programas de apoyo psicosocial / Red Mejor Niñez o Sename',
+      'Control o revisión de medidas cautelares/protectoras'
+    ]
+  },
+  'Adopción de Admisibilidad': {
+    'Declaración de susceptibilidad': ['Inhabilidad física o moral', 'Falta de atención', 'Entrega voluntaria', 'Vulneración grave de derechos']
+  },
+  'Adopción': {
+    'Adopción': ['Adopción propiamente tal (o solicitada por cónyuges/solteros)', 'Adopción por integración']
+  },
+  'Violencia intrafamiliar': {
+    'Violencia intrafamiliar': [
+      'VIF en contra de la mujer', 'VIF en contra de adultos mayores', 'VIF en contra de NNA',
+      'VIF en contra de personas en situación de discapacidad',
+      'Medidas cautelares o de protección asociadas a VIF'
+    ],
+    'Violencia de género': [
+      'Violencia física', 'Violencia psicológica o emocional',
+      'Violencia económica o patrimonial', 'Violencia sexual'
+    ]
+  },
+  'Ley de identidad de género': {
+    'Identidad de género': [
+      'Rectificación de género y nombre, mayores de 14 y menores de 18 años',
+      'Rectificación de género y nombre, mayores de 16 y menores de 18 años con vínculo matrimonial vigente',
+      'Término de matrimonio', 'Compensación económica por término de matrimonio'
+    ]
+  },
+  'Ley 21,331 - Salud Mental': {
+    'Salud Mental': ['Protección salud mental voluntaria', 'Protección salud mental forzada']
+  }
 };
 
 const ETAPAS_FAMILIA = [
@@ -4457,8 +4503,12 @@ const ETAPAS_FAMILIA = [
   'Recursos'
 ];
 
-function opcionesTipoJuicioParaProcedimiento() { return MATERIAS_FAMILIA; }
-function opcionesMateriaParaProcedimiento(materiaSeleccionada) { return SUBMATERIAS_POR_MATERIA[materiaSeleccionada] || []; }
+function opcionesTipoJuicioParaProcedimiento(procedimiento) {
+  return MATERIAS_POR_PROCEDIMIENTO[procedimiento] || [];
+}
+function opcionesMateriaParaProcedimiento(procedimiento, materiaSeleccionada) {
+  return SUBMATERIAS_POR_PROCEDIMIENTO_Y_MATERIA[procedimiento]?.[materiaSeleccionada] || [];
+}
 function opcionesEtapaParaProcedimiento() { return ETAPAS_FAMILIA; }
 
 const RIT_PREFIJOS_VALIDOS = ['A', 'C', 'E', 'F', 'V', 'P', 'T', 'Z', 'X', 'I', 'M', 'W', 'R', 'S', 'O'];
@@ -4620,8 +4670,8 @@ const JURISDICCION_CORTE_OPCIONES = ['C.A de Santiago', 'C.A de San Miguel', 'C.
 
 function antecedentesFormHtml(c) {
   const procedimientoCanon = procedimientoCanonico(c.subcategoria) || (c.subcategoria || null);
-  const opcionesTipoJuicio = MATERIAS_FAMILIA;
-  const opcionesMateria = SUBMATERIAS_POR_MATERIA[c.tipoJuicio] || [];
+  const opcionesTipoJuicio = opcionesTipoJuicioParaProcedimiento(procedimientoCanon);
+  const opcionesMateria = opcionesMateriaParaProcedimiento(procedimientoCanon, c.tipoJuicio);
   const opcionesEtapa = ETAPAS_FAMILIA;
   const { rit, rol } = ritYRolEfectivos(c);
   const lista = intervinientesEfectivos(c);
@@ -4905,16 +4955,30 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     refreshPreviews();
   }
 
-  // En Familia, Procedimiento es independiente de Materia.
-  form.querySelector('#af-procedimiento').addEventListener('change', refreshPreviews);
+  // Procedimiento -> recalcula Materia y limpia Sub Materia.
+  function wireProcedimientoFamilia() {
+    const procedimientoSel = form.querySelector('#af-procedimiento');
+    if (!procedimientoSel) return;
+    procedimientoSel.addEventListener('change', () => {
+      const procedimiento = procedimientoSel.value || null;
+      const opcionesMateria = opcionesTipoJuicioParaProcedimiento(procedimiento);
+      form.querySelector('#af-tipojuicio-wrap').innerHTML = `<label>Materia</label>${campoTipoJuicioHtml(opcionesMateria, null)}`;
+      form.querySelector('#af-materia-wrap').innerHTML = `<label>Sub Materia</label>${campoDependienteHtml('af-materia', [], null)}`;
+      wireMateriaFamilia();
+      wireSubmateriaEtapaInputs();
+      refreshPreviews();
+    });
+  }
 
-  // Materia -> recalcula únicamente Sub Materia.
+  // Materia -> recalcula Sub Materia dentro del Procedimiento seleccionado.
   function wireMateriaFamilia() {
     const materiaSel = form.querySelector('#af-tipojuicio');
     if (!materiaSel) return;
     materiaSel.addEventListener('change', () => {
+      const procedimiento = form.querySelector('#af-procedimiento')?.value || null;
       const materia = materiaSel.value || null;
-      form.querySelector('#af-materia-wrap').innerHTML = `<label>Sub Materia</label>${campoDependienteHtml('af-materia', SUBMATERIAS_POR_MATERIA[materia] || [], null)}`;
+      const opcionesSubmateria = opcionesMateriaParaProcedimiento(procedimiento, materia);
+      form.querySelector('#af-materia-wrap').innerHTML = `<label>Sub Materia</label>${campoDependienteHtml('af-materia', opcionesSubmateria, null)}`;
       wireSubmateriaEtapaInputs();
       refreshPreviews();
     });
@@ -4926,6 +4990,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
       if (el) el.addEventListener('input', refreshPreviews);
     });
   }
+  wireProcedimientoFamilia();
   wireMateriaFamilia();
   wireSubmateriaEtapaInputs();
 
