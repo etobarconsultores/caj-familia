@@ -40,9 +40,11 @@ export async function signOut() {
 }
 
 export async function sendPasswordReset(email) {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: window.location.origin
-  });
+  // Marca explícitamente el retorno como recuperación. Así app.js puede
+  // bloquear cualquier INITIAL_SESSION/SIGNED_IN que llegue antes del evento
+  // PASSWORD_RECOVERY y mostrar siempre el formulario de nueva contraseña.
+  const redirectTo = `${window.location.origin}/?password_recovery=1`;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
 }
 

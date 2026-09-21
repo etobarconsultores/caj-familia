@@ -420,6 +420,11 @@ function wireAuthUI() {
         document.getElementById('reset-password').value = '';
         document.getElementById('reset-password-confirm').value = '';
         setTimeout(async () => {
+          // Quita del navegador tanto la marca propia como cualquier token de
+          // recuperación que haya quedado en la URL antes de cerrar la sesión.
+          try {
+            window.history.replaceState({}, '', window.location.origin + window.location.pathname);
+          } catch (_) { /* no crítico */ }
           try { await supabase.auth.signOut(); } catch (_) { /* no crítico */ }
           switchAuthForm('login');
         }, 1600);
@@ -12787,6 +12792,23 @@ export async function initApp() {
 
   const { onAuthStateChange } = await import('./auth.js');
 
+  // El enlace de recuperación incluye una marca propia para que el flujo no
+  // dependa del orden de eventos que emita Supabase. En algunas cargas puede
+  // aparecer INITIAL_SESSION/SIGNED_IN antes de PASSWORD_RECOVERY; mientras
+  // esta marca esté presente, la entrada normal a la app queda bloqueada.
+  const recoveryIntent = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('password_recovery') === '1') return true;
+      const hash = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+      return hash.get('type') === 'recovery' || hash.get('password_recovery') === '1';
+    } catch (_) {
+      return false;
+    }
+  })();
+
+  if (recoveryIntent) mostrarRecuperacionContrasena();
+
   // onAuthStateChange es la única fuente de verdad sobre el estado de sesión:
   // se dispara de inmediato con la sesión actual (o null) al suscribirse, y
   // luego en cada login/logout/refresh. Así evitamos que dos rutas distintas
@@ -12814,7 +12836,7 @@ export async function initApp() {
     // Un enlace de recuperación crea una sesión temporal válida. No debe
     // tratarse como un inicio de sesión normal: primero se exige definir la
     // nueva contraseña. Supabase emite PASSWORD_RECOVERY para este flujo.
-    if (event === 'PASSWORD_RECOVERY' && session) {
+    if (session && (recoveryIntent || event === 'PASSWORD_RECOVERY')) {
       mostrarRecuperacionContrasena();
       return;
     }
