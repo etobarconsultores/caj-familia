@@ -2441,7 +2441,7 @@ function caseCardHtml(c) {
     <div class="case-main">
       <div class="case-card-heading">
         <div>
-          <div class="titulo">${escapeHtml(c.titulo)}</div>
+          <div class="titulo">${escapeHtml(tituloAutomatico(c) || c.titulo || 'Sin título')}</div>
           <div class="case-card-context">
             ${categoriaLabel ? `<span class="case-status-chip case-status-${escapeHtml(c.categoria || '')}">${escapeHtml(categoriaLabel)}</span>` : ''}
             ${tutor ? `<span class="case-tutor-chip">Tutor · ${escapeHtml(tutor)}</span>` : ''}
@@ -4583,16 +4583,12 @@ function tituloAutomatico(c) {
   const componentes = [];
   const rolTexto = rolCompletoTexto(c);
   if (rolTexto) componentes.push(`ROL ${rolTexto}`);
-  // En Familia, el título usa la Sub Materia; omitir la Materia evita
-  // redundancias como "Alimentos / Alimentos menores, fijación".
+  // En Familia, el título usa únicamente la Sub Materia y el caratulado
+  // abreviado (primer apellido de cada parte), evitando redundancias y
+  // nombres completos en las vistas compactas.
   if (c.materia) componentes.push(c.materia);
-  const lista = intervinientesEfectivos(c);
-  const primerDemandante = lista.find(i => i.tipoParte === 'Demandante');
-  const primerDemandado = lista.find(i => i.tipoParte === 'Demandado');
-  const apDte = nombreCorto(primerDemandante ? primerDemandante.nombre : null);
-  const apDdo = nombreCorto(primerDemandado ? primerDemandado.nombre : null);
-  if (apDte) componentes.push(apDte);
-  if (apDdo) componentes.push(apDdo);
+  const caratulado = caratuladoTexto(c);
+  if (caratulado) componentes.push(caratulado);
   return componentes.filter(Boolean).join(' / ');
 }
 
