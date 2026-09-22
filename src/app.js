@@ -3624,7 +3624,7 @@ function cronologiaHtml(c) {
       <div class="cron-body" style="flex:1;">
         <div class="desc" data-view>${escapeHtml(g.descripcion)}</div>
         <div class="txt" data-edit style="display:none;">
-          <textarea class="cron-edit-input" style="width:100%; min-height:50px;">${escapeHtml(g.descripcion)}</textarea>
+          <textarea class="cron-edit-input" name="cronologia-actuacion-editar" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-lpignore="true" data-1p-ignore="true" style="width:100%; min-height:50px;">${escapeHtml(g.descripcion)}</textarea>
         </div>
         ${g.driveLink ? `<div class="meta"><a href="${escapeHtml(g.driveLink)}" target="_blank" rel="noopener">Ver documento ↗</a></div>` : ''}
       </div>
@@ -11466,7 +11466,7 @@ function detailHtml(c) {
         <div class="gt-cron-add">
           <div class="gt-cron-grid">
             <div><label>Fecha de actuación</label><input type="date" id="new-cron-fecha" value="${escapeHtml(todayISO())}"></div>
-            <div><label>Actuación</label><input type="text" id="new-cron" placeholder="Texto de la gestión realizada…"></div>
+            <div><label>Actuación</label><input type="text" id="new-cron" name="cronologia-actuacion" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-lpignore="true" data-1p-ignore="true" placeholder="Texto de la gestión realizada…"></div>
           </div>
           <div class="gt-cron-actions"><button class="btn small primary" id="add-cron">Registrar actuación</button></div>
         </div>
