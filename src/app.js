@@ -11466,7 +11466,7 @@ function detailHtml(c) {
         <div class="gt-cron-add">
           <div class="gt-cron-grid">
             <div><label>Fecha de actuación</label><input type="date" id="new-cron-fecha" value="${escapeHtml(todayISO())}"></div>
-            <div><label>Actuación</label><input type="text" id="new-cron" name="cronologia-actuacion" autocomplete="off" autocapitalize="sentences" spellcheck="true" data-lpignore="true" data-1p-ignore="true" placeholder="Texto de la gestión realizada…"></div>
+            <div><label>Actuación</label><input type="text" id="new-cron" name="practicajuris-cronologia-actuacion" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="Texto de la gestión realizada…"></div>
           </div>
           <div class="gt-cron-actions"><button class="btn small primary" id="add-cron">Registrar actuación</button></div>
         </div>
@@ -12054,6 +12054,33 @@ function wireCronologiaEvents(c, panel) {
     });
   });
   const addCron = panel.querySelector('#add-cron');
+  const cronInp = panel.querySelector('#new-cron');
+
+  // Chrome y algunos gestores de contraseñas pueden confundir este campo
+  // con un nombre de usuario e insertar el correo de la sesión. Lo marcamos
+  // como campo de texto propio de Práctica Juris y limpiamos únicamente el
+  // correo exacto de la cuenta, sin tocar ningún texto escrito por la usuaria.
+  if (cronInp) {
+    const esCorreoAutofillCronologia = () => {
+      const correo = String(CURRENT_USER?.email || '').trim().toLowerCase();
+      return !!correo && String(cronInp.value || '').trim().toLowerCase() === correo;
+    };
+    const limpiarAutofillCronologia = () => {
+      if (!esCorreoAutofillCronologia()) return false;
+      cronInp.value = '';
+      return true;
+    };
+
+    limpiarAutofillCronologia();
+    [50, 150, 400, 1000, 2000, 3500].forEach(ms => {
+      setTimeout(limpiarAutofillCronologia, ms);
+    });
+    cronInp.addEventListener('focus', limpiarAutofillCronologia);
+    cronInp.addEventListener('input', () => {
+      if (esCorreoAutofillCronologia()) cronInp.value = '';
+    });
+  }
+
   if (addCron) addCron.addEventListener('click', async () => {
     const inp = panel.querySelector('#new-cron');
     const fechaInp = panel.querySelector('#new-cron-fecha');
