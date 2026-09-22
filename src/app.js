@@ -319,6 +319,15 @@ function mostrarRecuperacionContrasena() {
   document.getElementById('loading-screen').hidden = true;
   document.getElementById('app-root').hidden = true;
   document.getElementById('auth-screen').hidden = false;
+
+  // Supabase puede dejar un fragmento vacío (#) después de consumir los
+  // tokens del enlace de recuperación. Se elimina únicamente ese # vacío;
+  // nunca se tocan fragmentos que todavía contengan tokens.
+  if (window.location.hash === '#') {
+    const cleanUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState({}, '', cleanUrl);
+  }
+
   switchAuthForm('reset');
   const errEl = document.getElementById('reset-password-error');
   const okEl = document.getElementById('reset-password-success');
@@ -422,6 +431,9 @@ function wireAuthUI() {
         setTimeout(async () => {
           // Quita del navegador tanto la marca propia como cualquier token de
           // recuperación que haya quedado en la URL antes de cerrar la sesión.
+          // El cambio ya terminó: desde este momento cualquier nueva sesión
+          // debe tratarse como un login normal, no como recuperación.
+          recoveryIntent = false;
           try {
             window.history.replaceState({}, '', window.location.origin + window.location.pathname);
           } catch (_) { /* no crítico */ }
@@ -12796,7 +12808,7 @@ export async function initApp() {
   // dependa del orden de eventos que emita Supabase. En algunas cargas puede
   // aparecer INITIAL_SESSION/SIGNED_IN antes de PASSWORD_RECOVERY; mientras
   // esta marca esté presente, la entrada normal a la app queda bloqueada.
-  const recoveryIntent = (() => {
+  let recoveryIntent = (() => {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('password_recovery') === '1') return true;
