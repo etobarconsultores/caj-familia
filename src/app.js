@@ -335,6 +335,10 @@ function mostrarRecuperacionContrasena() {
   if (okEl) okEl.textContent = '';
 }
 
+// Estado compartido del flujo de recuperación de contraseña.
+// Debe ser accesible tanto desde initApp() como desde wireAuthUI().
+let recoveryIntent = false;
+
 function wireAuthUI() {
   document.getElementById('link-to-register').addEventListener('click', () => switchAuthForm('register'));
   document.getElementById('link-to-forgot').addEventListener('click', () => switchAuthForm('forgot'));
@@ -429,17 +433,17 @@ function wireAuthUI() {
         document.getElementById('reset-password').value = '';
         document.getElementById('reset-password-confirm').value = '';
         setTimeout(async () => {
-          // Quita del navegador tanto la marca propia como cualquier token de
-          // recuperación que haya quedado en la URL antes de cerrar la sesión.
-          // El cambio ya terminó: desde este momento cualquier nueva sesión
-          // debe tratarse como un login normal, no como recuperación.
+          // El cambio ya terminó: desactiva el modo recuperación ANTES de
+          // cerrar la sesión temporal, limpia la URL y vuelve al login normal.
           recoveryIntent = false;
           try {
             window.history.replaceState({}, '', window.location.origin + window.location.pathname);
           } catch (_) { /* no crítico */ }
-          try { await supabase.auth.signOut(); } catch (_) { /* no crítico */ }
+          try {
+            await supabase.auth.signOut();
+          } catch (_) { /* no crítico */ }
           switchAuthForm('login');
-        }, 1600);
+        }, 1200);
       } catch (err) {
         errEl.textContent = traducirError(err.message);
       } finally {
@@ -12808,7 +12812,7 @@ export async function initApp() {
   // dependa del orden de eventos que emita Supabase. En algunas cargas puede
   // aparecer INITIAL_SESSION/SIGNED_IN antes de PASSWORD_RECOVERY; mientras
   // esta marca esté presente, la entrada normal a la app queda bloqueada.
-  let recoveryIntent = (() => {
+  recoveryIntent = (() => {
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('password_recovery') === '1') return true;
