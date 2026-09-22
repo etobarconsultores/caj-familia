@@ -2771,7 +2771,7 @@ function notifPersonaBlockHtml(persona, idx) {
     <div class="notif-person-body agenda-form">
       <div class="notif-person-fields">
         <div><label>Parte</label><select class="np-parte" data-idx="${idx}"><option value="">Sin definir</option>${NOTIF_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <div><label>Nombre</label><input type="text" class="np-nombre" data-idx="${idx}" value="${escapeHtml(persona.nombre || '')}" placeholder="Nombre de la persona"></div>
+        <div><label>Nombre</label><input type="text" class="np-nombre" data-idx="${idx}" name="notificacion-persona-${idx}" autocomplete="off" value="${escapeHtml(persona.nombre || '')}" placeholder="Se completa desde Antecedentes" readonly></div>
         <div><label>Estado de notificación</label>
           <select class="np-estado" data-idx="${idx}">
             <option value="">Sin definir</option>
@@ -2870,10 +2870,19 @@ function notificacionTabHtml(c) {
 }
 
 function wireNotificacionTab(c, panel) {
-  let estadoPersonas = (c.notificacionPersonas || []).map(p => ({
-    id: p.id, parte: p.parte, nombre: p.nombre, estadoNotificacion: p.estadoNotificacion,
-    domicilios: (p.domicilios || []).map(d => ({ id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha, folio: d.folio, informadoPor: d.informadoPor }))
-  }));
+  let estadoPersonas = (c.notificacionPersonas || []).map(p => {
+    const nombreDesdeAntecedentes = nombreOficioDesdeAntecedentes(c, p.parte);
+    const nombreGuardado = (p.nombre || '').trim();
+    const correoCuenta = (CURRENT_USER?.email || '').trim().toLowerCase();
+    const nombreSeguro = nombreGuardado && nombreGuardado.toLowerCase() !== correoCuenta ? nombreGuardado : '';
+    return {
+      id: p.id,
+      parte: p.parte,
+      nombre: nombreDesdeAntecedentes || nombreSeguro,
+      estadoNotificacion: p.estadoNotificacion,
+      domicilios: (p.domicilios || []).map(d => ({ id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha, folio: d.folio, informadoPor: d.informadoPor }))
+    };
+  });
 
   function refrescar() {
     panel.querySelector('#notif-personas-wrap').innerHTML = estadoPersonas.length
@@ -2893,8 +2902,13 @@ function wireNotificacionTab(c, panel) {
   const wrap = panel.querySelector('#notif-personas-wrap');
   if (wrap) {
     wrap.addEventListener('input', (e) => {
-      if (e.target.classList.contains('np-parte')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].parte = e.target.value; return; }
-      if (e.target.classList.contains('np-nombre')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].nombre = e.target.value.trim(); return; }
+      if (e.target.classList.contains('np-parte')) {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        estadoPersonas[idx].parte = e.target.value;
+        estadoPersonas[idx].nombre = nombreOficioDesdeAntecedentes(c, e.target.value);
+        refrescar();
+        return;
+      }
       if (e.target.classList.contains('np-estado')) { estadoPersonas[parseInt(e.target.dataset.idx, 10)].estadoNotificacion = e.target.value; return; }
       const tr = e.target.closest('tr[data-p-idx]');
       if (!tr) return;
@@ -2925,6 +2939,12 @@ function wireNotificacionTab(c, panel) {
   const guardarBtn = panel.querySelector('#notif-guardar');
   if (guardarBtn) guardarBtn.addEventListener('click', async () => {
     try {
+      const incompleta = estadoPersonas.find(p => !p.parte || !p.nombre);
+      if (incompleta) {
+        toast('Completa Parte y Nombre de todas las personas antes de guardar.');
+        return;
+      }
+
       const originalesPersonas = c.notificacionPersonas || [];
       const idsPersonasFinales = new Set();
       const nuevaListaPersonas = [];
@@ -3230,7 +3250,7 @@ function campoCredencialHtml(campo, etiqueta) {
       <button type="button" data-action="cred-abrir-editor" data-campo="${campo}" id="cred-link-editor-${campo}" style="background:none; border:none; padding:0; color:var(--brass); cursor:pointer; text-decoration:underline; font-size:11.5px;">Agregar clave</button><span id="cred-link-sep-${campo}" style="display:none; color:var(--ink-faint);"> · </span><button type="button" data-action="cred-delete" data-campo="${campo}" id="cred-link-eliminar-${campo}" style="display:none; background:none; border:none; padding:0; color:var(--urgent); cursor:pointer; text-decoration:underline; font-size:11.5px;">Eliminar</button>
     </div>
     <div id="cred-editor-${campo}" style="display:none; margin-top:6px;">
-      <input type="password" class="ct-input" id="ct-${campo}" placeholder="Nueva credencial" style="width:100%;">
+      <input type="text" class="ct-input" id="ct-${campo}" name="practicajuris-contacto-${campo}" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="Nueva credencial" style="width:100%; -webkit-text-security:disc;">
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button type="button" class="btn small primary" data-action="cred-guardar-editor" data-campo="${campo}">Guardar cambio</button>
         <button type="button" class="btn small" data-action="cred-cancelar-editor" data-campo="${campo}">Cancelar</button>
