@@ -297,6 +297,14 @@ function showApp() {
   document.getElementById('loading-screen').hidden = true;
   document.getElementById('auth-screen').hidden = true;
   document.getElementById('app-root').hidden = false;
+
+  // Una vez autenticada la usuaria, las credenciales del formulario de login
+  // ya no son necesarias. Limpiarlas evita que Chrome intente asociar una
+  // contraseña oculta a campos de texto internos (por ejemplo, Cronología).
+  const loginEmail = document.getElementById('login-email');
+  const loginPassword = document.getElementById('login-password');
+  if (loginEmail) loginEmail.value = '';
+  if (loginPassword) loginPassword.value = '';
 }
 
 function switchAuthForm(which) {
