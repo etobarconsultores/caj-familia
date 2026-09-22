@@ -1,10 +1,5 @@
 import { supabase } from '../supabaseClient.js';
 
-// Organización/módulo del build de Familia. Se escriben explícitamente
-// en cada evento nuevo de Agenda para que nunca quede clasificado como Civil.
-const FAMILIA_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000002'; // CAJ Puente Alto
-const FAMILIA_MODULE_ID = 'familia';
-
 // ============================================================================
 // Helpers de mapeo entre columnas de Supabase (snake_case) y el modelo de la
 // aplicación (camelCase), para no tener que tocar la lógica de la UI.
@@ -685,8 +680,6 @@ export async function createAgendaEvento(userId, causaId, patch) {
   const dbPatch = eventoPatchToDb(patch);
   dbPatch.user_id = userId;
   dbPatch.causa_id = causaId;
-  dbPatch.organization_id = FAMILIA_ORGANIZATION_ID;
-  dbPatch.module_id = FAMILIA_MODULE_ID;
   const { data, error } = await supabase.from('agenda_eventos').insert(dbPatch).select().single();
   if (error) throw error;
   return eventoFromDb(data);
