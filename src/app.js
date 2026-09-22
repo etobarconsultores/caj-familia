@@ -4283,9 +4283,18 @@ function wireAgendaTab(c, panel) {
     });
     formWrap.querySelector('#save-evento').addEventListener('click', async () => {
       const tipoSel = formWrap.querySelector('#ev-tipo').value;
+      const tipoAudienciaSel = tipoSel === 'Audiencia' ? (formWrap.querySelector('#ev-tipoaudiencia').value || null) : null;
+      // La columna agenda_eventos.titulo sigue siendo NOT NULL en Supabase,
+      // aunque el campo Título ya no se muestre en el formulario. Guardamos
+      // un título técnico automático para mantener compatibilidad con el
+      // esquema y con eventos históricos.
+      const tituloAuto = (evento && evento.titulo)
+        ? evento.titulo
+        : (tipoSel === 'Audiencia' && tipoAudienciaSel ? `${tipoSel} — ${tipoAudienciaSel}` : (tipoSel || 'Evento'));
       const patch = {
         tipo: tipoSel,
-        tipoAudiencia: tipoSel === 'Audiencia' ? (formWrap.querySelector('#ev-tipoaudiencia').value || null) : null,
+        titulo: tituloAuto,
+        tipoAudiencia: tipoAudienciaSel,
         descripcion: formWrap.querySelector('#ev-descripcion').value.trim() || null,
         fecha: formWrap.querySelector('#ev-fecha').value || null,
         horaInicio: formWrap.querySelector('#ev-horaInicio').value.trim() || null,
