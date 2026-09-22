@@ -3656,10 +3656,10 @@ function cronologiaHtml(c) {
         </div>
         ${g.driveLink ? `<div class="meta"><a href="${escapeHtml(g.driveLink)}" target="_blank" rel="noopener">Ver documento ↗</a></div>` : ''}
       </div>
-      <div style="display:flex; gap:6px; align-self:center;">
-        <button data-action="edit-cron" data-id="${g.id}">Editar</button>
-        <button data-action="save-cron" data-id="${g.id}" style="display:none; border-color:var(--brass); color:var(--brass);">Guardar</button>
-        <button data-action="delete-cron" data-id="${g.id}" style="border-color:var(--urgent); color:var(--urgent);">Eliminar</button>
+      <div style="display:flex; gap:8px; align-self:center; align-items:center;">
+        <button class="btn small ghost" type="button" data-action="edit-cron" data-id="${g.id}">Editar</button>
+        <button class="btn small primary" type="button" data-action="save-cron" data-id="${g.id}" style="display:none;">Guardar</button>
+        <button class="btn small danger" type="button" data-action="delete-cron" data-id="${g.id}">Eliminar</button>
       </div>
     </div>`).join('')}</div>`;
 }
