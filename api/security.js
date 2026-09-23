@@ -6,6 +6,7 @@ import { pinCreate } from './_lib/security-ops/pinCreate.js';
 import { pinChange } from './_lib/security-ops/pinChange.js';
 import { pinReset } from './_lib/security-ops/pinReset.js';
 import { pinStatus } from './_lib/security-ops/pinStatus.js';
+import { moduleEntry } from './_lib/security-ops/moduleEntry.js';
 import { requestClosure } from './_lib/account-ops/requestClosure.js';
 import { reactivate } from './_lib/account-ops/reactivate.js';
 import { processExpiredDeletions } from './_lib/account-ops/processExpiredDeletions.js';
@@ -65,6 +66,12 @@ export default async function handler(req, res) {
   if (!requerirMetodo(req, res, 'POST')) return;
 
   const { operation } = req.body || {};
+
+  // Entrada desde Práctica Juris Core. No puede exigir JWT Familia porque la
+  // usuaria todavía no tiene una sesión en este proyecto Supabase.
+  if (operation === 'module.entry') {
+    return await moduleEntry(req, res);
+  }
 
   // Whitelist estricta: se exige que la clave sea propia del objeto (no
   // heredada), para no dejar ningún resquicio a algo como "__proto__" o

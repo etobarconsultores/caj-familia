@@ -53,6 +53,62 @@ export async function getSession() {
   return data.session;
 }
 
+
+// Entrada federada desde Práctica Juris Core.
+// El código efímero se entrega al backend de Familia, que lo valida con el
+// Core y devuelve únicamente un token hash canjeable por una sesión Supabase.
+export async function signInFromCoreEntry(code) {
+  const normalizedCode = String(code || '').trim();
+  if (normalizedCode.length < 32 || normalizedCode.length > 256) {
+    throw new Error('El acceso temporal no es válido.');
+  }
+
+  // Si había una sesión Familia previa, se elimina localmente antes del
+  // canje para que nunca quede abierta una cuenta distinta de la seleccionada.
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (sessionData?.session) {
+    const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+    if (signOutError) throw signOutError;
+  }
+
+  const response = await fetch('/api/security', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      operation: 'module.entry',
+      code: normalizedCode
+    })
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error || 'No pudimos validar el acceso desde Práctica Juris.');
+  }
+
+  const tokenHash = String(payload?.tokenHash || '').trim();
+  if (!tokenHash) {
+    throw new Error('El servidor no devolvió una autorización válida para Práctica Familia.');
+  }
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    token_hash: tokenHash,
+    type: 'email'
+  });
+
+  if (error) throw error;
+  if (!data?.session || !data?.user) {
+    throw new Error('No pudimos iniciar la sesión de Práctica Familia.');
+  }
+
+  return data;
+}
+
 // Verifica la contraseña actual de la cuenta usando un cliente Supabase
 // TEMPORAL Y AISLADO -- nunca el cliente principal (`supabase`) -- para que
 // la sesión que se crea al validar no reemplace ni interfiera con la

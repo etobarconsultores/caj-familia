@@ -307,6 +307,18 @@ function showApp() {
   if (loginPassword) loginPassword.value = '';
 }
 
+const PRACTICA_JURIS_CORE_URL = 'https://practicajuris-core.vercel.app';
+
+async function cerrarSesionYVolverAlCore() {
+  const { signOut } = await import('./auth.js');
+  try {
+    await signOut();
+  } finally {
+    // Familia cierra solo su sesión local; el Core conserva la sesión central.
+    window.location.replace(PRACTICA_JURIS_CORE_URL);
+  }
+}
+
 function switchAuthForm(which) {
   document.getElementById('form-login').hidden = which !== 'login';
   document.getElementById('form-register').hidden = which !== 'register';
@@ -476,9 +488,8 @@ function wireAuthUI() {
   if (familiaCambiarModulo) familiaCambiarModulo.addEventListener('click', () => volverASelectorModulo());
 
   const familiaLogout = document.getElementById('familia-logout');
-  if (familiaLogout) familiaLogout.addEventListener('click', async () => {
-    const { signOut } = await import('./auth.js');
-    await signOut();
+  if (familiaLogout) familiaLogout.addEventListener('click', () => {
+    cerrarSesionYVolverAlCore();
   });
 }
 
@@ -733,9 +744,7 @@ function actualizarVisibilidadTabReceptores() {
 }
 
 async function cerrarSesionApp() {
-  // Mismo flujo de logout de siempre -- no se duplica ninguna lógica.
-  const { signOut } = await import('./auth.js');
-  await signOut();
+  await cerrarSesionYVolverAlCore();
 }
 
 // Referencia a los listeners de document del menú abierto -- permite
@@ -1838,9 +1847,8 @@ function mostrarPantallaCierrePendiente(session, estado, opciones = {}) {
     </div>
   `);
 
-  document.getElementById('cierre-gate-logout').addEventListener('click', async () => {
-    const { signOut } = await import('./auth.js');
-    await signOut();
+  document.getElementById('cierre-gate-logout').addEventListener('click', () => {
+    cerrarSesionYVolverAlCore();
   });
 
   if (soloError) {
@@ -1901,10 +1909,9 @@ function mostrarPantallaMfaGate({ soloError }) {
     </div>
   `);
 
-  document.getElementById('mfa-gate-logout').addEventListener('click', async () => {
+  document.getElementById('mfa-gate-logout').addEventListener('click', () => {
     _gateEsperandoVerificacion = false;
-    const { signOut } = await import('./auth.js');
-    await signOut();
+    cerrarSesionYVolverAlCore();
   });
 
   if (soloError) return;
@@ -2020,9 +2027,8 @@ function mostrarPantallaLegalGate(session, { soloError = false } = {}) {
     </div>
   `);
 
-  document.getElementById('legal-gate-logout').addEventListener('click', async () => {
-    const { signOut } = await import('./auth.js');
-    await signOut();
+  document.getElementById('legal-gate-logout').addEventListener('click', () => {
+    cerrarSesionYVolverAlCore();
   });
 
   if (soloError) return;
@@ -12861,6 +12867,45 @@ function wireTopLevelUI() {
   wireMobileMenu();
 }
 
+// Consume, si existe, el código de entrada enviado por Práctica Juris Core.
+// Viaja en el fragmento (#), se elimina de la barra ANTES de canjearlo y
+// nunca se persiste en localStorage/sessionStorage.
+async function consumirEntradaDesdeCore() {
+  const rawHash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : '';
+
+  if (!rawHash) return { detected: false, error: null };
+
+  const params = new URLSearchParams(rawHash);
+  const code = String(params.get('pj_entry') || '').trim();
+  if (!code) return { detected: false, error: null };
+
+  window.history.replaceState(
+    {},
+    document.title,
+    `${window.location.pathname}${window.location.search}`
+  );
+
+  document.getElementById('auth-screen').hidden = true;
+  document.getElementById('app-root').hidden = true;
+  document.getElementById('familia-screen').hidden = true;
+  document.getElementById('module-select-screen').hidden = true;
+  document.getElementById('loading-screen').hidden = false;
+
+  try {
+    const { signInFromCoreEntry } = await import('./auth.js');
+    await signInFromCoreEntry(code);
+    return { detected: true, error: null };
+  } catch (error) {
+    console.error('No se pudo completar el acceso desde Práctica Juris Core.');
+    return {
+      detected: true,
+      error: error?.message || 'No pudimos completar el acceso desde Práctica Juris.'
+    };
+  }
+}
+
 // ============================================================================
 // BOOTSTRAP
 // ============================================================================
@@ -12869,6 +12914,11 @@ export async function initApp() {
   wireAuthUI();
   wireTopLevelUI();
   switchAuthForm('login');
+
+  // Si llegamos desde el Core, canjeamos el código antes de suscribir el
+  // listener global. Luego INITIAL_SESSION continúa por los gates normales
+  // de MFA, cierre pendiente y documentos legales.
+  const coreEntry = await consumirEntradaDesdeCore();
 
   const { onAuthStateChange } = await import('./auth.js');
 
@@ -12980,6 +13030,11 @@ export async function initApp() {
       cerrarPantallaCierrePendiente();
       cerrarPantallaLegalGate();
       showAuthScreen();
+
+      if (coreEntry?.detected && coreEntry.error) {
+        const errEl = document.getElementById('login-error');
+        if (errEl) errEl.textContent = coreEntry.error;
+      }
     }
   });
 }
