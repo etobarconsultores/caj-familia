@@ -57,6 +57,50 @@ export async function getSession() {
 // Entrada federada desde Práctica Juris Core.
 // El código efímero se entrega al backend de Familia, que lo valida con el
 // Core y devuelve únicamente un token hash canjeable por una sesión Supabase.
+export async function validateCoreModuleAccess(session) {
+  const accessToken = session?.access_token;
+  if (!accessToken) {
+    const error = new Error('La sesión de Práctica Familia no está disponible.');
+    error.code = 'FAMILIA_SESSION_UNAVAILABLE';
+    throw error;
+  }
+
+  const response = await fetch('/api/security', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ operation: 'module.accessCheck' })
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(
+      payload?.error || 'No pudimos verificar tu acceso a Práctica Familia.'
+    );
+    error.status = response.status;
+    error.code = payload?.code || 'MODULE_ACCESS_CHECK_FAILED';
+    throw error;
+  }
+
+  if (payload?.allowed !== true || payload?.moduleId !== 'familia') {
+    const error = new Error('No pudimos verificar tu acceso a Práctica Familia.');
+    error.status = 503;
+    error.code = 'CORE_INVALID_RESPONSE';
+    throw error;
+  }
+
+  return payload;
+}
+
+
 export async function signInFromCoreEntry(code) {
   const normalizedCode = String(code || '').trim();
   if (normalizedCode.length < 32 || normalizedCode.length > 256) {

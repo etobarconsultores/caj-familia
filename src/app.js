@@ -1741,6 +1741,54 @@ function traducirError(msg) {
   return msg;
 }
 
+// ---------- Gate de autorización central de módulo ----------
+// Antes de ejecutar MFA/legal o cargar datos, toda sesión Familia
+// (incluyendo una sesión antigua o un login directo) debe seguir habilitada
+// en Práctica Juris Core.
+let _validandoAccesoCore = false;
+
+async function validarAccesoCoreYEntrar(session) {
+  if (_validandoAccesoCore) return;
+  _validandoAccesoCore = true;
+
+  try {
+    const { validateCoreModuleAccess } = await import('./auth.js');
+    await validateCoreModuleAccess(session);
+    await verificarAalYEntrar(session);
+  } catch (error) {
+    const accesoDenegado =
+      error?.status === 403 ||
+      error?.code === 'MODULE_ACCESS_DENIED';
+
+    if (accesoDenegado) {
+      console.warn('Práctica Familia: acceso rechazado por Práctica Juris Core.');
+      const { signOut } = await import('./auth.js');
+      try {
+        await signOut();
+      } catch (_) {
+        // Aunque el cierre local falle, nunca se permite continuar a la app.
+      }
+      window.location.replace(PRACTICA_JURIS_CORE_URL);
+      return;
+    }
+
+    // Fallar cerrado también si Core no está disponible: no se cargan datos.
+    console.error('No se pudo verificar el permiso central de Práctica Familia.');
+    document.getElementById('app-root').hidden = true;
+    document.getElementById('familia-screen').hidden = true;
+    document.getElementById('module-select-screen').hidden = true;
+    showAuthScreen();
+
+    const errEl = document.getElementById('login-error');
+    if (errEl) {
+      errEl.textContent =
+        'No pudimos verificar tu acceso con Práctica Juris. Vuelve al frontis e inténtalo nuevamente.';
+    }
+  } finally {
+    _validandoAccesoCore = false;
+  }
+}
+
 // ---------- Gate de verificación en 2 pasos al iniciar sesión ----------
 // true mientras se está esperando que la usuaria complete el desafío MFA
 // del LOGIN (no el de inscribir/desactivar un factor dentro de Administrar
@@ -12988,6 +13036,19 @@ export async function initApp() {
         event === 'TOKEN_REFRESHED' ||
         (event === 'SIGNED_IN' && appYaActivaMismoUsuario)
       ) {
+        if (event === 'TOKEN_REFRESHED') {
+          // Revalidación periódica: si el permiso se revoca mientras la app
+          // está abierta, el siguiente refresh de sesión vuelve a consultar Core.
+          import('./auth.js')
+            .then(({ validateCoreModuleAccess }) => validateCoreModuleAccess(session))
+            .catch(async (error) => {
+              if (error?.status === 403 || error?.code === 'MODULE_ACCESS_DENIED') {
+                const { signOut } = await import('./auth.js');
+                try { await signOut(); } catch (_) {}
+                window.location.replace(PRACTICA_JURIS_CORE_URL);
+              }
+            });
+        }
         if (!CURRENT_USER) CURRENT_USER = { id: null, email: null, nombre: null };
         CURRENT_USER.id = session.user.id;
         CURRENT_USER.email = session.user.email;
@@ -13012,8 +13073,9 @@ export async function initApp() {
         // cuenta), no se hace nada acá -- ya lo maneja esa pantalla.
         return;
       }
-      // SIGNED_IN / INITIAL_SESSION.
-      verificarAalYEntrar(session);
+      // SIGNED_IN / INITIAL_SESSION. Antes de MFA/legal, el Core vuelve a
+      // validar que esta identidad Familia tenga el módulo habilitado.
+      validarAccesoCoreYEntrar(session);
     } else {
       CAUSAS = [];
       ENCARGOS = [];

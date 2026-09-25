@@ -7,6 +7,7 @@ import { pinChange } from './_lib/security-ops/pinChange.js';
 import { pinReset } from './_lib/security-ops/pinReset.js';
 import { pinStatus } from './_lib/security-ops/pinStatus.js';
 import { moduleEntry } from './_lib/security-ops/moduleEntry.js';
+import { moduleAccessCheck } from './_lib/security-ops/moduleAccessCheck.js';
 import { requestClosure } from './_lib/account-ops/requestClosure.js';
 import { reactivate } from './_lib/account-ops/reactivate.js';
 import { processExpiredDeletions } from './_lib/account-ops/processExpiredDeletions.js';
@@ -43,6 +44,7 @@ const OPERACIONES = Object.freeze({
   'pin.change': pinChange,
   'pin.reset': pinReset,
   'pin.status': pinStatus,
+  'module.accessCheck': moduleAccessCheck,
   'account.requestClosure': requestClosure,
   'account.reactivate': reactivate
 });
