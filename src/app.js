@@ -345,8 +345,23 @@ function showApp() {
 
 const PRACTICA_JURIS_CORE_URL = APP_BASE ? `${window.location.origin}/` : 'https://practicajuris.cl/';
 
+// Evita que el listener de Supabase pinte el login antiguo del módulo
+// durante los milisegundos entre signOut() y la redirección al Core.
+let _logoutHaciaCoreEnCurso = false;
+
 async function cerrarSesionYVolverAlCore() {
   const { signOut } = await import('./auth.js');
+  _logoutHaciaCoreEnCurso = true;
+
+  // Mantener una transición neutra mientras Supabase cierra la sesión local.
+  // Así nunca alcanza a aparecer el formulario de login heredado del módulo.
+  const loading = document.getElementById('loading-screen');
+  const auth = document.getElementById('auth-screen');
+  const appRoot = document.getElementById('app-root');
+  if (loading) loading.hidden = false;
+  if (auth) auth.hidden = true;
+  if (appRoot) appRoot.hidden = true;
+
   try {
     await signOut();
   } finally {
@@ -13120,6 +13135,10 @@ export async function initApp() {
       // SIGNED_IN / INITIAL_SESSION.
       verificarAalYEntrar(session);
     } else {
+      // Si la ausencia de sesión se debe a "Cerrar sesión" hacia el Core,
+      // no renderizar el login local heredado: la redirección ya está en curso.
+      if (_logoutHaciaCoreEnCurso) return;
+
       CAUSAS = [];
       ENCARGOS = [];
       CURRENT_PRACTICA = null;
