@@ -1659,18 +1659,34 @@ function mostrarSeccionCuenta(seccion) {
   }
 
   if (seccion === 'suscripcion') {
+    // Por ahora Esencial es el único plan comercialmente habilitado.
+    // Si más adelante el Core entrega plan_id en la identidad o sesión,
+    // esta vista ya queda preparada para mostrarlo sin rehacer la sección.
+    const planId = String(
+      CURRENT_USER?.plan_id ||
+      CURRENT_USER?.plan ||
+      CURRENT_USER?.subscription_plan ||
+      'esencial'
+    ).toLowerCase();
+    const planNombre = planId === 'plus' ? 'Plus' : planId === 'pro' ? 'Pro' : 'Esencial';
+    const precioMensual = planId === 'esencial' ? '$12.990 + IVA / mes' : 'Precio por definir';
+
     cont.innerHTML = `
       <div class="cuenta-section-intro">
         <div class="cuenta-section-kicker">PLAN Y FACTURACIÓN</div>
         <h2>Administrar suscripción</h2>
-        <p>Este espacio reunirá tu plan, facturación y medios de pago cuando habilitemos las suscripciones.</p>
+        <p>Consulta el plan asociado a tu cuenta y las opciones disponibles para Práctica Juris.</p>
       </div>
 
       <section class="cuenta-card cuenta-subscription-card cuenta-subscription-hero">
         <div class="cuenta-subscription-hero-copy">
-          <div class="cuenta-coming-soon">PRÓXIMAMENTE</div>
-          <h3>Suscripciones de Práctica Juris</h3>
-          <p>Estamos preparando esta sección para que puedas revisar tu plan y administrar la facturación desde un solo lugar.</p>
+          <div class="cuenta-coming-soon" style="color:#2f7a4f;border-color:color-mix(in srgb,#2f7a4f 42%,var(--line));background:color-mix(in srgb,#2f7a4f 9%,transparent);">PLAN ACTUAL</div>
+          <h3>${escapeHtml(planNombre)} · Familia</h3>
+          <p>Tu acceso al módulo Familia está habilitado. Actualmente puedes utilizar todas las funciones incluidas en el plan ${escapeHtml(planNombre)}.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;">
+            <span class="cuenta-subscription-state" style="margin-top:0;color:#2f7a4f;border-color:color-mix(in srgb,#2f7a4f 35%,var(--line));">ACTIVO</span>
+            <span class="cuenta-subscription-state" style="margin-top:0;">${escapeHtml(precioMensual)}</span>
+          </div>
         </div>
         <div class="cuenta-subscription-orbit" aria-hidden="true">
           <span class="cuenta-subscription-orbit-ring"></span>
@@ -1681,37 +1697,54 @@ function mostrarSeccionCuenta(seccion) {
       </section>
 
       <div class="cuenta-subscription-grid">
-        <section class="cuenta-card cuenta-subscription-feature">
+        <section class="cuenta-card cuenta-subscription-feature" style="min-height:260px;">
           <div class="cuenta-subscription-feature-icon">01</div>
           <div class="cuenta-subscription-feature-copy">
-            <div class="k">Suscripción actual</div>
-            <div class="cuenta-muted">Aquí verás el nombre de tu plan, estado y fecha de renovación.</div>
+            <div class="k">Tu plan incluye</div>
+            <div class="cuenta-muted" style="line-height:1.65;">
+              ✓ Gestión completa de causas de familia.<br>
+              ✓ Seguimiento de actuaciones y cronología.<br>
+              ✓ Agenda de audiencias, gestiones y fechas importantes.<br>
+              ✓ Registro y seguimiento de notificaciones y oficios.<br>
+              ✓ Organización de partes, contactos, documentos y antecedentes.<br>
+              ✓ Exportación de información de causas.<br>
+              ✓ Generación y apoyo para informes de cierre de práctica.<br>
+              ✓ Acceso seguro a credenciales de trabajo.<br>
+              ✓ Panel general para visualizar y organizar la práctica.
+            </div>
           </div>
-          <div class="cuenta-subscription-state">PENDIENTE</div>
+          <div class="cuenta-subscription-state" style="color:#2f7a4f;">INCLUIDO</div>
         </section>
 
-        <section class="cuenta-card cuenta-subscription-feature">
+        <section class="cuenta-card cuenta-subscription-feature" style="min-height:260px;">
           <div class="cuenta-subscription-feature-icon">02</div>
           <div class="cuenta-subscription-feature-copy">
-            <div class="k">Cambiar plan</div>
-            <div class="cuenta-muted">Podrás comparar alternativas y cambiar de plan cuando la función esté disponible.</div>
+            <div class="k">Planes superiores</div>
+            <div class="cuenta-muted" style="line-height:1.7;">
+              <strong style="color:var(--ink);">Plus</strong><br>
+              Modelos de escritos y apoyo con plazos.<br><br>
+              <strong style="color:var(--ink);">Pro</strong><br>
+              Todo lo anterior, más confección de minutas, conexión con PJUD para revisión de estado diario y funciones de IA con sugerencias de actuaciones y estrategias.
+            </div>
           </div>
-          <div class="cuenta-subscription-state">PENDIENTE</div>
+          <div class="cuenta-subscription-state">PRÓXIMAMENTE</div>
         </section>
 
-        <section class="cuenta-card cuenta-subscription-feature">
+        <section class="cuenta-card cuenta-subscription-feature" style="min-height:260px;">
           <div class="cuenta-subscription-feature-icon">03</div>
           <div class="cuenta-subscription-feature-copy">
-            <div class="k">Forma de pago</div>
-            <div class="cuenta-muted">Gestionarás medios de pago y antecedentes de facturación desde esta sección.</div>
+            <div class="k">Facturación y forma de pago</div>
+            <div class="cuenta-muted" style="line-height:1.7;">
+              Aquí podrás revisar tus cobros, antecedentes de facturación, método de pago y estado de renovación cuando habilitemos el sistema de suscripciones comerciales.
+            </div>
           </div>
-          <div class="cuenta-subscription-state">PENDIENTE</div>
+          <div class="cuenta-subscription-state">PRÓXIMAMENTE</div>
         </section>
       </div>
 
       <div class="cuenta-subscription-note">
         <span class="cuenta-subscription-note-dot"></span>
-        <span>No necesitas realizar ninguna acción por ahora.</span>
+        <span>Durante esta etapa de desarrollo, el acceso al plan Esencial se encuentra habilitado sin cobro automático. La facturación se activará antes de la comercialización.</span>
       </div>
     `;
     return;
