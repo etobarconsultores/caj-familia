@@ -4559,7 +4559,7 @@ function agendaEventCardHtml(e) {
         ${horas ? `<span class="ca-event-time">${escapeHtml(horas)}</span>` : ''}
         ${ubicacion ? `<span>${escapeHtml(ubicacion)}</span>` : ''}
       </div>
-      ${agendaObservacionesSinClaveZoom(e.observaciones) ? `<div class="ca-event-note">${escapeHtml(agendaObservacionesSinClaveZoom(e.observaciones))}</div>` : ''}
+      ${agendaObservacionesLimpias(e.observaciones) ? `<div class="ca-event-note">${escapeHtml(agendaObservacionesLimpias(e.observaciones))}</div>` : ''}
     </div>
     <div class="evento-badges ca-event-badges">
       <span class="stamp evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
@@ -4615,24 +4615,35 @@ function agendaListHtml(c) {
 }
 
 
-function agendaClaveZoomDesdeObservaciones(observaciones) {
+function agendaMetaDesdeObservaciones(observaciones) {
   const texto = String(observaciones || '');
-  const match = texto.match(/^\s*clave(?:\s+zoom)?\s*:\s*(.+?)\s*$/im);
-  return match ? match[1].trim() : '';
+  const leer = (re) => {
+    const m = texto.match(re);
+    return m ? m[1].trim() : '';
+  };
+  return {
+    sala: leer(/^\s*Sala\s*:\s*(.+?)\s*$/im),
+    idZoom: leer(/^\s*ID\s+Zoom\s*:\s*(.+?)\s*$/im),
+    claveZoom: leer(/^\s*Clave(?:\s+Zoom)?\s*:\s*(.+?)\s*$/im)
+  };
 }
 
-function agendaObservacionesSinClaveZoom(observaciones) {
+function agendaObservacionesLimpias(observaciones) {
   return String(observaciones || '')
     .split(/\r?\n/)
-    .filter(linea => !/^\s*clave(?:\s+zoom)?\s*:/i.test(linea))
+    .filter(linea => !/^\s*(?:Sala|ID\s+Zoom|Clave(?:\s+Zoom)?)\s*:/i.test(linea))
     .join('\n')
     .trim();
 }
 
-function agendaObservacionesConClaveZoom(observaciones, claveZoom) {
-  const limpias = agendaObservacionesSinClaveZoom(observaciones);
-  const clave = String(claveZoom || '').trim();
-  return [limpias, clave ? `Clave Zoom: ${clave}` : ''].filter(Boolean).join('\n') || null;
+function agendaObservacionesConMeta(observaciones, { sala, idZoom, claveZoom } = {}) {
+  const limpias = agendaObservacionesLimpias(observaciones);
+  const lineasMeta = [
+    String(sala || '').trim() ? `Sala: ${String(sala).trim()}` : '',
+    String(idZoom || '').trim() ? `ID Zoom: ${String(idZoom).trim()}` : '',
+    String(claveZoom || '').trim() ? `Clave Zoom: ${String(claveZoom).trim()}` : ''
+  ].filter(Boolean);
+  return [limpias, ...lineasMeta].filter(Boolean).join('\n') || null;
 }
 
 function agendaFormHtml(evento) {
@@ -4646,8 +4657,14 @@ function agendaFormHtml(evento) {
   if (e.modalidad && !MODALIDAD_OPCIONES.includes(e.modalidad)) modalidadOptions += `<option value="${escapeHtml(e.modalidad)}" selected>${escapeHtml(e.modalidad)} (valor anterior)</option>`;
   const esAudiencia = e.tipo === 'Audiencia';
   const tipoAudienciaOptions = ['', ...TIPO_AUDIENCIA_OPCIONES].map(t => `<option value="${t}" ${(e.tipoAudiencia || '') === t ? 'selected' : ''}>${t || 'Sin definir'}</option>`).join('');
-  const claveZoom = agendaClaveZoomDesdeObservaciones(e.observaciones);
-  const observacionesVisibles = agendaObservacionesSinClaveZoom(e.observaciones);
+  const agendaMeta = agendaMetaDesdeObservaciones(e.observaciones);
+  const ubicacionOriginal = String(e.ubicacion || '').trim();
+  const salaDesdeUbicacion = /^sala/i.test(ubicacionOriginal) ? ubicacionOriginal : '';
+  const sala = agendaMeta.sala || salaDesdeUbicacion;
+  const ubicacionVisible = salaDesdeUbicacion && !agendaMeta.sala ? '' : ubicacionOriginal;
+  const idZoom = agendaMeta.idZoom;
+  const claveZoom = agendaMeta.claveZoom;
+  const observacionesVisibles = agendaObservacionesLimpias(e.observaciones);
   return `
   <div class="agenda-form">
     <div class="subhead" style="margin-top:0;">${evento ? 'Editar evento' : 'Nuevo evento'}</div>
@@ -4666,12 +4683,14 @@ function agendaFormHtml(evento) {
       <div><label>Hora de término</label><input type="text" id="ev-horaTermino" value="${escapeHtml(e.horaTermino || '')}" placeholder="HH:MM"></div>
       <div><label>Prioridad</label><select id="ev-prioridad">${prioridadOptions}</select></div>
     </div>
-    <div class="agenda-grid-modalidad-ubicacion">
+    <div class="agenda-grid-sala-modalidad-ubicacion">
+      <div><label>Sala</label><input type="text" id="ev-sala" value="${escapeHtml(sala)}" placeholder="Ej. Sala N°1"></div>
       <div><label>Modalidad</label><select id="ev-modalidad">${modalidadOptions}</select></div>
-      <div><label>Ubicación</label><input type="text" id="ev-ubicacion" value="${escapeHtml(e.ubicacion || '')}"></div>
+      <div><label>Ubicación</label><input type="text" id="ev-ubicacion" value="${escapeHtml(ubicacionVisible)}" placeholder="Dirección o lugar"></div>
     </div>
     <div class="agenda-grid-video">
       <div><label>Enlace de videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
+      <div><label>ID Zoom</label><input type="text" id="ev-idZoom" value="${escapeHtml(idZoom)}" placeholder="Ej. 123 456 789"></div>
       <div><label>Clave Zoom</label><input type="text" id="ev-claveZoom" value="${escapeHtml(claveZoom)}" placeholder="Ej. 746555"></div>
     </div>
     <div><label>Observaciones</label><textarea id="ev-observaciones">${escapeHtml(observacionesVisibles)}</textarea></div>
@@ -4722,9 +4741,13 @@ function wireAgendaTab(c, panel) {
         enlace: formWrap.querySelector('#ev-enlace').value.trim() || null,
         estado: formWrap.querySelector('#ev-estado').value,
         prioridad: formWrap.querySelector('#ev-prioridad').value || null,
-        observaciones: agendaObservacionesConClaveZoom(
+        observaciones: agendaObservacionesConMeta(
           formWrap.querySelector('#ev-observaciones').value,
-          formWrap.querySelector('#ev-claveZoom').value
+          {
+            sala: formWrap.querySelector('#ev-sala').value,
+            idZoom: formWrap.querySelector('#ev-idZoom').value,
+            claveZoom: formWrap.querySelector('#ev-claveZoom').value
+          }
         )
       };
       if (!patch.fecha) { toast('Selecciona una fecha para el evento'); return; }

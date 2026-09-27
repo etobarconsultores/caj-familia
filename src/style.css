@@ -522,24 +522,24 @@ body{
   grid-template-columns:minmax(170px,.9fr) minmax(120px,.55fr) minmax(120px,.55fr) minmax(220px,1.25fr);
   gap:12px;
 }
-.agenda-grid-modalidad-ubicacion{
+.agenda-grid-sala-modalidad-ubicacion{
   display:grid;
-  grid-template-columns:minmax(180px,.7fr) minmax(280px,2fr);
+  grid-template-columns:minmax(110px,.55fr) minmax(150px,.8fr) minmax(300px,2.65fr);
   gap:12px;
 }
 .agenda-grid-video{
   display:grid;
-  grid-template-columns:minmax(0,3fr) minmax(180px,1fr);
+  grid-template-columns:minmax(280px,1.5fr) minmax(150px,.65fr) minmax(210px,1fr);
   gap:12px;
 }
 @media (max-width:900px){
   .agenda-grid-fecha-horas{ grid-template-columns:1fr 1fr; }
-  .agenda-grid-modalidad-ubicacion{ grid-template-columns:1fr 1fr; }
-  .agenda-grid-video{ grid-template-columns:2fr 1fr; }
+  .agenda-grid-sala-modalidad-ubicacion{ grid-template-columns:.7fr 1fr 2fr; }
+  .agenda-grid-video{ grid-template-columns:1.5fr .8fr 1fr; }
 }
 @media (max-width:640px){
   .agenda-grid-fecha-horas,
-  .agenda-grid-modalidad-ubicacion,
+  .agenda-grid-sala-modalidad-ubicacion,
   .agenda-grid-video{ grid-template-columns:1fr; }
 }
 .form-grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
