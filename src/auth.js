@@ -1,5 +1,15 @@
 import { supabase } from './supabaseClient.js';
 
+const APP_BASE = window.location.pathname === '/familia' || window.location.pathname.startsWith('/familia/')
+  ? '/familia'
+  : '';
+
+function appPath(path) {
+  const normalized = String(path || '');
+  return `${APP_BASE}${normalized.startsWith('/') ? normalized : `/${normalized}`}`;
+}
+
+
 export async function signUp(email, password, nombreCompleto, legalAcceptance = {}) {
   const {
     termsAccepted = false,
@@ -43,7 +53,7 @@ export async function sendPasswordReset(email) {
   // Marca explícitamente el retorno como recuperación. Así app.js puede
   // bloquear cualquier INITIAL_SESSION/SIGNED_IN que llegue antes del evento
   // PASSWORD_RECOVERY y mostrar siempre el formulario de nueva contraseña.
-  const redirectTo = `${window.location.origin}/?password_recovery=1`;
+  const redirectTo = `${window.location.origin}${APP_BASE}/?password_recovery=1`;
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) throw error;
 }
@@ -65,7 +75,7 @@ export async function validateCoreModuleAccess(session) {
     throw error;
   }
 
-  const response = await fetch('/api/security', {
+  const response = await fetch(appPath('/api/security'), {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -115,7 +125,7 @@ export async function signInFromCoreEntry(code) {
     if (signOutError) throw signOutError;
   }
 
-  const response = await fetch('/api/security', {
+  const response = await fetch(appPath('/api/security'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

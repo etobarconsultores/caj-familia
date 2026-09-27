@@ -8,6 +8,15 @@ import { generarFormulario10Docx } from './lib/formulario10Docx.js';
 import { generarFormulario9Docx } from './lib/formulario9Docx.js';
 import { generarInformePracticaDocx } from './lib/informePracticaDocx.js';
 
+const APP_BASE = window.location.pathname === '/familia' || window.location.pathname.startsWith('/familia/')
+  ? '/familia'
+  : '';
+
+function appPath(path) {
+  const normalized = String(path || '');
+  return `${APP_BASE}${normalized.startsWith('/') ? normalized : `/${normalized}`}`;
+}
+
 // ============================================================================
 // Estado
 // ============================================================================
@@ -288,7 +297,7 @@ function aplicarBrandingPracticaJuris() {
     brand.insertAdjacentHTML('afterbegin', `
       <div class="pj-brand-sidebar" aria-label="Práctica Juris">
         <img
-          src="/assets/branding/practica-juris-nombre.png"
+          src="${appPath('/assets/branding/practica-juris-nombre.png')}"
           alt="Práctica Juris"
           class="pj-brand-sidebar-img"
           draggable="false"
@@ -303,7 +312,7 @@ function aplicarBrandingPracticaJuris() {
     authCard.insertAdjacentHTML('afterbegin', `
       <div class="pj-brand-login" aria-label="Práctica Juris">
         <img
-          src="/assets/branding/practica-juris-logo-completo.png"
+          src="${appPath('/assets/branding/practica-juris-logo-completo.png')}"
           alt="Práctica Juris"
           class="pj-brand-login-img"
           draggable="false"
@@ -334,7 +343,7 @@ function showApp() {
   if (loginPassword) loginPassword.value = '';
 }
 
-const PRACTICA_JURIS_CORE_URL = 'https://practicajuris-core.vercel.app';
+const PRACTICA_JURIS_CORE_URL = `${window.location.origin}/`;
 
 async function cerrarSesionYVolverAlCore() {
   const { signOut } = await import('./auth.js');
@@ -1691,7 +1700,7 @@ function mostrarSeccionCuenta(seccion) {
         <div class="cuenta-subscription-orbit" aria-hidden="true">
           <span class="cuenta-subscription-orbit-ring"></span>
           <span class="cuenta-subscription-orbit-core">
-            <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="cuenta-subscription-orbit-logo" draggable="false">
+            <img src="${appPath('/assets/branding/practica-juris-isotipo.png')}" alt="" class="cuenta-subscription-orbit-logo" draggable="false">
           </span>
         </div>
       </section>
@@ -3966,8 +3975,8 @@ function renderFichaHtml(data) {
   <div class="ficha-doc">
     <div class="ficha-header">
       <div class="ficha-brand-row">
-        <img src="/assets/branding/practica-juris-logo-completo.png" alt="Práctica Juris" class="ficha-brand-logo" draggable="false">
-        <img src="/assets/branding/practica-juris-isotipo.png" alt="" class="ficha-brand-isotipo" draggable="false">
+        <img src="${appPath('/assets/branding/practica-juris-logo-completo.png')}" alt="Práctica Juris" class="ficha-brand-logo" draggable="false">
+        <img src="${appPath('/assets/branding/practica-juris-isotipo.png')}" alt="" class="ficha-brand-isotipo" draggable="false">
       </div>
       <div class="ficha-brand">${escapeHtml(data.brand)}</div>
       <h2>${escapeHtml(data.titulo)}</h2>
@@ -4141,8 +4150,8 @@ async function renderFichaPdf(data) {
   // imágenes no cargan, el PDF continúa normalmente con la marca textual.
   try {
     const [logo, isotipo] = await Promise.all([
-      cargarImagenDataUrl('/assets/branding/practica-juris-logo-completo.png'),
-      cargarImagenDataUrl('/assets/branding/practica-juris-isotipo.png')
+      cargarImagenDataUrl(appPath('/assets/branding/practica-juris-logo-completo.png')),
+      cargarImagenDataUrl(appPath('/assets/branding/practica-juris-isotipo.png'))
     ]);
     pdf.addImage(logo, 'PNG', margin, w.y - 4, 46, 13);
     pdf.addImage(isotipo, 'PNG', margin + contentWidth - 13, w.y - 4, 13, 13);

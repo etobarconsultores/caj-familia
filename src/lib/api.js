@@ -1,5 +1,15 @@
 import { supabase } from '../supabaseClient.js';
 
+const APP_BASE = window.location.pathname === '/familia' || window.location.pathname.startsWith('/familia/')
+  ? '/familia'
+  : '';
+
+function appPath(path) {
+  const normalized = String(path || '');
+  return `${APP_BASE}${normalized.startsWith('/') ? normalized : `/${normalized}`}`;
+}
+
+
 // ============================================================================
 // Helpers de mapeo entre columnas de Supabase (snake_case) y el modelo de la
 // aplicación (camelCase), para no tener que tocar la lógica de la UI.
@@ -973,7 +983,7 @@ async function googleApiFetch(ruta, opciones = {}) {
   const token = sessionData?.session?.access_token;
   if (!token) throw new Error('Sesión no disponible. Vuelve a iniciar sesión.');
 
-  const resp = await fetch(`/api/google/${ruta}`, {
+  const resp = await fetch(appPath(`/api/google/${ruta}`), {
     method: opciones.method || 'GET',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -1038,7 +1048,7 @@ async function securityApiFetch(operation, body = {}) {
   const token = sessionData?.session?.access_token;
   if (!token) throw new Error('Sesión no disponible. Vuelve a iniciar sesión.');
 
-  const resp = await fetch('/api/security', {
+  const resp = await fetch(appPath('/api/security'), {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
