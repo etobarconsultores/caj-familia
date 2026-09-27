@@ -8878,3 +8878,23 @@ html[data-theme="light"] .ig-subcard{
     border-left-width:3px;
   }
 }
+
+
+/* Ajuste de desplazamiento en Administrar cuenta:
+   deja espacio real al final del contenido y evita que el último bloque
+   quede pegado al borde inferior del panel. */
+.cuenta-contenido{
+  padding-bottom:44px;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+
+.cuenta-subscription-note{
+  margin-bottom:8px;
+}
+
+@media (max-width:760px){
+  .cuenta-contenido{
+    padding-bottom:44px;
+  }
+}
