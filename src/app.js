@@ -4559,7 +4559,7 @@ function agendaEventCardHtml(e) {
         ${horas ? `<span class="ca-event-time">${escapeHtml(horas)}</span>` : ''}
         ${ubicacion ? `<span>${escapeHtml(ubicacion)}</span>` : ''}
       </div>
-      ${e.observaciones ? `<div class="ca-event-note">${escapeHtml(e.observaciones)}</div>` : ''}
+      ${agendaObservacionesSinClaveZoom(e.observaciones) ? `<div class="ca-event-note">${escapeHtml(agendaObservacionesSinClaveZoom(e.observaciones))}</div>` : ''}
     </div>
     <div class="evento-badges ca-event-badges">
       <span class="stamp evento-estado-${eventoEstadoClass(e.estado)}">${escapeHtml(e.estado)}</span>
@@ -4614,6 +4614,27 @@ function agendaListHtml(c) {
   return html;
 }
 
+
+function agendaClaveZoomDesdeObservaciones(observaciones) {
+  const texto = String(observaciones || '');
+  const match = texto.match(/^\s*clave(?:\s+zoom)?\s*:\s*(.+?)\s*$/im);
+  return match ? match[1].trim() : '';
+}
+
+function agendaObservacionesSinClaveZoom(observaciones) {
+  return String(observaciones || '')
+    .split(/\r?\n/)
+    .filter(linea => !/^\s*clave(?:\s+zoom)?\s*:/i.test(linea))
+    .join('\n')
+    .trim();
+}
+
+function agendaObservacionesConClaveZoom(observaciones, claveZoom) {
+  const limpias = agendaObservacionesSinClaveZoom(observaciones);
+  const clave = String(claveZoom || '').trim();
+  return [limpias, clave ? `Clave Zoom: ${clave}` : ''].filter(Boolean).join('\n') || null;
+}
+
 function agendaFormHtml(evento) {
   const e = evento || { tipo: 'Audiencia', estado: 'Pendiente' };
   let tipoOptions = AGENDA_TIPOS_FORM.map(t => `<option value="${t}" ${e.tipo === t ? 'selected' : ''}>${t}</option>`).join('');
@@ -4625,6 +4646,8 @@ function agendaFormHtml(evento) {
   if (e.modalidad && !MODALIDAD_OPCIONES.includes(e.modalidad)) modalidadOptions += `<option value="${escapeHtml(e.modalidad)}" selected>${escapeHtml(e.modalidad)} (valor anterior)</option>`;
   const esAudiencia = e.tipo === 'Audiencia';
   const tipoAudienciaOptions = ['', ...TIPO_AUDIENCIA_OPCIONES].map(t => `<option value="${t}" ${(e.tipoAudiencia || '') === t ? 'selected' : ''}>${t || 'Sin definir'}</option>`).join('');
+  const claveZoom = agendaClaveZoomDesdeObservaciones(e.observaciones);
+  const observacionesVisibles = agendaObservacionesSinClaveZoom(e.observaciones);
   return `
   <div class="agenda-form">
     <div class="subhead" style="margin-top:0;">${evento ? 'Editar evento' : 'Nuevo evento'}</div>
@@ -4637,20 +4660,21 @@ function agendaFormHtml(evento) {
       <select id="ev-tipoaudiencia">${tipoAudienciaOptions}</select>
     </div>
     <div><label>Descripción</label><textarea id="ev-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
-    <div class="form-grid2">
+    <div class="agenda-grid-fecha-horas">
       <div><label>Fecha</label><input type="date" id="ev-fecha" value="${escapeHtml(e.fecha || '')}"></div>
-      <div><label>Prioridad</label><select id="ev-prioridad">${prioridadOptions}</select></div>
-    </div>
-    <div class="form-grid2">
       <div><label>Hora de inicio</label><input type="text" id="ev-horaInicio" value="${escapeHtml(e.horaInicio || '')}" placeholder="HH:MM"></div>
       <div><label>Hora de término</label><input type="text" id="ev-horaTermino" value="${escapeHtml(e.horaTermino || '')}" placeholder="HH:MM"></div>
+      <div><label>Prioridad</label><select id="ev-prioridad">${prioridadOptions}</select></div>
     </div>
-    <div class="form-grid2">
+    <div class="agenda-grid-modalidad-ubicacion">
       <div><label>Modalidad</label><select id="ev-modalidad">${modalidadOptions}</select></div>
       <div><label>Ubicación</label><input type="text" id="ev-ubicacion" value="${escapeHtml(e.ubicacion || '')}"></div>
     </div>
-    <div><label>Enlace de videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
-    <div><label>Observaciones</label><textarea id="ev-observaciones">${escapeHtml(e.observaciones || '')}</textarea></div>
+    <div class="agenda-grid-video">
+      <div><label>Enlace de videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
+      <div><label>Clave Zoom</label><input type="text" id="ev-claveZoom" value="${escapeHtml(claveZoom)}" placeholder="Ej. 746555"></div>
+    </div>
+    <div><label>Observaciones</label><textarea id="ev-observaciones">${escapeHtml(observacionesVisibles)}</textarea></div>
     <div style="display:flex; gap:8px; margin-top:6px;">
       <button class="btn primary" id="save-evento" type="button">Guardar evento</button>
       <button class="btn ghost" id="cancel-evento" type="button">Cancelar</button>
@@ -4698,7 +4722,10 @@ function wireAgendaTab(c, panel) {
         enlace: formWrap.querySelector('#ev-enlace').value.trim() || null,
         estado: formWrap.querySelector('#ev-estado').value,
         prioridad: formWrap.querySelector('#ev-prioridad').value || null,
-        observaciones: formWrap.querySelector('#ev-observaciones').value.trim() || null
+        observaciones: agendaObservacionesConClaveZoom(
+          formWrap.querySelector('#ev-observaciones').value,
+          formWrap.querySelector('#ev-claveZoom').value
+        )
       };
       if (!patch.fecha) { toast('Selecciona una fecha para el evento'); return; }
       try {

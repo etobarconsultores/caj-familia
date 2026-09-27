@@ -515,6 +515,33 @@ body{
 }
 .modal-form textarea{ min-height:70px; resize:vertical; }
 .form-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+/* Agenda · distribución compacta de audiencia */
+.agenda-grid-fecha-horas{
+  display:grid;
+  grid-template-columns:minmax(170px,.9fr) minmax(120px,.55fr) minmax(120px,.55fr) minmax(220px,1.25fr);
+  gap:12px;
+}
+.agenda-grid-modalidad-ubicacion{
+  display:grid;
+  grid-template-columns:minmax(180px,.7fr) minmax(280px,2fr);
+  gap:12px;
+}
+.agenda-grid-video{
+  display:grid;
+  grid-template-columns:minmax(0,3fr) minmax(180px,1fr);
+  gap:12px;
+}
+@media (max-width:900px){
+  .agenda-grid-fecha-horas{ grid-template-columns:1fr 1fr; }
+  .agenda-grid-modalidad-ubicacion{ grid-template-columns:1fr 1fr; }
+  .agenda-grid-video{ grid-template-columns:2fr 1fr; }
+}
+@media (max-width:640px){
+  .agenda-grid-fecha-horas,
+  .agenda-grid-modalidad-ubicacion,
+  .agenda-grid-video{ grid-template-columns:1fr; }
+}
 .form-grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
 @media (max-width:820px){ .form-grid4{ grid-template-columns:1fr 1fr; } }
 @media (max-width:640px){ .form-grid4{ grid-template-columns:1fr; } }
@@ -6892,16 +6919,18 @@ html[data-theme="light"] .if-inst-next{
    ========================================================================== */
 
 .practica-jornada-config{
+  grid-column:1 / -1;
   border-top:1px solid var(--line);
   padding-top:14px;
   margin-top:14px;
 }
 .practica-jornada-dias{
   display:flex;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
   gap:8px;
   margin-top:10px;
   width:100%;
+  align-items:center;
 }
 .practica-dia-check{
   display:inline-flex;
@@ -6923,8 +6952,9 @@ html[data-theme="light"] .if-inst-next{
   height:15px;
   margin:0;
 }
-.practica-dia-check span{
-  flex:0 0 auto;
+.practica-dia-check span{ flex:0 0 auto; }
+@media (max-width:760px){
+  .practica-jornada-dias{ flex-wrap:wrap; }
 }
 .practica-dia-check:has(input:checked){
   border-color:var(--accent);
@@ -6941,6 +6971,7 @@ html[data-theme="light"] .if-inst-next{
   margin-top:10px;
 }
 .practica-jornada-ayuda{ margin-top:8px; line-height:1.45; }
+
 
 .if-att-panel{
   margin-top:16px;
