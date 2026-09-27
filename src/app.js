@@ -343,7 +343,7 @@ function showApp() {
   if (loginPassword) loginPassword.value = '';
 }
 
-const PRACTICA_JURIS_CORE_URL = `${window.location.origin}/`;
+const PRACTICA_JURIS_CORE_URL = APP_BASE ? `${window.location.origin}/` : 'https://practicajuris.cl/';
 
 async function cerrarSesionYVolverAlCore() {
   const { signOut } = await import('./auth.js');
@@ -1876,13 +1876,25 @@ async function verificarCierrePendienteYEntrar(session) {
   // camino, así que nadie más la habría cerrado.
   cerrarPantallaCierrePendiente();
 
-  // La entrada federada desde Core ya exige el flujo legal central. En ese
-  // caso no repetimos la aceptación dentro de Familia. Los accesos directos
-  // al módulo conservan el gate local como respaldo.
+  // La aceptación legal es central en Práctica Juris. Si esta pestaña ya fue
+  // validada por Core, entramos de inmediato. Si se abrió directamente
+  // /familia/ con una sesión del módulo ya existente, revalidamos
+  // el permiso central antes de omitir el gate legal local.
   if (legalYaValidadoPorCore(session.user.id)) {
     cerrarPantallaLegalGate();
     await onSessionReady(session);
     return;
+  }
+
+  try {
+    const { validateCoreModuleAccess } = await import('./auth.js');
+    await validateCoreModuleAccess(session);
+    marcarLegalValidadoPorCore(session.user.id);
+    cerrarPantallaLegalGate();
+    await onSessionReady(session);
+    return;
+  } catch (e) {
+    console.warn('No se pudo confirmar la validación legal central; se conserva el respaldo local.');
   }
 
   await verificarLegalYEntrar(session);
