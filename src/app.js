@@ -2861,8 +2861,10 @@ function hitosHtml(c) {
 const NOTIF_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero'];
 
 function notifDomicilioRowHtml(d, pIdx, dIdx) {
+  const desdeOficios = d.origenOficios === true;
+  const bloqueo = desdeOficios ? 'readonly title="Sincronizado automáticamente desde Oficios"' : '';
   return `<tr data-p-idx="${pIdx}" data-d-idx="${dIdx}">
-    <td><input type="text" class="np-domicilio" value="${escapeHtml(d.domicilio || '')}" placeholder="Domicilio o resultado de búsqueda"></td>
+    <td><input type="text" class="np-domicilio" value="${escapeHtml(d.domicilio || '')}" placeholder="Domicilio o resultado de búsqueda" ${bloqueo}></td>
     <td><select class="np-dom-estado">
       <option value="" ${!d.estado ? 'selected' : ''}>—</option>
       <option value="Negativa" ${d.estado === 'Negativa' ? 'selected' : ''}>Negativa</option>
@@ -2871,8 +2873,11 @@ function notifDomicilioRowHtml(d, pIdx, dIdx) {
     </select></td>
     <td><input type="date" class="np-dom-fecha" value="${escapeHtml(d.fecha || '')}"></td>
     <td><input type="text" class="np-dom-folio" value="${escapeHtml(d.folio || '')}" placeholder="Folio"></td>
-    <td><input type="text" class="np-dom-informado" value="${escapeHtml(d.informadoPor || '')}" placeholder="Nombre"></td>
-    <td class="col-del"><button class="notif-row-del" data-action="np-quitar-domicilio" data-p-idx="${pIdx}" data-d-idx="${dIdx}" aria-label="Quitar domicilio">&times;</button></td>
+    <td><input type="text" class="np-dom-informado" value="${escapeHtml(d.informadoPor || '')}" placeholder="Nombre" ${bloqueo}></td>
+    <td class="col-del">${desdeOficios
+      ? '<span title="Sincronizado desde Oficios" aria-label="Sincronizado desde Oficios">↔</span>'
+      : `<button class="notif-row-del" data-action="np-quitar-domicilio" data-p-idx="${pIdx}" data-d-idx="${dIdx}" aria-label="Quitar domicilio">&times;</button>`
+    }</td>
   </tr>`;
 }
 
@@ -3005,7 +3010,11 @@ function wireNotificacionTab(c, panel) {
       parte: p.parte,
       nombre: nombreDesdeAntecedentes || nombreSeguro,
       estadoNotificacion: p.estadoNotificacion,
-      domicilios: (p.domicilios || []).map(d => ({ id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha, folio: d.folio, informadoPor: d.informadoPor }))
+      domicilios: (p.domicilios || []).map(d => ({
+        id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha, folio: d.folio,
+        informadoPor: d.informadoPor, origenOficios: d.origenOficios === true,
+        oficioInstitucionIds: Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds : []
+      }))
     };
   });
 
@@ -3049,7 +3058,7 @@ function wireNotificacionTab(c, panel) {
     wrap.addEventListener('click', (e) => {
       const addBtn = e.target.closest('[data-action="np-agregar-domicilio"]');
       if (addBtn) {
-        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].domicilios.push({ id: null, domicilio: '', estado: '', fecha: '', folio: '', informadoPor: '' });
+        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].domicilios.push({ id: null, domicilio: '', estado: '', fecha: '', folio: '', informadoPor: '', origenOficios: false, oficioInstitucionIds: [] });
         refrescar();
         return;
       }
@@ -3093,7 +3102,12 @@ function wireNotificacionTab(c, panel) {
           const d = p.domicilios[dIdx];
           if (!d.domicilio && !d.estado && !d.fecha && !d.folio && !d.informadoPor) continue;
           let domId = d.id;
-          const dPatch = { domicilio: d.domicilio || null, estado: d.estado || null, fecha: d.fecha || null, folio: d.folio || null, informadoPor: d.informadoPor || null, orden: dIdx };
+          const dPatch = {
+            domicilio: d.domicilio || null, estado: d.estado || null, fecha: d.fecha || null,
+            folio: d.folio || null, informadoPor: d.informadoPor || null, orden: dIdx,
+            origenOficios: d.origenOficios === true,
+            oficioInstitucionIds: Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds : []
+          };
           if (domId) await api.updateNotificacionDomicilio(domId, dPatch);
           else { const creado = await api.createNotificacionDomicilio(personaId, dPatch); domId = creado.id; }
           idsDomiciliosFinales.add(domId);
@@ -3123,6 +3137,7 @@ function oficioInstitucionRowHtml(inst, pIdx, iIdx) {
     <td><select class="oi-respuesta"><option value="">Sin definir</option>${OFICIO_RESPUESTA_OPCIONES.map(o => `<option value="${o}" ${inst.respuesta === o ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
     <td><input type="date" class="oi-fecha" value="${escapeHtml(inst.fecha || '')}"></td>
     <td><input type="text" class="oi-folio" value="${escapeHtml(inst.folio || '')}"></td>
+    <td><input type="text" class="oi-domicilio" value="${escapeHtml(inst.domicilio || '')}" placeholder="Domicilio informado"></td>
     <td class="col-del"><button class="notif-row-del" data-action="oi-quitar-institucion" data-p-idx="${pIdx}" data-i-idx="${iIdx}">&times;</button></td>
   </tr>`;
 }
@@ -3184,7 +3199,7 @@ function oficioPersonaBlockHtml(persona, idx) {
         </div>
         ${instituciones.length ? `<div class="notif-table-wrap">
           <table class="notif-table oficio-table">
-            <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-del"></th></tr></thead>
+            <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-domicilio">Domicilio</th><th class="col-del"></th></tr></thead>
             <tbody class="op-instituciones-tbody" data-idx="${idx}">${instituciones.map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii)).join('')}</tbody>
           </table>
         </div>` : `<div class="oficio-inst-empty">Sin instituciones registradas</div>`}
@@ -3225,6 +3240,218 @@ function oficiosTabHtml(c) {
   `;
 }
 
+
+// ============================================================================
+// Integración Oficios -> Notificación
+// ============================================================================
+// La comparación de domicilios es deliberadamente conservadora: normaliza
+// diferencias de escritura comunes ("calle Sur N° 701" / "Sur 701"), pero
+// nunca fusiona automáticamente direcciones cuyos números principales difieren.
+function partesDomicilioComparable(valor) {
+  let s = String(valor || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  // Quita complementos de unidad para que "Sur 701, depto 4" pueda coincidir
+  // con "Calle Sur 701" sin confundir el 4 con la numeración principal.
+  s = s.replace(/\b(?:depto|dpto|departamento|casa|block|bloque|torre|piso|oficina|local)\s*[-#n°º.]?\s*[a-z0-9-]+\b/g, ' ');
+  s = s.replace(/[º°#.,;:/\\()[\]{}_-]+/g, ' ');
+  s = s.replace(/\b(?:numero|nro|num|n)\b/g, ' ');
+  s = s.replace(/\b(?:avenida|avda|av|calle|cl|pasaje|pje)\b/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+
+  const tokens = s.split(' ').filter(Boolean);
+  const numeros = tokens.filter(t => /^\d+[a-z]?$/.test(t));
+  const palabras = tokens.filter(t => !/^\d+[a-z]?$/.test(t) && t.length > 1);
+  return { limpio: s, numeros, palabras };
+}
+
+function domiciliosEquivalentes(a, b) {
+  const aa = partesDomicilioComparable(a);
+  const bb = partesDomicilioComparable(b);
+  if (!aa.limpio || !bb.limpio) return false;
+  if (aa.limpio === bb.limpio) return true;
+
+  const numeroA = aa.numeros[0] || '';
+  const numeroB = bb.numeros[0] || '';
+  if (numeroA && numeroB && numeroA !== numeroB) return false;
+
+  const setA = new Set(aa.palabras);
+  const setB = new Set(bb.palabras);
+  if (!setA.size || !setB.size) return false;
+
+  const compartidas = [...setA].filter(x => setB.has(x)).length;
+  const union = new Set([...setA, ...setB]).size;
+  const jaccard = union ? compartidas / union : 0;
+  const menor = setA.size <= setB.size ? setA : setB;
+  const mayor = setA.size <= setB.size ? setB : setA;
+  const menorContenido = [...menor].every(x => mayor.has(x));
+
+  // Con numeración coincidente basta que el nombre de vía más corto esté
+  // contenido en el más largo. Sin numeración exigimos una similitud alta.
+  if (numeroA && numeroB && numeroA === numeroB && menorContenido && compartidas >= 1) return true;
+  if (numeroA && numeroB && numeroA === numeroB && jaccard >= 0.60) return true;
+  return !numeroA && !numeroB && jaccard >= 0.80;
+}
+
+function domicilioMasCompleto(a, b) {
+  const aa = String(a || '').trim();
+  const bb = String(b || '').trim();
+  if (!aa) return bb;
+  if (!bb) return aa;
+  return bb.length > aa.length ? bb : aa;
+}
+
+function nombresInformantesUnicos(valores) {
+  const out = [];
+  const vistos = new Set();
+  for (const valor of valores || []) {
+    const piezas = String(valor || '').split(/\s*[·;,]\s*/).map(x => x.trim()).filter(Boolean);
+    for (const pieza of piezas) {
+      const key = pieza.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (!vistos.has(key)) {
+        vistos.add(key);
+        out.push(pieza);
+      }
+    }
+  }
+  return out;
+}
+
+function agruparDomiciliosInformados(instituciones) {
+  const grupos = [];
+  for (const inst of instituciones || []) {
+    const domicilio = String(inst.domicilio || '').trim();
+    const institucion = String(inst.institucion || '').trim();
+    if (!domicilio || !institucion) continue;
+
+    let grupo = grupos.find(g => domiciliosEquivalentes(g.domicilio, domicilio));
+    if (!grupo) {
+      grupo = { domicilio, informantes: [], ids: [] };
+      grupos.push(grupo);
+    } else {
+      grupo.domicilio = domicilioMasCompleto(grupo.domicilio, domicilio);
+    }
+    grupo.informantes = nombresInformantesUnicos([...grupo.informantes, institucion]);
+    if (inst.id && !grupo.ids.includes(String(inst.id))) grupo.ids.push(String(inst.id));
+  }
+  return grupos;
+}
+
+function mismaPersonaOficioNotificacion(oficioPersona, notifPersona, todasNotif) {
+  if (!oficioPersona || !notifPersona || oficioPersona.parte !== notifPersona.parte) return false;
+  const norm = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const no = norm(oficioPersona.nombre);
+  const nn = norm(notifPersona.nombre);
+  if (no && nn && no === nn) return true;
+  return (todasNotif || []).filter(p => p.parte === oficioPersona.parte).length === 1;
+}
+
+async function sincronizarDomiciliosOficiosConNotificacion(c, personasOficios) {
+  const notif = (c.notificacionPersonas || []).map(p => ({
+    ...p,
+    domicilios: (p.domicilios || []).map(d => ({
+      ...d,
+      oficioInstitucionIds: Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds.map(String) : []
+    }))
+  }));
+
+  let creados = 0;
+  let actualizados = 0;
+  let depurados = 0;
+
+  for (const op of personasOficios || []) {
+    const grupos = agruparDomiciliosInformados(op.instituciones || []);
+    if (!grupos.length) continue;
+
+    let np = notif.find(p => mismaPersonaOficioNotificacion(op, p, notif));
+    if (!np) {
+      const creada = await api.createNotificacionPersona(CURRENT_USER.id, c.id, {
+        parte: op.parte,
+        nombre: op.nombre,
+        estadoNotificacion: null,
+        orden: notif.length
+      });
+      np = {
+        id: creada.id,
+        parte: op.parte,
+        nombre: op.nombre,
+        estadoNotificacion: null,
+        orden: notif.length,
+        domicilios: []
+      };
+      notif.push(np);
+    }
+
+    const idsActivos = new Set(grupos.flatMap(g => g.ids.map(String)));
+
+    for (const grupo of grupos) {
+      let existente = (np.domicilios || []).find(d => {
+        const ids = Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds.map(String) : [];
+        return ids.some(id => grupo.ids.includes(id));
+      });
+
+      if (!existente) {
+        existente = (np.domicilios || []).find(d => domiciliosEquivalentes(d.domicilio, grupo.domicilio));
+      }
+
+      const informadoPor = nombresInformantesUnicos(grupo.informantes).join(' · ');
+
+      if (existente) {
+        const eraAuto = existente.origenOficios === true;
+        const patch = {
+          domicilio: eraAuto ? grupo.domicilio : (existente.domicilio || grupo.domicilio),
+          informadoPor: eraAuto
+            ? informadoPor
+            : nombresInformantesUnicos([existente.informadoPor, informadoPor]).join(' · '),
+          origenOficios: true,
+          oficioInstitucionIds: grupo.ids,
+          orden: existente.orden ?? np.domicilios.indexOf(existente)
+        };
+        await api.updateNotificacionDomicilio(existente.id, patch);
+        Object.assign(existente, patch);
+        actualizados++;
+      } else {
+        const patch = {
+          domicilio: grupo.domicilio,
+          estado: null,
+          fecha: null,
+          folio: null,
+          informadoPor,
+          origenOficios: true,
+          oficioInstitucionIds: grupo.ids,
+          orden: (np.domicilios || []).length
+        };
+        const creado = await api.createNotificacionDomicilio(np.id, patch);
+        np.domicilios.push({ id: creado.id, ...patch });
+        creados++;
+      }
+    }
+
+    // Si una fila automática ya no tiene ninguna institución de origen activa,
+    // solo se retira cuando todavía no tiene gestión manual registrada.
+    for (const d of [...(np.domicilios || [])]) {
+      if (d.origenOficios !== true) continue;
+      const ids = Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds.map(String) : [];
+      const sigueActiva = ids.some(id => idsActivos.has(id));
+      if (sigueActiva) continue;
+
+      if (!d.estado && !d.fecha && !d.folio) {
+        await api.deleteNotificacionDomicilio(d.id);
+        np.domicilios = np.domicilios.filter(x => x.id !== d.id);
+        depurados++;
+      } else {
+        const patch = { origenOficios: false, oficioInstitucionIds: [] };
+        await api.updateNotificacionDomicilio(d.id, patch);
+        Object.assign(d, patch);
+      }
+    }
+  }
+
+  c.notificacionPersonas = notif;
+  return { creados, actualizados, depurados };
+}
+
 function wireOficiosTab(c, panel) {
   let estadoPersonas = (c.oficiosPersonas || []).map(p => {
     const nombreDesdeAntecedentes = nombreOficioDesdeAntecedentes(c, p.parte);
@@ -3235,7 +3462,10 @@ function wireOficiosTab(c, panel) {
       id: p.id,
       parte: p.parte,
       nombre: nombreDesdeAntecedentes || nombreSeguro,
-      instituciones: (p.instituciones || []).map(i => ({ id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta, fecha: i.fecha, folio: i.folio }))
+      instituciones: (p.instituciones || []).map(i => ({
+        id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta,
+        fecha: i.fecha, folio: i.folio, domicilio: i.domicilio || ''
+      }))
     };
   });
 
@@ -3274,11 +3504,12 @@ function wireOficiosTab(c, panel) {
       if (e.target.classList.contains('oi-respuesta')) inst.respuesta = e.target.value || null;
       if (e.target.classList.contains('oi-fecha')) inst.fecha = e.target.value || null;
       if (e.target.classList.contains('oi-folio')) inst.folio = e.target.value.trim();
+      if (e.target.classList.contains('oi-domicilio')) inst.domicilio = e.target.value.trim();
     });
     wrap.addEventListener('click', (e) => {
       const addBtn = e.target.closest('[data-action="op-agregar-institucion"]');
       if (addBtn) {
-        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].instituciones.push({ id: null, institucion: '', tramitacion: '', respuesta: '', fecha: '', folio: '' });
+        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].instituciones.push({ id: null, institucion: '', tramitacion: '', respuesta: '', fecha: '', folio: '', domicilio: '' });
         refrescar();
         return;
       }
@@ -3314,9 +3545,13 @@ function wireOficiosTab(c, panel) {
         const nuevaListaInstituciones = [];
         for (let iIdx = 0; iIdx < p.instituciones.length; iIdx++) {
           const inst = p.instituciones[iIdx];
-          if (!inst.institucion && !inst.tramitacion && !inst.respuesta && !inst.fecha && !inst.folio) continue;
+          if (!inst.institucion && !inst.tramitacion && !inst.respuesta && !inst.fecha && !inst.folio && !inst.domicilio) continue;
           let instId = inst.id;
-          const iPatch = { institucion: inst.institucion || null, tramitacion: inst.tramitacion || null, respuesta: inst.respuesta || null, fecha: inst.fecha || null, folio: inst.folio || null, orden: iIdx };
+          const iPatch = {
+            institucion: inst.institucion || null, tramitacion: inst.tramitacion || null,
+            respuesta: inst.respuesta || null, fecha: inst.fecha || null,
+            folio: inst.folio || null, domicilio: inst.domicilio || null, orden: iIdx
+          };
           if (instId) await api.updateOficioInstitucion(instId, iPatch);
           else { const creado = await api.createOficioInstitucion(personaId, iPatch); instId = creado.id; }
           idsInstitucionesFinales.add(instId);
@@ -3329,7 +3564,11 @@ function wireOficiosTab(c, panel) {
       for (const op of originalesPersonas) if (!idsPersonasFinales.has(op.id)) await api.deleteOficioPersona(op.id);
 
       c.oficiosPersonas = nuevaListaPersonas;
-      toast('Oficios guardados');
+      const sync = await sincronizarDomiciliosOficiosConNotificacion(c, nuevaListaPersonas);
+      const cambiosNotif = sync.creados + sync.actualizados + sync.depurados;
+      toast(cambiosNotif
+        ? `Oficios guardados · Notificación sincronizada (${cambiosNotif})`
+        : 'Oficios guardados');
       openDetail(c.id, 'oficios');
     } catch (e) { toast('No se pudo guardar: ' + e.message); }
   });

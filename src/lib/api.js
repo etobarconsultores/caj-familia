@@ -136,7 +136,9 @@ function causaFromDb(row) {
           .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
           .map(d => ({
             id: d.id, domicilio: d.domicilio, estado: d.estado, fecha: d.fecha,
-            folio: d.folio, informadoPor: d.informado_por, orden: d.orden
+            folio: d.folio, informadoPor: d.informado_por, orden: d.orden,
+            origenOficios: d.origen_oficios === true,
+            oficioInstitucionIds: Array.isArray(d.oficio_institucion_ids) ? d.oficio_institucion_ids : []
           }))
       })),
     oficiosPersonas: (row.oficios_personas || [])
@@ -149,7 +151,8 @@ function causaFromDb(row) {
           .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
           .map(i => ({
             id: i.id, institucion: i.institucion, tramitacion: i.tramitacion,
-            respuesta: i.respuesta, fecha: i.fecha, folio: i.folio, orden: i.orden
+            respuesta: i.respuesta, fecha: i.fecha, folio: i.folio,
+            domicilio: i.domicilio, orden: i.orden
           }))
       }))
   };
@@ -451,7 +454,11 @@ export async function deleteNotificacionPersona(id) {
 }
 
 function notifDomicilioPatchToDb(patch) {
-  const map = { domicilio: 'domicilio', estado: 'estado', fecha: 'fecha', folio: 'folio', informadoPor: 'informado_por', orden: 'orden' };
+  const map = {
+    domicilio: 'domicilio', estado: 'estado', fecha: 'fecha', folio: 'folio',
+    informadoPor: 'informado_por', orden: 'orden', origenOficios: 'origen_oficios',
+    oficioInstitucionIds: 'oficio_institucion_ids'
+  };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
   return out;
@@ -499,7 +506,10 @@ export async function deleteOficioPersona(id) {
 }
 
 function oficioInstitucionPatchToDb(patch) {
-  const map = { institucion: 'institucion', tramitacion: 'tramitacion', respuesta: 'respuesta', fecha: 'fecha', folio: 'folio', orden: 'orden' };
+  const map = {
+    institucion: 'institucion', tramitacion: 'tramitacion', respuesta: 'respuesta',
+    fecha: 'fecha', folio: 'folio', domicilio: 'domicilio', orden: 'orden'
+  };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
   return out;
