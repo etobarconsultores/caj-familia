@@ -3113,7 +3113,7 @@ function wireNotificacionTab(c, panel) {
 }
 
 const OFICIO_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero'];
-const OFICIO_TRAMITACION_OPCIONES = ['Correo enviado a usuario/a', 'Tramitada por mano', 'Tramitada por correo', 'Pendiente de tramitar'];
+const OFICIO_TRAMITACION_OPCIONES = ['Correo enviado a usuario/a', 'Tramitada por mano', 'Tramitada por correo', 'Por interconexión', 'Pendiente de tramitar'];
 const OFICIO_RESPUESTA_OPCIONES = ['Contestada', 'Pendiente'];
 
 function oficioInstitucionRowHtml(inst, pIdx, iIdx) {
