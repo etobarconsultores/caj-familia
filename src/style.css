@@ -460,6 +460,7 @@ body{
 @media (max-width:640px){
   .overlay{ padding:10px; }
   .detail-panel{ width:100%; height:96vh; max-height:96vh; border-radius:8px; }
+  #overlay-new .detail-panel-new-case{ width:100%; height:96vh; max-height:96vh; }
   .detail-head{ padding:18px 16px 14px; }
   .detail-tabs{ padding:0 16px; }
   .dtab-content{ padding:16px 16px 22px; }
@@ -6896,21 +6897,25 @@ html[data-theme="light"] .if-inst-next{
   margin-top:14px;
 }
 .practica-jornada-dias{
-  display:flex;
-  flex-wrap:wrap;
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
   gap:8px;
   margin-top:10px;
+  width:100%;
 }
 .practica-dia-check{
-  display:inline-flex;
+  display:flex;
   align-items:center;
+  justify-content:center;
   gap:6px;
-  padding:7px 10px;
+  min-width:0;
+  padding:7px 8px;
   border:1px solid var(--line);
   border-radius:8px;
   background:var(--panel);
   font-size:12px;
   cursor:pointer;
+  white-space:nowrap;
 }
 .practica-dia-check input{ margin:0; }
 .practica-dia-check:has(input:checked){
@@ -6928,6 +6933,13 @@ html[data-theme="light"] .if-inst-next{
   margin-top:10px;
 }
 .practica-jornada-ayuda{ margin-top:8px; line-height:1.45; }
+
+@media (max-width:760px){
+  .practica-jornada-dias{ grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+@media (max-width:480px){
+  .practica-jornada-dias{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
 
 .if-att-panel{
   margin-top:16px;
@@ -7632,6 +7644,12 @@ html[data-theme="light"] .if-inst-next{
    ============================================================ */
 
 /* Nueva causa: misma familia visual que las fichas actuales. */
+#overlay-new .detail-panel-new-case{
+  width:92vw;
+  max-width:1550px;
+  height:92vh;
+  max-height:92vh;
+}
 #overlay-new #nf-antecedentes-wrap{
   padding:14px 18px 20px;
   background:color-mix(in srgb,var(--bg) 94%,var(--bg-elev));
