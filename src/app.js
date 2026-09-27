@@ -345,6 +345,14 @@ function showApp() {
 
 const PRACTICA_JURIS_CORE_URL = APP_BASE ? `${window.location.origin}/` : 'https://practicajuris.cl/';
 
+function redirigirAlCoreSiAccesoDirecto() {
+  // El login oficial vive en Práctica Juris Core. Si el módulo se abre
+  // directamente sin sesión local, se vuelve al Core en vez de mostrar
+  // el formulario heredado del módulo.
+  window.location.replace(PRACTICA_JURIS_CORE_URL);
+}
+
+
 // Evita que el listener de Supabase pinte el login antiguo del módulo
 // durante los milisegundos entre signOut() y la redirección al Core.
 let _logoutHaciaCoreEnCurso = false;
@@ -3252,8 +3260,6 @@ function partesDomicilioComparable(valor) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 
-  // Quita complementos de unidad para que "Sur 701, depto 4" pueda coincidir
-  // con "Calle Sur 701" sin confundir el 4 con la numeración principal.
   s = s.replace(/\b(?:depto|dpto|departamento|casa|block|bloque|torre|piso|oficina|local)\s*[-#n°º.]?\s*[a-z0-9-]+\b/g, ' ');
   s = s.replace(/[º°#.,;:/\\()[\]{}_-]+/g, ' ');
   s = s.replace(/\b(?:numero|nro|num|n)\b/g, ' ');
@@ -3287,8 +3293,6 @@ function domiciliosEquivalentes(a, b) {
   const mayor = setA.size <= setB.size ? setB : setA;
   const menorContenido = [...menor].every(x => mayor.has(x));
 
-  // Con numeración coincidente basta que el nombre de vía más corto esté
-  // contenido en el más largo. Sin numeración exigimos una similitud alta.
   if (numeroA && numeroB && numeroA === numeroB && menorContenido && compartidas >= 1) return true;
   if (numeroA && numeroB && numeroA === numeroB && jaccard >= 0.60) return true;
   return !numeroA && !numeroB && jaccard >= 0.80;
@@ -3428,8 +3432,6 @@ async function sincronizarDomiciliosOficiosConNotificacion(c, personasOficios) {
       }
     }
 
-    // Si una fila automática ya no tiene ninguna institución de origen activa,
-    // solo se retira cuando todavía no tiene gestión manual registrada.
     for (const d of [...(np.domicilios || [])]) {
       if (d.origenOficios !== true) continue;
       const ids = Array.isArray(d.oficioInstitucionIds) ? d.oficioInstitucionIds.map(String) : [];
@@ -13392,12 +13394,23 @@ export async function initApp() {
       cerrarPantallaMfaGate();
       cerrarPantallaCierrePendiente();
       cerrarPantallaLegalGate();
-      showAuthScreen();
 
+      // Recuperación de contraseña: conservar la pantalla especial del módulo.
+      if (recoveryIntent) {
+        mostrarRecuperacionContrasena();
+        return;
+      }
+
+      // Si el acceso venía desde Core y el canje falló, mostramos el error
+      // en vez de crear un bucle de redirección.
       if (coreEntry?.detected && coreEntry.error) {
+        showAuthScreen();
         const errEl = document.getElementById('login-error');
         if (errEl) errEl.textContent = coreEntry.error;
+        return;
       }
+
+      redirigirAlCoreSiAccesoDirecto();
     }
   });
 }
