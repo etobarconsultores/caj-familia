@@ -350,9 +350,16 @@ async function cerrarSesionYVolverAlCore() {
   try {
     await signOut();
   } finally {
-    // Familia cierra solo su sesión local; el Core conserva la sesión central.
-    window.location.replace(PRACTICA_JURIS_CORE_URL);
+    // "Cerrar sesión" debe terminar también la sesión central. El Core
+    // reconoce ?logout=1, cierra su propia sesión y muestra el frontis de acceso.
+    window.location.replace(`${PRACTICA_JURIS_CORE_URL}?logout=1`);
   }
+}
+
+function volverAlSelectorCentral() {
+  // "Cambiar de módulo" conserva la sesión del módulo y la sesión central:
+  // simplemente vuelve al Core, que mostrará el selector de áreas habilitadas.
+  window.location.replace(PRACTICA_JURIS_CORE_URL);
 }
 
 function switchAuthForm(which) {
@@ -1783,6 +1790,8 @@ function abrirModalAdministracionCuenta() {
             <div class="cuenta-nav-label cuenta-nav-label-spaced">PREFERENCIAS</div>
             <button type="button" class="cuenta-nav-item" data-seccion="apariencia"><span class="cuenta-nav-icon">03</span><span>Apariencia</span></button>
             <button type="button" class="cuenta-nav-item" data-seccion="suscripcion"><span class="cuenta-nav-icon">04</span><span>Administrar suscripción</span></button>
+            <div class="cuenta-nav-label cuenta-nav-label-spaced">NAVEGACIÓN</div>
+            <button type="button" class="cuenta-nav-item" id="cuenta-cambiar-modulo"><span class="cuenta-nav-icon">↔</span><span>Cambiar de módulo</span></button>
           </nav>
           <div class="cuenta-contenido" id="cuenta-contenido"></div>
         </div>
@@ -1792,8 +1801,12 @@ function abrirModalAdministracionCuenta() {
   const overlay = document.getElementById('cuenta-overlay');
   overlay.addEventListener('click', (e) => { if (e.target.id === 'cuenta-overlay') cerrarModalCuenta(); });
   document.getElementById('cuenta-cerrar').addEventListener('click', cerrarModalCuenta);
-  document.querySelectorAll('.cuenta-nav-item').forEach(btn => {
+  document.querySelectorAll('.cuenta-nav-item[data-seccion]').forEach(btn => {
     btn.addEventListener('click', () => mostrarSeccionCuenta(btn.dataset.seccion));
+  });
+  document.getElementById('cuenta-cambiar-modulo')?.addEventListener('click', () => {
+    cerrarModalCuenta();
+    volverAlSelectorCentral();
   });
 
   _cuentaEscHandler = (e) => { if (e.key === 'Escape') cerrarModalCuenta(); };
