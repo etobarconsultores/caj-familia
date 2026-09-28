@@ -4364,17 +4364,116 @@ function buildFichaData(c) {
     rows: cronologiaItems.map(g => [fmtFechaHora(g.fecha), g.descripcion || '', g.usuarioNombre || ''])
   });
 
-  const notificacion = kv([
-    ['Estado de notificación', c.notifEstado],
-    ['Persona a notificar', c.notifNombre]
-  ]);
-  if (notificacion.length) sections.push({ title: 'Notificación', kind: 'kv', rows: notificacion });
+  // Estado de notificación: usa el modelo múltiple actual y conserva
+  // compatibilidad con el registro histórico de una sola persona.
+  const notifPersonas = c.notificacionPersonas || [];
+  if (notifPersonas.length) {
+    const filasNotif = [];
+    notifPersonas.forEach(p => {
+      const domicilios = (p.domicilios || []).filter(d =>
+        d.domicilio || d.estado || d.fecha || d.folio || d.informadoPor
+      );
+      if (domicilios.length) {
+        domicilios.forEach(d => filasNotif.push([
+          p.parte || '',
+          p.nombre || '',
+          p.estadoNotificacion || 'Sin definir',
+          d.domicilio || '',
+          d.estado || 'Sin definir',
+          fmtFechaSolo(d.fecha)
+        ]));
+      } else {
+        filasNotif.push([
+          p.parte || '',
+          p.nombre || '',
+          p.estadoNotificacion || 'Sin definir',
+          '',
+          '',
+          ''
+        ]);
+      }
+    });
 
-  const domiciliosConDatos = (c.domicilios || []).filter(d => d.domicilio || d.estado || d.fecha || d.folio || d.informadoPor);
-  if (domiciliosConDatos.length) sections.push({
-    title: 'Domicilios de notificación', kind: 'table',
-    headers: ['Domicilio', 'Resultado', 'Fecha', 'Folio', 'Informado por'], widths: [0.34, 0.16, 0.14, 0.14, 0.22],
-    rows: domiciliosConDatos.map(d => [d.domicilio || '', d.estado || '', fmtFechaSolo(d.fecha), d.folio || '', d.informadoPor || ''])
+    sections.push({
+      title: 'Estado de notificación',
+      kind: 'table',
+      headers: ['Parte', 'Persona', 'Estado', 'Domicilio', 'Resultado', 'Fecha'],
+      widths: [0.12, 0.20, 0.14, 0.27, 0.15, 0.12],
+      rows: filasNotif
+    });
+  } else {
+    const notificacion = kv([
+      ['Estado de notificación', c.notifEstado],
+      ['Persona a notificar', c.notifNombre]
+    ]);
+    if (notificacion.length) sections.push({ title: 'Estado de notificación', kind: 'kv', rows: notificacion });
+
+    const domiciliosConDatos = (c.domicilios || []).filter(d =>
+      d.domicilio || d.estado || d.fecha || d.folio || d.informadoPor
+    );
+    if (domiciliosConDatos.length) sections.push({
+      title: 'Domicilios de notificación',
+      kind: 'table',
+      headers: ['Domicilio', 'Resultado', 'Fecha', 'Folio', 'Informado por'],
+      widths: [0.34, 0.16, 0.14, 0.14, 0.22],
+      rows: domiciliosConDatos.map(d => [
+        d.domicilio || '',
+        d.estado || '',
+        fmtFechaSolo(d.fecha),
+        d.folio || '',
+        d.informadoPor || ''
+      ])
+    });
+  }
+
+  // Estado de Oficios. Se separa por finalidad para que la ficha muestre
+  // claramente qué está pendiente, qué fue contestado y qué se incorporará.
+  const oficiosPersonas = c.oficiosPersonas || [];
+  const oficiosDomicilio = [];
+  const oficiosOtros = [];
+
+  oficiosPersonas.forEach(p => {
+    const tipoPersona = p.tipoOficio || 'domicilio';
+    (p.instituciones || []).forEach(inst => {
+      const tipo = inst.tipoOficio || tipoPersona || 'domicilio';
+      if (tipo === 'otros_antecedentes') {
+        oficiosOtros.push([
+          p.nombre || p.parte || '',
+          inst.institucion || '',
+          inst.tramitacion || 'Sin definir',
+          inst.respuesta || 'Sin definir',
+          fmtFechaSolo(inst.fecha),
+          inst.utilidadProbatoria === 'incorporar'
+            ? 'Incorporar'
+            : (inst.utilidadProbatoria === 'no_incorporar' ? 'No incorporar' : 'Sin definir')
+        ]);
+      } else {
+        oficiosDomicilio.push([
+          p.nombre || p.parte || '',
+          inst.institucion || '',
+          inst.tramitacion || 'Sin definir',
+          inst.respuesta || 'Sin definir',
+          fmtFechaSolo(inst.fecha),
+          inst.domicilio || ''
+        ]);
+      }
+    });
+  });
+
+  if (oficiosDomicilio.length) sections.push({
+    title: 'Oficios para obtención de domicilios',
+    kind: 'table',
+    headers: ['Persona', 'Institución', 'Tramitación', 'Respuesta', 'Fecha', 'Domicilio informado'],
+    widths: [0.18, 0.22, 0.16, 0.14, 0.12, 0.18],
+    rows: oficiosDomicilio
+  });
+
+  if (oficiosOtros.length) sections.push({
+    title: 'Oficios para obtención de otros antecedentes',
+    kind: 'table',
+    headers: ['Persona', 'Institución', 'Tramitación', 'Respuesta', 'Fecha', 'Utilidad probatoria'],
+    widths: [0.18, 0.22, 0.16, 0.14, 0.12, 0.18],
+    rows: oficiosOtros
   });
 
   const contacto = kv([
