@@ -5637,6 +5637,26 @@ function representadosSeleccionadosChipsHtml(tipoParte, lista, seleccionados) {
     `<span class="af-representado-chip">${escapeHtml(item.nombre || 'Sin nombre')}</span>`
   ).join('');
 }
+
+function clavesRepresentadosGuardadas(c) {
+  const lista = intervinientesEfectivos(c);
+  const elegidos = intervinientesRepresentadosEfectivos(c);
+  const idsElegidos = new Set(elegidos.filter(i => i.id).map(i => String(i.id)));
+  const clavesFallback = new Set(
+    elegidos.map(i => `${String(i.rut || '').trim().toLowerCase()}|${String(i.nombre || '').trim().toLowerCase()}`)
+  );
+
+  return new Set(
+    lista
+      .map((item, idx) => ({ item, key: claveRepresentado(item, idx) }))
+      .filter(({ item }) => {
+        if (item.id && idsElegidos.has(String(item.id))) return true;
+        const fallback = `${String(item.rut || '').trim().toLowerCase()}|${String(item.nombre || '').trim().toLowerCase()}`;
+        return clavesFallback.has(fallback);
+      })
+      .map(({ key }) => key)
+  );
+}
 // parte_representada (columna antigua) solo admite 'Demandante'/'Demandado'
 // por su CHECK ya existente — nunca se le escribe ninguno de los otros 5
 // tipos nuevos, para no violar esa restricción. Traducción en ambos
@@ -5929,8 +5949,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     const sugerencia = sugerirPartesNombrePatrocinadoF9(nombreCompleto);
 
     if (nombrePreview) {
-      const nombres = seleccionados.map(i => i.nombre).filter(Boolean).join(' · ');
-      nombrePreview.innerHTML = `<span>Representado(s)</span><strong>${escapeHtml(nombres || 'Sin definir')}</strong>`;
+      nombrePreview.innerHTML = representadosSeleccionadosChipsHtml(tipo, estadoIntervinientes, seleccionPatrocinados);
     }
 
     if (apellidosInput && nombresInput) {
