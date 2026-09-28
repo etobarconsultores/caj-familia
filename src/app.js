@@ -5626,6 +5626,17 @@ function representadosOpcionesHtml(tipoParte, lista, seleccionados) {
     }).join('')}
   </div>`;
 }
+
+function representadosSeleccionadosChipsHtml(tipoParte, lista, seleccionados) {
+  if (!tipoParte) return `<span class="af-representados-summary-empty">Sin representados seleccionados</span>`;
+  const elegidos = lista
+    .map((item, idx) => ({ item, idx, key: claveRepresentado(item, idx) }))
+    .filter(({ item, key }) => item.tipoParte === tipoParte && seleccionados.has(key));
+  if (!elegidos.length) return `<span class="af-representados-summary-empty">Sin representados seleccionados</span>`;
+  return elegidos.map(({ item }) =>
+    `<span class="af-representado-chip">${escapeHtml(item.nombre || 'Sin nombre')}</span>`
+  ).join('');
+}
 // parte_representada (columna antigua) solo admite 'Demandante'/'Demandado'
 // por su CHECK ya existente — nunca se le escribe ninguno de los otros 5
 // tipos nuevos, para no violar esa restricción. Traducción en ambos
@@ -5746,8 +5757,8 @@ function antecedentesFormHtml(c) {
         </div>
       </div>
       <div class="af-section-body">
-        <div class="form-grid2 af-representacion-grid">
-          <div>
+        <div class="af-representacion-layout">
+          <div class="af-representacion-tipo">
             <label>Tipo de parte</label>
             <select id="af-patrocinado-tipo">
               <option value="">Sin definir</option>
@@ -5755,8 +5766,17 @@ function antecedentesFormHtml(c) {
             </select>
           </div>
           <div class="af-representados-field">
-            <label>Representado(s)</label>
+            <div class="af-representados-title-row">
+              <label>Representado(s)</label>
+              <span class="af-representados-help">Selecciona uno o varios</span>
+            </div>
             <div id="af-representados-opciones"></div>
+            <div class="af-representados-summary">
+              <span class="af-representados-summary-label">Seleccionados</span>
+              <div id="af-patrocinado-nombre-preview" class="af-representados-chips">
+                ${representadosSeleccionadosChipsHtml(tipoPatrocinadoEfectivo(c), c.intervinientes || [], clavesRepresentadosGuardadas(c))}
+              </div>
+            </div>
           </div>
         </div>
         ${!c.id ? `
@@ -5771,9 +5791,6 @@ function antecedentesFormHtml(c) {
           </div>
         </div>
         ` : ''}
-        <div class="af-preview-strip">
-          <div id="af-patrocinado-nombre-preview"><span>Representado(s)</span><strong>${escapeHtml(patrocinadosNombreTexto(c) || 'Sin definir')}</strong></div>
-        </div>
         <div class="af-preview-strip">
           <div id="af-caratulado-preview"><span>Caratulado</span><strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
           <div id="af-titulo-preview"><span>Título generado</span><strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
@@ -5963,8 +5980,9 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     const tituloPreview = form.querySelector('#af-titulo-preview');
     if (tituloPreview) tituloPreview.innerHTML = `Título generado: <strong>${escapeHtml(tituloAutomatico(snap) || 'Sin definir')}</strong>`;
     const patrocinadoPreview = form.querySelector('#af-patrocinado-nombre-preview');
-    if (patrocinadoPreview && !esNuevaCausa) {
-      patrocinadoPreview.innerHTML = `<span>Representado(s)</span><strong>${escapeHtml(snap.patrocinado || 'Sin definir')}</strong>`;
+    if (patrocinadoPreview) {
+      const tipo = form.querySelector('#af-patrocinado-tipo')?.value || '';
+      patrocinadoPreview.innerHTML = representadosSeleccionadosChipsHtml(tipo, estadoIntervinientes, seleccionPatrocinados);
     }
     renderOpcionesRepresentados();
   }
