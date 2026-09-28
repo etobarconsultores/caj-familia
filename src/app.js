@@ -5547,13 +5547,84 @@ function intervinientesRowsHtml(lista) {
   </div>`;
 }
 
-// Patrocinado ya no se digita: su nombre se deriva del interviniente con
-// el tipo de parte seleccionado (el primero por orden, si hubiera más de
-// uno del mismo tipo).
-function nombrePatrocinadoDesdeIntervinientes(tipoParte, lista) {
-  if (!tipoParte) return null;
-  const match = lista.find(i => i.tipoParte === tipoParte);
-  return match ? match.nombre : null;
+// La representación puede abarcar uno o varios intervinientes del mismo tipo.
+// Se guarda en el campo `representacion` como JSON con los ids seleccionados,
+// manteniendo los campos históricos con el primer representado como principal.
+function representacionIdsGuardados(c) {
+  try {
+    const raw = String(c?.representacion || '').trim();
+    if (!raw || !raw.startsWith('{')) return [];
+    const data = JSON.parse(raw);
+    return Array.isArray(data?.intervinienteIds)
+      ? data.intervinienteIds.map(String).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+function serializarRepresentacion(ids) {
+  return JSON.stringify({ version: 1, intervinienteIds: [...new Set((ids || []).map(String).filter(Boolean))] });
+}
+function claveRepresentado(item, idx = 0) {
+  if (item?.id) return `id:${item.id}`;
+  return item?._repKey || `tmp:${idx}`;
+}
+function intervinientesRepresentadosEfectivos(c) {
+  const lista = intervinientesEfectivos(c);
+  const ids = representacionIdsGuardados(c);
+  if (ids.length) {
+    const porId = new Map(lista.filter(i => i.id).map(i => [String(i.id), i]));
+    const elegidos = ids.map(id => porId.get(String(id))).filter(Boolean);
+    if (elegidos.length) return elegidos;
+  }
+
+  const tipo = tipoPatrocinadoEfectivo(c);
+  const legado = String(c?.patrocinado || '').trim();
+  if (legado) {
+    const nombres = legado.split(' · ').map(x => x.trim().toLowerCase()).filter(Boolean);
+    const matches = lista.filter(i =>
+      (!tipo || i.tipoParte === tipo) &&
+      nombres.includes(String(i.nombre || '').trim().toLowerCase())
+    );
+    if (matches.length) return matches;
+  }
+
+  if (c?.rut) {
+    const porRut = lista.find(i =>
+      (!tipo || i.tipoParte === tipo) &&
+      String(i.rut || '').trim().toLowerCase() === String(c.rut || '').trim().toLowerCase()
+    );
+    if (porRut) return [porRut];
+  }
+
+  const primero = tipo ? lista.find(i => i.tipoParte === tipo) : null;
+  return primero ? [primero] : [];
+}
+function patrocinadoPrincipalEfectivo(c) {
+  const elegidos = intervinientesRepresentadosEfectivos(c);
+  if (elegidos.length) return elegidos[0].nombre || null;
+  return c?.patrocinado || null;
+}
+function patrocinadosNombreTexto(c) {
+  const elegidos = intervinientesRepresentadosEfectivos(c);
+  if (elegidos.length) return elegidos.map(i => i.nombre).filter(Boolean).join(' · ');
+  return c?.patrocinado || null;
+}
+function representadosOpcionesHtml(tipoParte, lista, seleccionados) {
+  if (!tipoParte) return `<div class="af-representados-empty">Selecciona primero el tipo de parte.</div>`;
+  const candidatos = lista.map((item, idx) => ({ item, idx })).filter(({ item }) => item.tipoParte === tipoParte);
+  if (!candidatos.length) return `<div class="af-representados-empty">No hay intervinientes registrados con este tipo de parte.</div>`;
+  return `<div class="af-representados-list">
+    ${candidatos.map(({ item, idx }) => {
+      const key = claveRepresentado(item, idx);
+      const checked = seleccionados.has(key) ? 'checked' : '';
+      const rut = item.rut ? `<span>${escapeHtml(item.rut)}</span>` : '';
+      return `<label class="af-representado-option">
+        <input type="checkbox" class="af-representado-check" data-rep-key="${escapeHtml(key)}" ${checked}>
+        <span class="af-representado-main"><strong>${escapeHtml(item.nombre || 'Sin nombre')}</strong>${rut}</span>
+      </label>`;
+    }).join('')}
+  </div>`;
 }
 // parte_representada (columna antigua) solo admite 'Demandante'/'Demandado'
 // por su CHECK ya existente — nunca se le escribe ninguno de los otros 5
@@ -5673,37 +5744,36 @@ function antecedentesFormHtml(c) {
           <div class="af-section-kicker">Representación</div>
           <div class="af-section-title">Patrocinado</div>
         </div>
-
       </div>
       <div class="af-section-body">
+        <div class="form-grid2 af-representacion-grid">
+          <div>
+            <label>Tipo de parte</label>
+            <select id="af-patrocinado-tipo">
+              <option value="">Sin definir</option>
+              ${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="af-representados-field">
+            <label>Representado(s)</label>
+            <div id="af-representados-opciones"></div>
+          </div>
+        </div>
         ${!c.id ? `
-        <div class="form-grid2">
-          <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="form-grid2 af-patrocinado-nombre-grid">
           <div>
-            <label>RUT</label>
-            <div class="af-derived-value" id="af-patrocinado-rut-preview">Sin definir</div>
+            <label>Apellidos del representado principal</label>
+            <input type="text" id="af-patrocinado-apellidos-nueva" value="" placeholder="Apellidos">
           </div>
           <div>
-            <label>Apellidos</label>
-            <input type="text" id="af-patrocinado-apellidos-nueva" value="" placeholder="Apellidos del patrocinado">
-          </div>
-          <div>
-            <label>Nombres</label>
-            <input type="text" id="af-patrocinado-nombres-nueva" value="" placeholder="Nombres del patrocinado">
+            <label>Nombres del representado principal</label>
+            <input type="text" id="af-patrocinado-nombres-nueva" value="" placeholder="Nombres">
           </div>
         </div>
+        ` : ''}
         <div class="af-preview-strip">
-          <div id="af-patrocinado-nombre-preview"><span>Nombre completo</span><strong>Sin definir</strong></div>
+          <div id="af-patrocinado-nombre-preview"><span>Representado(s)</span><strong>${escapeHtml(patrocinadosNombreTexto(c) || 'Sin definir')}</strong></div>
         </div>
-        ` : `
-        <div class="form-grid2">
-          <div><label>Tipo de parte</label><select id="af-patrocinado-tipo"><option value="">Sin definir</option>${TIPOS_PARTE.map(t => `<option value="${t}" ${tipoPatrocinadoEfectivo(c) === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-          <div>
-            <label>Nombre</label>
-            <div class="af-derived-value" id="af-patrocinado-nombre-preview">${escapeHtml(nombrePatrocinadoDesdeIntervinientes(tipoPatrocinadoEfectivo(c), lista) || 'Sin definir')}</div>
-          </div>
-        </div>
-        `}
         <div class="af-preview-strip">
           <div id="af-caratulado-preview"><span>Caratulado</span><strong>${escapeHtml(caratuladoTexto(c) || 'Sin definir')}</strong></div>
           <div id="af-titulo-preview"><span>Título generado</span><strong>${escapeHtml(tituloAutomatico(c) || 'Sin definir')}</strong></div>
@@ -5745,17 +5815,18 @@ function antecedentesFormHtml(c) {
 // Arma un objeto tipo-causa a partir del estado actual del formulario (sin
 // guardar nada) — usado para recalcular las vistas previas de Tribunal/
 // Caratulado/Título en vivo, y como base del patch final al guardar.
-function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
+function snapshotDesdeFormulario(panel, c, estadoIntervinientes, seleccionPatrocinados = new Set()) {
   const procedimiento = panel.querySelector('#af-procedimiento').value || null;
   const ritSel = panel.querySelector('#af-rit').value || null;
   const rolInput = panel.querySelector('#af-rol').value.trim() || null;
   const tribunalFamiliaNombre = panel.querySelector('#af-tribunal-familia').value || null;
   const tribunalFamilia = partesTribunalFamilia(tribunalFamiliaNombre);
   const tipoPatrocinadoSel = panel.querySelector('#af-patrocinado-tipo').value || null;
-  const patrocinadoInterviniente = tipoPatrocinadoSel
-    ? estadoIntervinientes.find(i => i.tipoParte === tipoPatrocinadoSel)
-    : null;
-  const patrocinadoNombre = patrocinadoInterviniente?.nombre || null;
+  const patrocinadosSeleccionados = estadoIntervinientes.filter((i, idx) =>
+    i.tipoParte === tipoPatrocinadoSel && seleccionPatrocinados.has(claveRepresentado(i, idx))
+  );
+  const patrocinadoInterviniente = patrocinadosSeleccionados[0] || null;
+  const patrocinadoNombre = patrocinadosSeleccionados.map(i => i.nombre).filter(Boolean).join(' · ') || null;
   const parteRepresentada = parteRepresentadaLegacyDesdeTipo(tipoPatrocinadoSel);
   const apellidosNueva = panel.querySelector('#af-patrocinado-apellidos-nueva');
   const nombresNueva = panel.querySelector('#af-patrocinado-nombres-nueva');
@@ -5781,6 +5852,7 @@ function snapshotDesdeFormulario(panel, c, estadoIntervinientes) {
     intervinientes: estadoIntervinientes.filter(i => i.nombre && i.tipoParte),
     patrocinado: patrocinadoNombre,
     patrocinadoTipo: tipoPatrocinadoSel || null,
+    representacion: c.representacion || null,
     patrocinadoApellidos: apellidosNueva ? (apellidosNueva.value.trim() || null) : (c.patrocinadoApellidos || null),
     patrocinadoNombres: nombresNueva ? (nombresNueva.value.trim() || null) : (c.patrocinadoNombres || null),
     rut: patrocinadoInterviniente?.rut || c.rut || null,
@@ -5801,7 +5873,26 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
 
   // Estado en memoria de intervinientes — parte de intervinientesEfectivos(c)
   // (tabla nueva, o el respaldo demandante/demandado si aún no existe).
-  let estadoIntervinientes = intervinientesEfectivos(c).map(i => ({ id: i.id, tipoParte: i.tipoParte, rut: i.rut || '', nombre: i.nombre }));
+  let secuenciaRepTemporal = 0;
+  let estadoIntervinientes = intervinientesEfectivos(c).map((i, idx) => ({
+    id: i.id,
+    tipoParte: i.tipoParte,
+    rut: i.rut || '',
+    nombre: i.nombre,
+    _repKey: i.id ? `id:${i.id}` : `tmp:existente:${idx}`
+  }));
+  const idsGuardados = new Set(representacionIdsGuardados(c).map(id => `id:${id}`));
+  let seleccionPatrocinados = new Set(idsGuardados);
+  if (!seleccionPatrocinados.size) {
+    const legado = intervinientesRepresentadosEfectivos(c);
+    legado.forEach(rep => {
+      const idx = estadoIntervinientes.findIndex(i =>
+        (rep.id && i.id === rep.id) ||
+        (!rep.id && i.tipoParte === rep.tipoParte && i.nombre === rep.nombre)
+      );
+      if (idx >= 0) seleccionPatrocinados.add(claveRepresentado(estadoIntervinientes[idx], idx));
+    });
+  }
 
   let ultimaSugerenciaPatrocinado = { apellidos: '', nombres: '', tipo: '' };
 
@@ -5809,19 +5900,20 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     if (!esNuevaCausa) return;
 
     const tipo = form.querySelector('#af-patrocinado-tipo')?.value || '';
-    const seleccionado = tipo ? estadoIntervinientes.find(i => i.tipoParte === tipo) : null;
-    const rutPreview = form.querySelector('#af-patrocinado-rut-preview');
+    const seleccionados = estadoIntervinientes.filter((i, idx) =>
+      i.tipoParte === tipo && seleccionPatrocinados.has(claveRepresentado(i, idx))
+    );
+    const seleccionado = seleccionados[0] || null;
     const nombrePreview = form.querySelector('#af-patrocinado-nombre-preview');
     const apellidosInput = form.querySelector('#af-patrocinado-apellidos-nueva');
     const nombresInput = form.querySelector('#af-patrocinado-nombres-nueva');
 
     const nombreCompleto = seleccionado?.nombre || '';
-    const rut = seleccionado?.rut || '';
     const sugerencia = sugerirPartesNombrePatrocinadoF9(nombreCompleto);
 
-    if (rutPreview) rutPreview.textContent = rut || 'Sin definir';
     if (nombrePreview) {
-      nombrePreview.innerHTML = `<span>Nombre completo</span><strong>${escapeHtml(nombreCompleto || 'Sin definir')}</strong>`;
+      const nombres = seleccionados.map(i => i.nombre).filter(Boolean).join(' · ');
+      nombrePreview.innerHTML = `<span>Representado(s)</span><strong>${escapeHtml(nombres || 'Sin definir')}</strong>`;
     }
 
     if (apellidosInput && nombresInput) {
@@ -5847,9 +5939,23 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     };
   }
 
+  function renderOpcionesRepresentados() {
+    const wrap = form.querySelector('#af-representados-opciones');
+    if (!wrap) return;
+    const tipo = form.querySelector('#af-patrocinado-tipo')?.value || '';
+    const clavesValidas = new Set(
+      estadoIntervinientes
+        .map((i, idx) => ({ i, key: claveRepresentado(i, idx) }))
+        .filter(({ i }) => i.tipoParte === tipo)
+        .map(({ key }) => key)
+    );
+    seleccionPatrocinados = new Set([...seleccionPatrocinados].filter(key => clavesValidas.has(key)));
+    wrap.innerHTML = representadosOpcionesHtml(tipo, estadoIntervinientes, seleccionPatrocinados);
+  }
+
   function refreshPreviews() {
     sincronizarPatrocinadoNuevaCausa();
-    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
+    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes, seleccionPatrocinados);
     const tribunalPreview = form.querySelector('#af-tribunal-preview');
     if (tribunalPreview) tribunalPreview.innerHTML = `Se mostrará como: <strong>${escapeHtml(tribunalTexto(snap) || 'Sin definir')}</strong>`;
     const caratuladoPreview = form.querySelector('#af-caratulado-preview');
@@ -5857,7 +5963,10 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     const tituloPreview = form.querySelector('#af-titulo-preview');
     if (tituloPreview) tituloPreview.innerHTML = `Título generado: <strong>${escapeHtml(tituloAutomatico(snap) || 'Sin definir')}</strong>`;
     const patrocinadoPreview = form.querySelector('#af-patrocinado-nombre-preview');
-    if (patrocinadoPreview && !esNuevaCausa) patrocinadoPreview.textContent = snap.patrocinado || 'Sin definir';
+    if (patrocinadoPreview && !esNuevaCausa) {
+      patrocinadoPreview.innerHTML = `<span>Representado(s)</span><strong>${escapeHtml(snap.patrocinado || 'Sin definir')}</strong>`;
+    }
+    renderOpcionesRepresentados();
   }
 
   function renderIntervinientes() {
@@ -5915,7 +6024,10 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   // los datos ya ingresados en las filas que se mantienen.
   form.querySelector('#af-cant-intervinientes').addEventListener('input', (e) => {
     const nueva = Math.max(0, parseInt(e.target.value, 10) || 0);
-    while (estadoIntervinientes.length < nueva) estadoIntervinientes.push({ id: null, tipoParte: '', rut: '', nombre: '' });
+    while (estadoIntervinientes.length < nueva) {
+      secuenciaRepTemporal += 1;
+      estadoIntervinientes.push({ id: null, tipoParte: '', rut: '', nombre: '', _repKey: `tmp:nuevo:${secuenciaRepTemporal}` });
+    }
     while (estadoIntervinientes.length > nueva) estadoIntervinientes.pop();
     renderIntervinientes();
   });
@@ -5936,21 +6048,35 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
     const btn = e.target.closest('[data-action="af-quitar-interviniente"]');
     if (!btn) return;
     const idx = parseInt(btn.dataset.idx, 10);
+    const eliminado = estadoIntervinientes[idx];
+    if (eliminado) seleccionPatrocinados.delete(claveRepresentado(eliminado, idx));
     estadoIntervinientes.splice(idx, 1);
     renderIntervinientes();
+  });
+
+  const representadosWrap = form.querySelector('#af-representados-opciones');
+  if (representadosWrap) representadosWrap.addEventListener('change', (e) => {
+    const check = e.target.closest('.af-representado-check');
+    if (!check) return;
+    const key = check.dataset.repKey;
+    if (check.checked) seleccionPatrocinados.add(key);
+    else seleccionPatrocinados.delete(key);
+    refreshPreviews();
   });
 
   // Patrocinado (el nombre se deriva, no se digita — se refresca junto con
   // el resto de las vistas previas al cambiar el tipo o los intervinientes)
   const patrocinadoTipoSel = form.querySelector('#af-patrocinado-tipo');
   if (patrocinadoTipoSel) patrocinadoTipoSel.addEventListener('input', () => {
+    seleccionPatrocinados.clear();
     sincronizarPatrocinadoNuevaCausa({ forzarPartes: true });
     refreshPreviews();
   });
+  renderOpcionesRepresentados();
   sincronizarPatrocinadoNuevaCausa();
 
   form.querySelector('#af-save').addEventListener('click', async () => {
-    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes);
+    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes, seleccionPatrocinados);
     const patch = {
       folio: snap.folio, categoria: snap.categoria, origenCarpeta: snap.origenCarpeta, fechaIngreso: snap.fechaIngreso, tutor: snap.tutor,
       subcategoria: snap.subcategoria, tipoJuicio: snap.tipoJuicio, materia: snap.materia, bajEstado: snap.bajEstado,
@@ -5963,19 +6089,29 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
       titulo: tituloAutomatico(snap) || null
     };
     const intervinientesValidos = estadoIntervinientes.filter(i => i.nombre && i.tipoParte);
+    if (snap.patrocinadoTipo && !seleccionPatrocinados.size) {
+      toast('Selecciona al menos un representado.');
+      return;
+    }
     if (esNuevaCausa && snap.patrocinadoTipo && (!snap.patrocinadoApellidos || !snap.patrocinadoNombres)) {
-      toast('Completa apellidos y nombres del patrocinado antes de guardar la causa.');
+      toast('Completa apellidos y nombres del representado principal antes de guardar la causa.');
       return;
     }
     try {
       if (esNuevaCausa) {
         const nueva = await api.createCausa(CURRENT_USER.id, patch);
         nueva.intervinientes = [];
+        const idsRepresentadosCreados = [];
         for (let idx = 0; idx < intervinientesValidos.length; idx++) {
           const it = intervinientesValidos[idx];
+          const keyOriginal = claveRepresentado(it, idx);
           const creado = await api.createInterviniente(CURRENT_USER.id, nueva.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
           nueva.intervinientes.push({ id: creado.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
+          if (seleccionPatrocinados.has(keyOriginal)) idsRepresentadosCreados.push(creado.id);
         }
+        const representacionSerializada = serializarRepresentacion(idsRepresentadosCreados);
+        await api.updateCausa(nueva.id, { representacion: representacionSerializada });
+        nueva.representacion = representacionSerializada;
         CAUSAS.unshift(nueva);
         toast('Causa agregada');
         closeNewModal();
@@ -5985,20 +6121,27 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
         Object.assign(c, patch);
         const originales = intervinientesEfectivos(c).filter(i => i.id);
         const nuevaLista = [];
+        const idsRepresentadosFinales = [];
         for (let idx = 0; idx < intervinientesValidos.length; idx++) {
           const it = intervinientesValidos[idx];
+          const keyOriginal = claveRepresentado(it, idx);
           if (it.id) {
             await api.updateInterviniente(it.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
             nuevaLista.push({ id: it.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
+            if (seleccionPatrocinados.has(keyOriginal)) idsRepresentadosFinales.push(it.id);
           } else {
             const creado = await api.createInterviniente(CURRENT_USER.id, c.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
             nuevaLista.push({ id: creado.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
+            if (seleccionPatrocinados.has(keyOriginal)) idsRepresentadosFinales.push(creado.id);
           }
         }
         const idsFinales = new Set(nuevaLista.map(i => i.id));
         for (const original of originales) {
           if (!idsFinales.has(original.id)) await api.deleteInterviniente(original.id);
         }
+        const representacionSerializada = serializarRepresentacion(idsRepresentadosFinales);
+        await api.updateCausa(c.id, { representacion: representacionSerializada });
+        c.representacion = representacionSerializada;
         c.intervinientes = nuevaLista;
         toast('Cambios guardados');
         render();
@@ -6035,6 +6178,8 @@ function intervinientesEfectivos(c) {
 // parte_representada + demandante/demandado. Si aún no está definido, cae
 // de respaldo al campo "patrocinado" histórico.
 function patrocinadoEfectivo(c) {
+  const multiple = patrocinadosNombreTexto(c);
+  if (multiple) return multiple;
   if (c.parteRepresentada === 'Demandante' && c.demandanteNombre) return c.demandanteNombre;
   if (c.parteRepresentada === 'Demandado' && c.demandadoNombre) return c.demandadoNombre;
   return c.patrocinado || null;
@@ -10740,7 +10885,7 @@ function partesPatrocinadoF9(c) {
   if (apellidosGuardados && nombresGuardados) {
     return { apellidos: apellidosGuardados, nombres: nombresGuardados, origen: 'guardado' };
   }
-  const nombreCompleto = String(patrocinadoEfectivo(c) || c?.patrocinado || '').trim();
+  const nombreCompleto = String(patrocinadoPrincipalEfectivo(c) || c?.patrocinado || '').trim();
   const sugerencia = sugerirPartesNombrePatrocinadoF9(nombreCompleto);
   return {
     apellidos: apellidosGuardados || sugerencia.apellidos || '',
