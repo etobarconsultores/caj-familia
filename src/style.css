@@ -9007,3 +9007,51 @@ html[data-theme="light"] .ig-subcard{
     padding-bottom:44px;
   }
 }
+
+
+/* Oficios · separación por finalidad */
+.oficio-tipo-switch{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-bottom:10px;
+}
+.oficio-tipo-btn{
+  font-family:var(--font-body);
+  font-size:12.5px;
+  font-weight:500;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:5px;
+  background:var(--bg-card);
+  color:var(--ink-dim);
+  cursor:pointer;
+  transition:all .15s ease;
+}
+.oficio-tipo-btn:hover{
+  color:var(--ink);
+  border-color:var(--brass-soft);
+}
+.oficio-tipo-btn.active{
+  color:var(--ink);
+  border-color:var(--brass);
+  background:var(--bg-card-hover);
+  box-shadow:0 0 0 1px var(--brass) inset;
+}
+.oficio-tipo-explicacion{
+  margin:-2px 0 14px;
+  padding:9px 11px;
+  border:1px solid var(--line-soft);
+  border-radius:5px;
+  color:var(--ink-dim);
+  background:var(--bg-card);
+  font-size:12px;
+  line-height:1.45;
+}
+.oficio-table .oi-utilidad{
+  min-width:150px;
+}
+@media (max-width:720px){
+  .oficio-tipo-switch{ grid-template-columns:1fr; }
+}
+

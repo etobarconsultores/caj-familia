@@ -145,14 +145,15 @@ function causaFromDb(row) {
       .slice()
       .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
       .map(p => ({
-        id: p.id, parte: p.parte, nombre: p.nombre, orden: p.orden,
+        id: p.id, parte: p.parte, nombre: p.nombre, tipoOficio: p.tipo_oficio || 'domicilio', orden: p.orden,
         instituciones: (p._instituciones || [])
           .slice()
           .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
           .map(i => ({
             id: i.id, institucion: i.institucion, tramitacion: i.tramitacion,
             respuesta: i.respuesta, fecha: i.fecha, folio: i.folio,
-            domicilio: i.domicilio, orden: i.orden
+            tipoOficio: i.tipo_oficio || p.tipo_oficio || 'domicilio',
+            domicilio: i.domicilio, utilidadProbatoria: i.utilidad_probatoria, orden: i.orden
           }))
       }))
   };
@@ -482,7 +483,7 @@ export async function deleteNotificacionDomicilio(id) {
 
 // ---------- Oficios: personas + instituciones oficiadas ----------
 function oficioPersonaPatchToDb(patch) {
-  const map = { parte: 'parte', nombre: 'nombre', orden: 'orden' };
+  const map = { parte: 'parte', nombre: 'nombre', tipoOficio: 'tipo_oficio', orden: 'orden' };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });
   return out;
@@ -508,7 +509,8 @@ export async function deleteOficioPersona(id) {
 function oficioInstitucionPatchToDb(patch) {
   const map = {
     institucion: 'institucion', tramitacion: 'tramitacion', respuesta: 'respuesta',
-    fecha: 'fecha', folio: 'folio', domicilio: 'domicilio', orden: 'orden'
+    fecha: 'fecha', folio: 'folio', tipoOficio: 'tipo_oficio',
+    domicilio: 'domicilio', utilidadProbatoria: 'utilidad_probatoria', orden: 'orden'
   };
   const out = {};
   Object.entries(patch).forEach(([k, v]) => { if (map[k]) out[map[k]] = v === undefined ? null : v; });

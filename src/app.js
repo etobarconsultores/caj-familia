@@ -3137,15 +3137,25 @@ function wireNotificacionTab(c, panel) {
 const OFICIO_PARTE_OPCIONES = ['Demandado/a', 'Solicitado', 'Requerido', 'Tercero'];
 const OFICIO_TRAMITACION_OPCIONES = ['Correo enviado a usuario/a', 'Tramitada por mano', 'Tramitada por correo', 'Por interconexión', 'Pendiente de tramitar'];
 const OFICIO_RESPUESTA_OPCIONES = ['Contestada', 'Pendiente'];
+const OFICIO_TIPOS = ['domicilio', 'otros_antecedentes'];
 
-function oficioInstitucionRowHtml(inst, pIdx, iIdx) {
+function oficioInstitucionRowHtml(inst, pIdx, iIdx, tipoOficio = 'domicilio') {
+  const esDomicilio = tipoOficio === 'domicilio';
+  const utilidadOptions = [
+    ['', 'Sin definir'],
+    ['incorporar', 'Incorporar'],
+    ['no_incorporar', 'No incorporar']
+  ].map(([v, l]) => `<option value="${v}" ${(inst.utilidadProbatoria || '') === v ? 'selected' : ''}>${l}</option>`).join('');
+
   return `<tr data-p-idx="${pIdx}" data-i-idx="${iIdx}">
     <td><input type="text" class="oi-institucion" value="${escapeHtml(inst.institucion || '')}"></td>
     <td><select class="oi-tramitacion"><option value="">Sin definir</option>${OFICIO_TRAMITACION_OPCIONES.map(o => `<option value="${o}" ${inst.tramitacion === o ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
     <td><select class="oi-respuesta"><option value="">Sin definir</option>${OFICIO_RESPUESTA_OPCIONES.map(o => `<option value="${o}" ${inst.respuesta === o ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
     <td><input type="date" class="oi-fecha" value="${escapeHtml(inst.fecha || '')}"></td>
     <td><input type="text" class="oi-folio" value="${escapeHtml(inst.folio || '')}"></td>
-    <td><input type="text" class="oi-domicilio" value="${escapeHtml(inst.domicilio || '')}" placeholder="Domicilio informado"></td>
+    ${esDomicilio
+      ? `<td><input type="text" class="oi-domicilio" value="${escapeHtml(inst.domicilio || '')}" placeholder="Domicilio informado"></td>`
+      : `<td><select class="oi-utilidad">${utilidadOptions}</select></td>`}
     <td class="col-del"><button class="notif-row-del" data-action="oi-quitar-institucion" data-p-idx="${pIdx}" data-i-idx="${iIdx}">&times;</button></td>
   </tr>`;
 }
@@ -3176,10 +3186,12 @@ function nombreOficioDesdeAntecedentes(c, parteOficio) {
   return '';
 }
 
-function oficioPersonaBlockHtml(persona, idx) {
+function oficioPersonaBlockHtml(persona, idx, tipoOficio = 'domicilio') {
   const meta = oficioPersonaEstadoMeta(persona);
   const titulo = persona.nombre || `Persona ${idx + 1}`;
   const instituciones = persona.instituciones || [];
+  const esDomicilio = tipoOficio === 'domicilio';
+
   return `<section class="oficio-person-card ${meta.clase}" data-persona-idx="${idx}">
     <div class="oficio-person-head">
       <div>
@@ -3195,7 +3207,7 @@ function oficioPersonaBlockHtml(persona, idx) {
     <div class="oficio-person-body agenda-form">
       <div class="oficio-person-fields">
         <div><label>Parte</label><select class="op-parte" data-idx="${idx}"><option value="">Sin definir</option>${OFICIO_PARTE_OPCIONES.map(o => `<option value="${o}" ${persona.parte === o ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" name="oficio-persona-${idx}" autocomplete="off" value="${escapeHtml(persona.nombre || '')}" placeholder="Se completa desde Antecedentes" readonly></div>
+        <div><label>Nombre</label><input type="text" class="op-nombre" data-idx="${idx}" name="oficio-persona-${tipoOficio}-${idx}" autocomplete="off" value="${escapeHtml(persona.nombre || '')}" placeholder="Se completa desde Antecedentes" readonly></div>
       </div>
       <div class="oficio-inst-section">
         <div class="oficio-inst-head">
@@ -3207,8 +3219,16 @@ function oficioPersonaBlockHtml(persona, idx) {
         </div>
         ${instituciones.length ? `<div class="notif-table-wrap">
           <table class="notif-table oficio-table">
-            <thead><tr><th class="col-domicilio">Institución oficiada</th><th>Tramitación</th><th>Respuesta</th><th>Fecha</th><th>Folio</th><th class="col-domicilio">Domicilio</th><th class="col-del"></th></tr></thead>
-            <tbody class="op-instituciones-tbody" data-idx="${idx}">${instituciones.map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii)).join('')}</tbody>
+            <thead><tr>
+              <th class="col-domicilio">Institución oficiada</th>
+              <th>Tramitación</th>
+              <th>Respuesta</th>
+              <th>Fecha</th>
+              <th>Folio</th>
+              <th class="col-domicilio">${esDomicilio ? 'Domicilio' : 'Utilidad probatoria'}</th>
+              <th class="col-del"></th>
+            </tr></thead>
+            <tbody class="op-instituciones-tbody" data-idx="${idx}">${instituciones.map((inst, ii) => oficioInstitucionRowHtml(inst, idx, ii, tipoOficio)).join('')}</tbody>
           </table>
         </div>` : `<div class="oficio-inst-empty">Sin instituciones registradas</div>`}
         <div class="oficio-inst-actions"><button class="btn small" data-action="op-agregar-institucion" data-idx="${idx}" type="button">+ Agregar institución</button></div>
@@ -3221,28 +3241,47 @@ function oficioPersonaBlockHtml(persona, idx) {
 // (cantidad de personas -> bloques -> lista anidada), sin fallback histórico
 // porque no existe ningún dato anterior de Oficios en la aplicación.
 function oficiosTabHtml(c) {
-  const personas = c.oficiosPersonas || [];
+  const personas = (c.oficiosPersonas || []).filter(p => (p.tipoOficio || 'domicilio') === 'domicilio');
   const instituciones = personas.flatMap(p => p.instituciones || []);
   const pendientes = instituciones.filter(i => i.respuesta !== 'Contestada').length;
   const contestadas = instituciones.filter(i => i.respuesta === 'Contestada').length;
+
   return `
     <div class="oficio-shell">
+      <div class="oficio-tipo-switch" role="tablist" aria-label="Tipo de oficio">
+        <button class="oficio-tipo-btn active" data-oficio-tipo="domicilio" type="button">
+          Oficios para obtención de domicilios
+        </button>
+        <button class="oficio-tipo-btn" data-oficio-tipo="otros_antecedentes" type="button">
+          Oficios para obtención de otros antecedentes
+        </button>
+      </div>
+
+      <div class="oficio-tipo-explicacion" id="oficio-tipo-explicacion">
+        Los domicilios informados se sincronizan automáticamente con la sección Notificación.
+      </div>
+
       <section class="oficio-overview-card">
         <div class="oficio-overview-head">
-          <div><span class="oficio-kicker">Oficios</span><h3>Personas e instituciones</h3></div>
+          <div><span class="oficio-kicker">Oficios</span><h3 id="oficio-vista-titulo">Obtención de domicilios</h3></div>
           <div class="oficio-count-control">
             <label for="oficio-cantidad">Cantidad</label>
             <input type="number" id="oficio-cantidad" min="0" value="${personas.length}">
           </div>
         </div>
         <div class="oficio-stats">
-          <div class="oficio-stat"><strong>${personas.length}</strong><span>Personas</span></div>
-          <div class="oficio-stat is-info"><strong>${instituciones.length}</strong><span>Instituciones</span></div>
-          <div class="oficio-stat is-pending"><strong>${pendientes}</strong><span>Pendientes</span></div>
-          <div class="oficio-stat is-done"><strong>${contestadas}</strong><span>Contestadas</span></div>
+          <div class="oficio-stat"><strong id="oficio-stat-personas">${personas.length}</strong><span>Personas</span></div>
+          <div class="oficio-stat is-info"><strong id="oficio-stat-instituciones">${instituciones.length}</strong><span>Instituciones</span></div>
+          <div class="oficio-stat is-pending"><strong id="oficio-stat-pendientes">${pendientes}</strong><span>Pendientes</span></div>
+          <div class="oficio-stat is-done"><strong id="oficio-stat-contestadas">${contestadas}</strong><span>Contestadas</span></div>
         </div>
       </section>
-      <div id="oficio-personas-wrap" class="oficio-personas-wrap">${personas.length ? personas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('') : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>'}</div>
+
+      <div id="oficio-personas-wrap" class="oficio-personas-wrap">${
+        personas.length
+          ? personas.map((p, i) => oficioPersonaBlockHtml(p, i, 'domicilio')).join('')
+          : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>'
+      }</div>
       <div class="oficio-save-row"><button class="btn small primary" id="oficio-guardar">Guardar oficios</button></div>
     </div>
   `;
@@ -3455,69 +3494,168 @@ async function sincronizarDomiciliosOficiosConNotificacion(c, personasOficios) {
 }
 
 function wireOficiosTab(c, panel) {
-  let estadoPersonas = (c.oficiosPersonas || []).map(p => {
+  const normalizarTipo = valor => valor === 'otros_antecedentes' ? 'otros_antecedentes' : 'domicilio';
+
+  const estadoPorTipo = {
+    domicilio: [],
+    otros_antecedentes: []
+  };
+
+  for (const p of (c.oficiosPersonas || [])) {
+    const tipoPersona = normalizarTipo(p.tipoOficio);
     const nombreDesdeAntecedentes = nombreOficioDesdeAntecedentes(c, p.parte);
     const nombreGuardado = (p.nombre || '').trim();
     const correoCuenta = (CURRENT_USER?.email || '').trim().toLowerCase();
     const nombreSeguro = nombreGuardado && nombreGuardado.toLowerCase() !== correoCuenta ? nombreGuardado : '';
-    return {
+
+    estadoPorTipo[tipoPersona].push({
       id: p.id,
+      tipoOficio: tipoPersona,
       parte: p.parte,
       nombre: nombreDesdeAntecedentes || nombreSeguro,
-      instituciones: (p.instituciones || []).map(i => ({
-        id: i.id, institucion: i.institucion, tramitacion: i.tramitacion, respuesta: i.respuesta,
-        fecha: i.fecha, folio: i.folio, domicilio: i.domicilio || ''
-      }))
-    };
-  });
+      instituciones: (p.instituciones || []).map(i => {
+        const tipoInstitucion = normalizarTipo(i.tipoOficio || tipoPersona);
+        return {
+          id: i.id,
+          tipoOficio: tipoInstitucion,
+          institucion: i.institucion,
+          tramitacion: i.tramitacion,
+          respuesta: i.respuesta,
+          fecha: i.fecha,
+          folio: i.folio,
+          domicilio: i.domicilio || '',
+          utilidadProbatoria: i.utilidadProbatoria || ''
+        };
+      }).filter(i => i.tipoOficio === tipoPersona)
+    });
+  }
+
+  let tipoActivo = 'domicilio';
+
+  function personasActivas() {
+    return estadoPorTipo[tipoActivo];
+  }
+
+  function actualizarCabecera() {
+    const personas = personasActivas();
+    const instituciones = personas.flatMap(p => p.instituciones || []);
+    const pendientes = instituciones.filter(i => i.respuesta !== 'Contestada').length;
+    const contestadas = instituciones.filter(i => i.respuesta === 'Contestada').length;
+
+    const titulo = panel.querySelector('#oficio-vista-titulo');
+    const explicacion = panel.querySelector('#oficio-tipo-explicacion');
+    const cant = panel.querySelector('#oficio-cantidad');
+    const sPersonas = panel.querySelector('#oficio-stat-personas');
+    const sInstituciones = panel.querySelector('#oficio-stat-instituciones');
+    const sPendientes = panel.querySelector('#oficio-stat-pendientes');
+    const sContestadas = panel.querySelector('#oficio-stat-contestadas');
+
+    if (titulo) titulo.textContent = tipoActivo === 'domicilio'
+      ? 'Obtención de domicilios'
+      : 'Obtención de otros antecedentes';
+    if (explicacion) explicacion.textContent = tipoActivo === 'domicilio'
+      ? 'Los domicilios informados se sincronizan automáticamente con la sección Notificación.'
+      : 'Esta vista no se vincula con Notificación. Usa “Utilidad probatoria” para decidir si el antecedente recibido se incorporará como prueba.';
+    if (cant) cant.value = personas.length;
+    if (sPersonas) sPersonas.textContent = personas.length;
+    if (sInstituciones) sInstituciones.textContent = instituciones.length;
+    if (sPendientes) sPendientes.textContent = pendientes;
+    if (sContestadas) sContestadas.textContent = contestadas;
+
+    panel.querySelectorAll('[data-oficio-tipo]').forEach(btn => {
+      const activo = btn.dataset.oficioTipo === tipoActivo;
+      btn.classList.toggle('active', activo);
+      btn.setAttribute('aria-selected', activo ? 'true' : 'false');
+    });
+  }
 
   function refrescar() {
-    panel.querySelector('#oficio-personas-wrap').innerHTML = estadoPersonas.length
-      ? estadoPersonas.map((p, i) => oficioPersonaBlockHtml(p, i)).join('')
-      : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>';
-    panel.querySelector('#oficio-cantidad').value = estadoPersonas.length;
+    const personas = personasActivas();
+    const wrap = panel.querySelector('#oficio-personas-wrap');
+    if (wrap) {
+      wrap.innerHTML = personas.length
+        ? personas.map((p, i) => oficioPersonaBlockHtml(p, i, tipoActivo)).join('')
+        : '<div class="oficio-empty-state"><span class="oficio-empty-icon">✓</span><span>Sin personas registradas</span></div>';
+    }
+    actualizarCabecera();
+  }
+
+  const switcher = panel.querySelector('.oficio-tipo-switch');
+  if (switcher) {
+    switcher.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-oficio-tipo]');
+      if (!btn) return;
+      tipoActivo = normalizarTipo(btn.dataset.oficioTipo);
+      refrescar();
+    });
   }
 
   const cantInput = panel.querySelector('#oficio-cantidad');
   if (cantInput) cantInput.addEventListener('input', () => {
+    const lista = personasActivas();
     const nueva = Math.max(0, parseInt(cantInput.value, 10) || 0);
-    while (estadoPersonas.length < nueva) estadoPersonas.push({ id: null, parte: '', nombre: '', instituciones: [] });
-    while (estadoPersonas.length > nueva) estadoPersonas.pop();
+    while (lista.length < nueva) {
+      lista.push({ id: null, tipoOficio: tipoActivo, parte: '', nombre: '', instituciones: [] });
+    }
+    while (lista.length > nueva) lista.pop();
     refrescar();
   });
 
   const wrap = panel.querySelector('#oficio-personas-wrap');
   if (wrap) {
     wrap.addEventListener('input', (e) => {
+      const lista = personasActivas();
+
       if (e.target.classList.contains('op-parte')) {
         const idx = parseInt(e.target.dataset.idx, 10);
-        estadoPersonas[idx].parte = e.target.value;
-        estadoPersonas[idx].nombre = nombreOficioDesdeAntecedentes(c, e.target.value);
+        lista[idx].parte = e.target.value;
+        lista[idx].nombre = nombreOficioDesdeAntecedentes(c, e.target.value);
         refrescar();
         return;
       }
+
       const tr = e.target.closest('tr[data-p-idx]');
       if (!tr) return;
       const pi = parseInt(tr.dataset.pIdx, 10);
       const ii = parseInt(tr.dataset.iIdx, 10);
-      const inst = estadoPersonas[pi].instituciones[ii];
+      const inst = lista[pi]?.instituciones?.[ii];
+      if (!inst) return;
+
       if (e.target.classList.contains('oi-institucion')) inst.institucion = e.target.value.trim();
       if (e.target.classList.contains('oi-tramitacion')) inst.tramitacion = e.target.value || null;
       if (e.target.classList.contains('oi-respuesta')) inst.respuesta = e.target.value || null;
       if (e.target.classList.contains('oi-fecha')) inst.fecha = e.target.value || null;
       if (e.target.classList.contains('oi-folio')) inst.folio = e.target.value.trim();
       if (e.target.classList.contains('oi-domicilio')) inst.domicilio = e.target.value.trim();
+      if (e.target.classList.contains('oi-utilidad')) inst.utilidadProbatoria = e.target.value || null;
+      actualizarCabecera();
     });
+
     wrap.addEventListener('click', (e) => {
+      const lista = personasActivas();
       const addBtn = e.target.closest('[data-action="op-agregar-institucion"]');
       if (addBtn) {
-        estadoPersonas[parseInt(addBtn.dataset.idx, 10)].instituciones.push({ id: null, institucion: '', tramitacion: '', respuesta: '', fecha: '', folio: '', domicilio: '' });
+        const idx = parseInt(addBtn.dataset.idx, 10);
+        lista[idx].instituciones.push({
+          id: null,
+          tipoOficio: tipoActivo,
+          institucion: '',
+          tramitacion: '',
+          respuesta: '',
+          fecha: '',
+          folio: '',
+          domicilio: '',
+          utilidadProbatoria: ''
+        });
         refrescar();
         return;
       }
+
       const delBtn = e.target.closest('[data-action="oi-quitar-institucion"]');
       if (delBtn) {
-        estadoPersonas[parseInt(delBtn.dataset.pIdx, 10)].instituciones.splice(parseInt(delBtn.dataset.iIdx, 10), 1);
+        const pi = parseInt(delBtn.dataset.pIdx, 10);
+        const ii = parseInt(delBtn.dataset.iIdx, 10);
+        lista[pi].instituciones.splice(ii, 1);
         refrescar();
       }
     });
@@ -3529,14 +3667,28 @@ function wireOficiosTab(c, panel) {
       const originalesPersonas = c.oficiosPersonas || [];
       const idsPersonasFinales = new Set();
       const nuevaListaPersonas = [];
-      for (let idx = 0; idx < estadoPersonas.length; idx++) {
-        const p = estadoPersonas[idx];
+
+      const personasAGuardar = [
+        ...estadoPorTipo.domicilio.map(p => ({ ...p, tipoOficio: 'domicilio' })),
+        ...estadoPorTipo.otros_antecedentes.map(p => ({ ...p, tipoOficio: 'otros_antecedentes' }))
+      ];
+
+      for (let idx = 0; idx < personasAGuardar.length; idx++) {
+        const p = personasAGuardar[idx];
         if (!p.nombre || !p.parte) continue;
+
         let personaId = p.id;
+        const personaPatch = {
+          parte: p.parte,
+          nombre: p.nombre,
+          tipoOficio: p.tipoOficio,
+          orden: idx
+        };
+
         if (personaId) {
-          await api.updateOficioPersona(personaId, { parte: p.parte, nombre: p.nombre, orden: idx });
+          await api.updateOficioPersona(personaId, personaPatch);
         } else {
-          const creada = await api.createOficioPersona(CURRENT_USER.id, c.id, { parte: p.parte, nombre: p.nombre, orden: idx });
+          const creada = await api.createOficioPersona(CURRENT_USER.id, c.id, personaPatch);
           personaId = creada.id;
         }
         idsPersonasFinales.add(personaId);
@@ -3545,35 +3697,73 @@ function wireOficiosTab(c, panel) {
         const originalesInstituciones = (originalPersona && originalPersona.instituciones) || [];
         const idsInstitucionesFinales = new Set();
         const nuevaListaInstituciones = [];
+
         for (let iIdx = 0; iIdx < p.instituciones.length; iIdx++) {
           const inst = p.instituciones[iIdx];
-          if (!inst.institucion && !inst.tramitacion && !inst.respuesta && !inst.fecha && !inst.folio && !inst.domicilio) continue;
+          const tieneContenido = !!(
+            inst.institucion || inst.tramitacion || inst.respuesta || inst.fecha || inst.folio ||
+            (p.tipoOficio === 'domicilio' ? inst.domicilio : inst.utilidadProbatoria)
+          );
+          if (!tieneContenido) continue;
+
           let instId = inst.id;
           const iPatch = {
-            institucion: inst.institucion || null, tramitacion: inst.tramitacion || null,
-            respuesta: inst.respuesta || null, fecha: inst.fecha || null,
-            folio: inst.folio || null, domicilio: inst.domicilio || null, orden: iIdx
+            institucion: inst.institucion || null,
+            tramitacion: inst.tramitacion || null,
+            respuesta: inst.respuesta || null,
+            fecha: inst.fecha || null,
+            folio: inst.folio || null,
+            tipoOficio: p.tipoOficio,
+            domicilio: p.tipoOficio === 'domicilio' ? (inst.domicilio || null) : null,
+            utilidadProbatoria: p.tipoOficio === 'otros_antecedentes' ? (inst.utilidadProbatoria || null) : null,
+            orden: iIdx
           };
+
           if (instId) await api.updateOficioInstitucion(instId, iPatch);
-          else { const creado = await api.createOficioInstitucion(personaId, iPatch); instId = creado.id; }
+          else {
+            const creado = await api.createOficioInstitucion(personaId, iPatch);
+            instId = creado.id;
+          }
+
           idsInstitucionesFinales.add(instId);
           nuevaListaInstituciones.push({ id: instId, ...iPatch });
         }
-        for (const oi of originalesInstituciones) if (!idsInstitucionesFinales.has(oi.id)) await api.deleteOficioInstitucion(oi.id);
 
-        nuevaListaPersonas.push({ id: personaId, parte: p.parte, nombre: p.nombre, orden: idx, instituciones: nuevaListaInstituciones });
+        for (const oi of originalesInstituciones) {
+          if (!idsInstitucionesFinales.has(oi.id)) await api.deleteOficioInstitucion(oi.id);
+        }
+
+        nuevaListaPersonas.push({
+          id: personaId,
+          parte: p.parte,
+          nombre: p.nombre,
+          tipoOficio: p.tipoOficio,
+          orden: idx,
+          instituciones: nuevaListaInstituciones
+        });
       }
-      for (const op of originalesPersonas) if (!idsPersonasFinales.has(op.id)) await api.deleteOficioPersona(op.id);
+
+      for (const op of originalesPersonas) {
+        if (!idsPersonasFinales.has(op.id)) await api.deleteOficioPersona(op.id);
+      }
 
       c.oficiosPersonas = nuevaListaPersonas;
-      const sync = await sincronizarDomiciliosOficiosConNotificacion(c, nuevaListaPersonas);
+
+      // Solo los oficios destinados a obtener domicilios alimentan Notificación.
+      const personasDomicilio = nuevaListaPersonas.filter(p => p.tipoOficio === 'domicilio');
+      const sync = await sincronizarDomiciliosOficiosConNotificacion(c, personasDomicilio);
       const cambiosNotif = sync.creados + sync.actualizados + sync.depurados;
+
       toast(cambiosNotif
         ? `Oficios guardados · Notificación sincronizada (${cambiosNotif})`
         : 'Oficios guardados');
       openDetail(c.id, 'oficios');
-    } catch (e) { toast('No se pudo guardar: ' + e.message); }
+    } catch (e) {
+      toast('No se pudo guardar: ' + e.message);
+    }
   });
+
+  refrescar();
 }
 
 // Duración que permanece visible una credencial revelada antes de
