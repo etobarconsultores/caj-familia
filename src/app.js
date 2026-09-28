@@ -5685,7 +5685,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
         for (let idx = 0; idx < intervinientesValidos.length; idx++) {
           const it = intervinientesValidos[idx];
           const creado = await api.createInterviniente(CURRENT_USER.id, nueva.id, { tipoParte: it.tipoParte, rut: it.rut || null, nombre: it.nombre, orden: idx });
-          nueva.intervinientes.push(creado);
+          nueva.intervinientes.push({ id: creado.id, tipoParte: it.tipoParte, rut: it.rut || '', nombre: it.nombre, orden: idx });
         }
         CAUSAS.unshift(nueva);
         toast('Causa agregada');
