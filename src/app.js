@@ -6151,7 +6151,7 @@ function wireAntecedentesForm(panel, c, { esNuevaCausa }) {
   renderPatrocinados();
 
   form.querySelector('#af-save').addEventListener('click', async () => {
-    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes, seleccionPatrocinados);
+    const snap = snapshotDesdeFormulario(form, c, estadoIntervinientes, estadoPatrocinados);
     const patch = {
       folio: snap.folio, categoria: snap.categoria, origenCarpeta: snap.origenCarpeta, fechaIngreso: snap.fechaIngreso, tutor: snap.tutor,
       subcategoria: snap.subcategoria, tipoJuicio: snap.tipoJuicio, materia: snap.materia, bajEstado: snap.bajEstado,
