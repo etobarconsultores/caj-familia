@@ -5966,8 +5966,8 @@ function allGestionesActivasFlat() {
   return out;
 }
 
-// Vista activa dentro de Centro de Trabajo: 'Tarea' o 'Gestión' (nunca una
-// tercera pestaña — "Sin tipo asignado" es un bloque aparte, no una vista).
+// Vista activa dentro de Centro de Trabajo:
+// 'Tarea', 'Gestión' o 'Instrucción' (instrucciones pendientes del tutor).
 let centroTrabajoVista = 'Tarea';
 // Filtro de categoría dentro de la vista activa (capa nueva, no reemplaza la
 // clasificación temporal): null = sin filtro, string = categoría elegida.
@@ -6012,6 +6012,150 @@ function categoriaCardsHtml(vista) {
     }).join('')}
   </div>`;
 }
+
+
+function allInstruccionesPendientesFlat() {
+  const out = [];
+  CAUSAS.forEach(c => {
+    (c.instrucciones || []).forEach(it => {
+      if (it.estado === 'Pendiente') {
+        out.push({ ...it, causa: c, causaId: c.id });
+      }
+    });
+  });
+  return out;
+}
+
+function clasificarInstruccionesPendientes(items) {
+  const hoy = todayISO();
+  const d7 = new Date();
+  d7.setHours(0, 0, 0, 0);
+  d7.setDate(d7.getDate() + 7);
+  const en7 = toISO(d7);
+
+  const buckets = {
+    vencidas: [],
+    hoy: [],
+    proximos7: [],
+    posteriores: [],
+    sinFecha: []
+  };
+
+  items.forEach(it => {
+    if (!it.fechaLimite) buckets.sinFecha.push(it);
+    else if (it.fechaLimite < hoy) buckets.vencidas.push(it);
+    else if (it.fechaLimite === hoy) buckets.hoy.push(it);
+    else if (it.fechaLimite <= en7) buckets.proximos7.push(it);
+    else buckets.posteriores.push(it);
+  });
+
+  const porFecha = (a, b) => {
+    const fa = a.fechaLimite || '9999-12-31';
+    const fb = b.fechaLimite || '9999-12-31';
+    return fa.localeCompare(fb)
+      || String(a.fecha || '').localeCompare(String(b.fecha || ''))
+      || String(a.instruccion || '').localeCompare(String(b.instruccion || ''));
+  };
+  Object.values(buckets).forEach(arr => arr.sort(porFecha));
+  return buckets;
+}
+
+function instruccionPendienteCardHtml(it, tono) {
+  const etiquetas = {
+    vencida: 'Vencida',
+    hoy: 'Vence hoy',
+    proxima: 'Próxima',
+    posterior: 'Programada',
+    sinfecha: 'Sin fecha límite'
+  };
+  return `<button type="button" class="ct-instr-card tone-${tono}" data-causa-id="${it.causaId || it.causa?.id}">
+    <div class="ct-instr-card-top">
+      <span class="ct-instr-due">${escapeHtml(etiquetas[tono] || 'Pendiente')}</span>
+      ${it.fechaLimite ? `<span class="ct-instr-date">${escapeHtml(fmtFechaSolo(it.fechaLimite))}</span>` : ''}
+    </div>
+    <div class="ct-instr-text">${escapeHtml(it.instruccion || 'Instrucción pendiente')}</div>
+    <div class="ct-instr-cause">
+      <strong>${escapeHtml(causaShortLabel(it.causa))}</strong>
+      ${caratuladoTexto(it.causa) ? `<span>${escapeHtml(caratuladoTexto(it.causa))}</span>` : ''}
+    </div>
+    ${it.fecha ? `<div class="ct-instr-origin">Instrucción recibida: ${escapeHtml(fmtFechaSolo(it.fecha))}</div>` : ''}
+  </button>`;
+}
+
+function instruccionesTutorGrupoHtml(tutor, items) {
+  const b = clasificarInstruccionesPendientes(items);
+  const total = items.length;
+  const proximas = b.hoy.length + b.proximos7.length;
+
+  const bloque = (titulo, lista, tono, vacio = false) => {
+    if (!lista.length && !vacio) return '';
+    return `<div class="ct-instr-bucket">
+      <div class="ct-instr-bucket-head">
+        <span>${escapeHtml(titulo)}</span>
+        <span class="n">${lista.length}</span>
+      </div>
+      ${lista.length
+        ? `<div class="ct-instr-grid">${lista.map(it => instruccionPendienteCardHtml(it, tono)).join('')}</div>`
+        : '<div class="ct-instr-empty">Sin instrucciones en este grupo.</div>'}
+    </div>`;
+  };
+
+  return `<section class="ct-tutor-panel">
+    <div class="ct-tutor-head">
+      <div>
+        <div class="ct-tutor-kicker">Tutor</div>
+        <h3>${escapeHtml(tutor)}</h3>
+      </div>
+      <div class="ct-tutor-summary">
+        <span><strong>${total}</strong> pendiente${total === 1 ? '' : 's'}</span>
+        ${b.vencidas.length ? `<span class="is-overdue"><strong>${b.vencidas.length}</strong> vencida${b.vencidas.length === 1 ? '' : 's'}</span>` : ''}
+        ${proximas ? `<span><strong>${proximas}</strong> próxima${proximas === 1 ? '' : 's'}</span>` : ''}
+      </div>
+    </div>
+    <div class="ct-tutor-body">
+      ${bloque('Vencidas', b.vencidas, 'vencida')}
+      ${bloque('Vencen hoy', b.hoy, 'hoy')}
+      ${bloque('Próximos 7 días', b.proximos7, 'proxima')}
+      ${bloque('Más adelante', b.posteriores, 'posterior')}
+      ${bloque('Sin fecha límite', b.sinFecha, 'sinfecha')}
+    </div>
+  </section>`;
+}
+
+function instruccionesCentroTrabajoHtml() {
+  const items = allInstruccionesPendientesFlat();
+  if (!items.length) {
+    return `<div class="ct-instr-empty-state">
+      <div class="ct-instr-empty-icon">✓</div>
+      <strong>Sin instrucciones pendientes</strong>
+      <span>No tienes instrucciones del tutor pendientes de gestionar.</span>
+    </div>`;
+  }
+
+  const grupos = new Map();
+  items.forEach(it => {
+    const tutor = String(it.tutor || '').trim() || 'Sin tutor asignado';
+    if (!grupos.has(tutor)) grupos.set(tutor, []);
+    grupos.get(tutor).push(it);
+  });
+
+  const tutores = Array.from(grupos.keys()).sort((a, b) =>
+    a === 'Sin tutor asignado' ? 1 : b === 'Sin tutor asignado' ? -1 : a.localeCompare(b, 'es')
+  );
+
+  const global = clasificarInstruccionesPendientes(items);
+  return `
+    <div class="ct-instr-overview">
+      <div class="ct-instr-overview-card"><strong>${items.length}</strong><span>Pendientes</span></div>
+      <div class="ct-instr-overview-card is-overdue"><strong>${global.vencidas.length}</strong><span>Vencidas</span></div>
+      <div class="ct-instr-overview-card is-today"><strong>${global.hoy.length}</strong><span>Vencen hoy</span></div>
+      <div class="ct-instr-overview-card is-next"><strong>${global.proximos7.length}</strong><span>Próximos 7 días</span></div>
+    </div>
+    <div class="ct-instr-tutors">
+      ${tutores.map(tutor => instruccionesTutorGrupoHtml(tutor, grupos.get(tutor))).join('')}
+    </div>`;
+}
+
 
 function centroTrabajoBuckets(tipo) {
   const hoy = todayISO();
@@ -6144,10 +6288,13 @@ function prioridadesCentroTrabajoHtml(resumen) {
 }
 
 function renderCentroTrabajo() {
-  const b = centroTrabajoBuckets(centroTrabajoVista);
+  const esInstrucciones = centroTrabajoVista === 'Instrucción';
+  const b = esInstrucciones ? null : centroTrabajoBuckets(centroTrabajoVista);
   const resumen = centroTrabajoBuckets(undefined);
   const sinTipo = allGestionesActivasFlat().filter(g => !g.tipo);
-  const causasFiltradas = centroTrabajoCategoriaFiltro ? causasUnicasPorCategoria(centroTrabajoVista, centroTrabajoCategoriaFiltro) : [];
+  const causasFiltradas = (!esInstrucciones && centroTrabajoCategoriaFiltro)
+    ? causasUnicasPorCategoria(centroTrabajoVista, centroTrabajoCategoriaFiltro)
+    : [];
   const container = document.getElementById('list-container');
   const nombre = nombreCentroTrabajo();
   const saludo = `${saludoCentroTrabajo()}${nombre ? `, ${nombre}` : ''}`;
@@ -6193,40 +6340,47 @@ function renderCentroTrabajo() {
     <div class="pj-work-heading">
       <div>
         <div class="section-title">Centro de Trabajo</div>
-        <div class="pj-work-subtitle">¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.</div>
+        <div class="pj-work-subtitle">${esInstrucciones
+          ? 'Instrucciones pendientes de tus tutores, ordenadas por vencimiento para facilitar su gestión.'
+          : '¿Qué debo hacer hoy? — reúne automáticamente las gestiones pendientes de todas tus causas.'}</div>
       </div>
       <div class="pj-live-pill"><span></span> Actualizado</div>
     </div>
-    <div style="display:flex; gap:8px; margin-bottom:16px;">
+    <div class="ct-view-switch">
       <button class="btn small ${centroTrabajoVista === 'Tarea' ? 'primary' : 'ghost'}" data-ct-vista="Tarea" type="button">Tareas pendientes</button>
       <button class="btn small ${centroTrabajoVista === 'Gestión' ? 'primary' : 'ghost'}" data-ct-vista="Gestión" type="button">Gestiones pendientes</button>
+      <button class="btn small ${centroTrabajoVista === 'Instrucción' ? 'primary' : 'ghost'}" data-ct-vista="Instrucción" type="button">Instrucciones del tutor</button>
     </div>
-    <div class="subhead" style="margin-top:0;">Por categoría</div>
-    ${categoriaCardsHtml(centroTrabajoVista)}
-    ${centroTrabajoCategoriaFiltro ? `
-    <div class="work-bucket" style="margin-bottom:18px;">
-      <div class="work-bucket-h">${escapeHtml(centroTrabajoCategoriaFiltro)} <span class="n">${causasFiltradas.length}</span></div>
-      ${causasFiltradas.length ? `<div class="case-grid">${causasFiltradas.map(c => `
-        <div class="case-card" data-causa-id="${c.id}">
-          <div class="case-main">
-            <div class="titulo">${escapeHtml(tituloAutomatico(c) || c.titulo || 'Sin título')}</div>
-            <div class="meta"><span class="rol">${escapeHtml(c.rol || '')}</span><span>${escapeHtml(tribunalTexto(c) || '')}</span></div>
-          </div>
-        </div>`).join('')}</div>` : `<div class="dash-empty">Sin causas en esta categoría.</div>`}
-    </div>` : ''}
-    <div class="subhead" style="margin-top:0;">Por fecha</div>
-    ${workBucketHtml('Hoy', b.hoy, 'No tienes nada para revisar hoy.')}
-    ${workBucketHtml('Próximos 7 días', b.proximos7, 'Nada programado para los próximos 7 días.')}
-    ${workBucketHtml('En espera', b.enEspera, 'No hay nada en espera.')}
-    ${workBucketHtml('Vencidas', b.vencidas, 'No tienes nada vencido. Al día 🎉')}
-    ${workBucketHtml('Sin fecha', b.sinFecha, 'No hay nada sin fecha de revisión.')}
-    ${sinTipo.length ? `
-    <div class="work-bucket" style="margin-top:24px; border-top:1px dashed var(--line); padding-top:16px;">
-      <div class="work-bucket-h">Sin tipo asignado <span class="n">${sinTipo.length}</span></div>
-      <div style="color:var(--ink-faint); font-size:12px; margin:-4px 0 10px;">Registros históricos creados antes de distinguir Tarea/Gestión. Edítalos para clasificarlos — este bloque desaparece solo cuando ya no quede ninguno.</div>
-      <div class="work-grid">${sinTipo.map(workCardHtml).join('')}</div>
-    </div>` : ''}
+
+    ${esInstrucciones ? instruccionesCentroTrabajoHtml() : `
+      <div class="subhead" style="margin-top:0;">Por categoría</div>
+      ${categoriaCardsHtml(centroTrabajoVista)}
+      ${centroTrabajoCategoriaFiltro ? `
+      <div class="work-bucket" style="margin-bottom:18px;">
+        <div class="work-bucket-h">${escapeHtml(centroTrabajoCategoriaFiltro)} <span class="n">${causasFiltradas.length}</span></div>
+        ${causasFiltradas.length ? `<div class="case-grid">${causasFiltradas.map(c => `
+          <div class="case-card" data-causa-id="${c.id}">
+            <div class="case-main">
+              <div class="titulo">${escapeHtml(tituloAutomatico(c) || c.titulo || 'Sin título')}</div>
+              <div class="meta"><span class="rol">${escapeHtml(c.rol || '')}</span><span>${escapeHtml(tribunalTexto(c) || '')}</span></div>
+            </div>
+          </div>`).join('')}</div>` : `<div class="dash-empty">Sin causas en esta categoría.</div>`}
+      </div>` : ''}
+      <div class="subhead" style="margin-top:0;">Por fecha</div>
+      ${workBucketHtml('Hoy', b.hoy, 'No tienes nada para revisar hoy.')}
+      ${workBucketHtml('Próximos 7 días', b.proximos7, 'Nada programado para los próximos 7 días.')}
+      ${workBucketHtml('En espera', b.enEspera, 'No hay nada en espera.')}
+      ${workBucketHtml('Vencidas', b.vencidas, 'No tienes nada vencido. Al día 🎉')}
+      ${workBucketHtml('Sin fecha', b.sinFecha, 'No hay nada sin fecha de revisión.')}
+      ${sinTipo.length ? `
+      <div class="work-bucket" style="margin-top:24px; border-top:1px dashed var(--line); padding-top:16px;">
+        <div class="work-bucket-h">Sin tipo asignado <span class="n">${sinTipo.length}</span></div>
+        <div style="color:var(--ink-faint); font-size:12px; margin:-4px 0 10px;">Registros históricos creados antes de distinguir Tarea/Gestión. Edítalos para clasificarlos — este bloque desaparece solo cuando ya no quede ninguno.</div>
+        <div class="work-grid">${sinTipo.map(workCardHtml).join('')}</div>
+      </div>` : ''}
+    `}
   `;
+
   container.querySelectorAll('.pj-priority-item[data-causa-id]').forEach(el => {
     el.addEventListener('click', () => {
       currentCat = 'todas';
@@ -6235,7 +6389,11 @@ function renderCentroTrabajo() {
     });
   });
   container.querySelectorAll('[data-ct-vista]').forEach(btn => {
-    btn.addEventListener('click', () => { centroTrabajoVista = btn.dataset.ctVista; centroTrabajoCategoriaFiltro = null; renderCentroTrabajo(); });
+    btn.addEventListener('click', () => {
+      centroTrabajoVista = btn.dataset.ctVista;
+      centroTrabajoCategoriaFiltro = null;
+      renderCentroTrabajo();
+    });
   });
   container.querySelectorAll('[data-ct-categoria]').forEach(card => {
     card.addEventListener('click', () => {
