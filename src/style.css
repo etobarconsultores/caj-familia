@@ -9055,3 +9055,121 @@ html[data-theme="light"] .ig-subcard{
   .oficio-tipo-switch{ grid-template-columns:1fr; }
 }
 
+/* ============================================================
+   RESUMEN · DOCUMENTOS EN DOS COLUMNAS + CONTINUIDAD INFERIOR
+   Mismo diseño para Familia y Civil.
+   ============================================================ */
+
+/* Documentos arriba; Continuidad debajo. */
+.rf-summary-columns{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:10px;
+  align-items:start;
+}
+.rf-summary-columns > .rf-summary-card{
+  min-width:0;
+}
+
+/* Drive a la izquierda y CAJ Virtual a la derecha. */
+.rf-folder-links{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.rf-folder-link-block{
+  min-width:0;
+  padding:10px 11px;
+  border:1px solid var(--line-soft);
+  border-radius:8px;
+  background:color-mix(in srgb,var(--bg-card) 70%,transparent);
+}
+.rf-folder-link-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:5px;
+}
+.rf-folder-link-kicker{
+  display:block;
+  margin-bottom:2px;
+  font-family:var(--font-mono);
+  font-size:8px;
+  line-height:1.2;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--ink-faint);
+}
+.rf-folder-link-head strong{
+  display:block;
+  font-family:var(--font-body);
+  font-size:11.5px;
+  line-height:1.3;
+  font-weight:600;
+  color:var(--ink);
+}
+.rf-folder-link-head .btn.small{
+  padding:5px 9px;
+  font-size:11px;
+}
+.rf-folder-link-block .drive-url{
+  margin:0 0 5px;
+  padding:0;
+  background:transparent;
+  border:0;
+  font-family:var(--font-body);
+  font-size:11px;
+  line-height:1.35;
+  color:var(--ink-faint);
+}
+.rf-folder-link-block .drive-url.empty{
+  font-style:normal;
+}
+.rf-folder-link-block .drive-edit-row{
+  margin-top:5px;
+}
+.rf-folder-link-block .drive-edit-row input{
+  min-width:0;
+  padding:7px 9px;
+  font-family:var(--font-body);
+  font-size:11.5px;
+  line-height:1.3;
+}
+
+/* Continuidad: tarjeta más compacta y textarea proporcional. */
+.rf-continuity-card .rf-summary-head{
+  min-height:44px;
+  padding-top:8px;
+  padding-bottom:8px;
+}
+.rf-continuity-card .rf-summary-body{
+  padding-top:10px;
+  padding-bottom:10px;
+}
+.rf-continuity-card .rf-textarea-transfer{
+  min-height:72px;
+  height:72px;
+  resize:vertical;
+  font-family:var(--font-body);
+  font-size:12px;
+  line-height:1.45;
+}
+
+/* Tipografía general de estas dos tarjetas un poco más compacta. */
+.rf-documents-card .rf-summary-title,
+.rf-continuity-card .rf-summary-title{
+  font-size:14px;
+}
+.rf-documents-card .rf-summary-kicker,
+.rf-continuity-card .rf-summary-kicker{
+  font-size:8px;
+}
+
+/* Responsive: en pantallas angostas las carpetas vuelven a una columna. */
+@media (max-width:760px){
+  .rf-folder-links{
+    grid-template-columns:1fr;
+  }
+}
+

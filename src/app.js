@@ -11992,7 +11992,7 @@ function detailHtml(c) {
       </section>
 
       <div class="rf-summary-columns">
-        <section class="rf-summary-card">
+        <section class="rf-summary-card rf-documents-card">
           <div class="rf-summary-head">
             <div>
               <div class="rf-summary-kicker">Documentos</div>
@@ -12008,7 +12008,7 @@ function detailHtml(c) {
                 </div>
                 ${c.driveFolderUrl ? `<button class="btn small" id="btn-open-drive-edit" type="button">Abrir</button>` : ''}
               </div>
-              <div class="drive-url ${c.driveFolderUrl ? '' : 'empty'}" id="drive-url-display">${c.driveFolderUrl ? escapeHtml(c.driveFolderUrl) : 'Sin enlace registrado.'}</div>
+              ${c.driveFolderUrl ? '' : '<div class="drive-url empty" id="drive-url-display">Sin enlace registrado.</div>'}
               <div class="drive-edit-row">
                 <input type="text" id="rf-drive-url" placeholder="Pega aquí el enlace de Google Drive…" value="${escapeHtml(c.driveFolderUrl || '')}">
               </div>
@@ -12022,7 +12022,7 @@ function detailHtml(c) {
                 </div>
                 ${c.cajVirtualFolderUrl ? `<button class="btn small" id="btn-open-caj-virtual" type="button">Abrir</button>` : ''}
               </div>
-              <div class="drive-url ${c.cajVirtualFolderUrl ? '' : 'empty'}" id="caj-virtual-url-display">${c.cajVirtualFolderUrl ? escapeHtml(c.cajVirtualFolderUrl) : 'Sin enlace registrado.'}</div>
+              ${c.cajVirtualFolderUrl ? '' : '<div class="drive-url empty" id="caj-virtual-url-display">Sin enlace registrado.</div>'}
               <div class="drive-edit-row">
                 <input type="text" id="rf-caj-virtual-url" placeholder="Pega aquí el enlace de la carpeta virtual CAJ…" value="${escapeHtml(c.cajVirtualFolderUrl || '')}">
               </div>
@@ -12030,7 +12030,7 @@ function detailHtml(c) {
           </div>
         </section>
 
-        <section class="rf-summary-card">
+        <section class="rf-summary-card rf-continuity-card">
           <div class="rf-summary-head">
             <div>
               <div class="rf-summary-kicker">Continuidad</div>
