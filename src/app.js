@@ -4659,41 +4659,47 @@ function agendaFormHtml(evento) {
   const tipoAudienciaOptions = ['', ...TIPO_AUDIENCIA_OPCIONES].map(t => `<option value="${t}" ${(e.tipoAudiencia || '') === t ? 'selected' : ''}>${t || 'Sin definir'}</option>`).join('');
   const agendaMeta = agendaMetaDesdeObservaciones(e.observaciones);
   const ubicacionOriginal = String(e.ubicacion || '').trim();
-  const salaDesdeUbicacion = /^sala/i.test(ubicacionOriginal) ? ubicacionOriginal : '';
+  const salaDesdeUbicacion = /^sala\b/i.test(ubicacionOriginal) ? ubicacionOriginal : '';
   const sala = agendaMeta.sala || salaDesdeUbicacion;
   const ubicacionVisible = salaDesdeUbicacion && !agendaMeta.sala ? '' : ubicacionOriginal;
   const idZoom = agendaMeta.idZoom;
   const claveZoom = agendaMeta.claveZoom;
   const observacionesVisibles = agendaObservacionesLimpias(e.observaciones);
   return `
-  <div class="agenda-form">
+  <div class="agenda-form agenda-form-compacta">
     <div class="subhead" style="margin-top:0;">${evento ? 'Editar evento' : 'Nuevo evento'}</div>
-    <div class="form-grid2">
+
+    <div class="agenda-grid-principal">
       <div><label>Tipo de evento</label><select id="ev-tipo">${tipoOptions}</select></div>
+      <div id="ev-tipoaudiencia-wrap" ${esAudiencia ? '' : 'hidden'}>
+        <label>Tipo de audiencia</label>
+        <select id="ev-tipoaudiencia">${tipoAudienciaOptions}</select>
+      </div>
       <div><label>Estado</label><select id="ev-estado">${estadoOptions}</select></div>
+      <div class="agenda-campo-descripcion"><label>Descripción</label><textarea id="ev-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
     </div>
-    <div id="ev-tipoaudiencia-wrap" ${esAudiencia ? '' : 'hidden'}>
-      <label>Tipo de audiencia</label>
-      <select id="ev-tipoaudiencia">${tipoAudienciaOptions}</select>
-    </div>
-    <div><label>Descripción</label><textarea id="ev-descripcion">${escapeHtml(e.descripcion || '')}</textarea></div>
+
     <div class="agenda-grid-fecha-horas">
       <div><label>Fecha</label><input type="date" id="ev-fecha" value="${escapeHtml(e.fecha || '')}"></div>
-      <div><label>Hora de inicio</label><input type="text" id="ev-horaInicio" value="${escapeHtml(e.horaInicio || '')}" placeholder="HH:MM"></div>
-      <div><label>Hora de término</label><input type="text" id="ev-horaTermino" value="${escapeHtml(e.horaTermino || '')}" placeholder="HH:MM"></div>
+      <div><label>Hora inicio</label><input type="text" id="ev-horaInicio" value="${escapeHtml(e.horaInicio || '')}" placeholder="HH:MM"></div>
+      <div><label>Hora término</label><input type="text" id="ev-horaTermino" value="${escapeHtml(e.horaTermino || '')}" placeholder="HH:MM"></div>
       <div><label>Prioridad</label><select id="ev-prioridad">${prioridadOptions}</select></div>
     </div>
+
     <div class="agenda-grid-sala-modalidad-ubicacion">
       <div><label>Sala</label><input type="text" id="ev-sala" value="${escapeHtml(sala)}" placeholder="Ej. Sala N°1"></div>
       <div><label>Modalidad</label><select id="ev-modalidad">${modalidadOptions}</select></div>
       <div><label>Ubicación</label><input type="text" id="ev-ubicacion" value="${escapeHtml(ubicacionVisible)}" placeholder="Dirección o lugar"></div>
     </div>
+
     <div class="agenda-grid-video">
-      <div><label>Enlace de videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
       <div><label>ID Zoom</label><input type="text" id="ev-idZoom" value="${escapeHtml(idZoom)}" placeholder="Ej. 123 456 789"></div>
-      <div><label>Clave Zoom</label><input type="text" id="ev-claveZoom" value="${escapeHtml(claveZoom)}" placeholder="Ej. 746555"></div>
+      <div><label>Clave</label><input type="text" id="ev-claveZoom" value="${escapeHtml(claveZoom)}" placeholder="Ej. 746555"></div>
+      <div><label>Enlace de Videoconferencia</label><input type="text" id="ev-enlace" value="${escapeHtml(e.enlace || '')}" placeholder="https://…"></div>
     </div>
-    <div><label>Observaciones</label><textarea id="ev-observaciones">${escapeHtml(observacionesVisibles)}</textarea></div>
+
+    <div class="agenda-observaciones"><label>Observaciones</label><textarea id="ev-observaciones">${escapeHtml(observacionesVisibles)}</textarea></div>
+
     <div style="display:flex; gap:8px; margin-top:6px;">
       <button class="btn primary" id="save-evento" type="button">Guardar evento</button>
       <button class="btn ghost" id="cancel-evento" type="button">Cancelar</button>
