@@ -9476,3 +9476,14 @@ html[data-theme="light"] .ig-subcard{
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Nueva causa — acceso fijo en la zona superior del sidebar */
+.sidebar-new-cause{
+  margin-top:-10px;
+  margin-bottom:-8px;
+}
+.sidebar-new-cause .btn{
+  width:100%;
+  display:block;
+}
